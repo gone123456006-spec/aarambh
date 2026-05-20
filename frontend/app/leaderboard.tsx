@@ -1,0 +1,622 @@
+import React from 'react';
+import {
+  StyleSheet,
+  View,
+  Text,
+  ScrollView,
+  TouchableOpacity,
+  StatusBar,
+  ActivityIndicator,
+  Dimensions,
+  Image,
+} from 'react-native';
+import Animated, { FadeInDown, FadeInUp, Layout } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouter, Stack } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface LeaderboardUser {
+  id: string;
+  name: string;
+  points: number;
+  location: string;
+  isMe?: boolean;
+  rank?: number;
+}
+
+// ─── Shared-leaderboard key (all devices write here) ─────────────────────────
+// Each entry stored under "leaderboard:<userId>"
+// Entry shape: { id, name, points, location, updatedAt }
+
+const LB_PREFIX = 'leaderboard:';
+const USER_ID_KEY = 'userId';
+const USER_NAME_KEY = 'userName';
+const USER_REGION_KEY = 'userRegion';
+const SCORE_KEY = 'totalGameScore';
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Stable per-device user ID created once at profile setup */
+async function getOrCreateUserId(): Promise<string> {
+  let id = await AsyncStorage.getItem(USER_ID_KEY);
+  if (!id) {
+    id = `user_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
+    await AsyncStorage.setItem(USER_ID_KEY, id);
+  }
+  return id;
+}
+
+/** Write this user's latest score into the shared leaderboard store */
+async function pushMyScore(name: string, points: number, location: string) {
+  const id = await getOrCreateUserId();
+  const entry = JSON.stringify({ id, name, points, location, updatedAt: Date.now() });
+  await AsyncStorage.setItem(`${LB_PREFIX}${id}`, entry);
+}
+
+/** Read ALL leaderboard entries from AsyncStorage */
+async function fetchAllEntries(): Promise<LeaderboardUser[]> {
+  const allKeys = await AsyncStorage.getAllKeys();
+  const lbKeys = allKeys.filter((k) => k.startsWith(LB_PREFIX));
+  if (lbKeys.length === 0) return [];
+  const pairs = await AsyncStorage.multiGet(lbKeys);
+  return pairs
+    .map(([, value]) => {
+      if (!value) return null;
+      try {
+        return JSON.parse(value) as LeaderboardUser;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean) as LeaderboardUser[];
+}
+
+// ─── Medal colours ────────────────────────────────────────────────────────────
+const MEDAL = { 1: '#FFD700', 2: '#C0C0C0', 3: '#CD7F32' };
+
+/** Icons8 3D Fluency — https://icons8.com/icons/fluency */
+const LB_TROPHY_LOGO = 'https://img.icons8.com/3d-fluency/48/trophy.png';
+const LB_CROWN_LOGO = 'https://img.icons8.com/3d-fluency/48/crown.png';
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
+export default function LeaderboardScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  const [loading, setLoading] = React.useState(true);
+  const [leaderboard, setLeaderboard] = React.useState<LeaderboardUser[]>([]);
+  const [myId, setMyId] = React.useState('');
+  const [myScore, setMyScore] = React.useState(0);
+  const [myRank, setMyRank] = React.useState(0);
+
+  // ── Load & build leaderboard ──────────────────────────────────────────────
+  React.useEffect(() => {
+    const load = async () => {
+      try {
+        // 1. Read profile info saved during account creation
+        const [rawScore, name, region, id] = await Promise.all([
+          AsyncStorage.getItem(SCORE_KEY),
+          AsyncStorage.getItem(USER_NAME_KEY),
+          AsyncStorage.getItem(USER_REGION_KEY),
+          getOrCreateUserId(),
+        ]);
+
+        const score = rawScore ? parseInt(rawScore, 10) : 0;
+        const displayName = name?.trim() || 'You';
+        const displayRegion = region?.trim() || '';
+
+        setMyId(id);
+        setMyScore(score);
+
+        // 2. Push current user's fresh score so it's reflected immediately
+        await pushMyScore(displayName, score, displayRegion);
+
+        // 3. Read all stored entries
+        const entries = await fetchAllEntries();
+
+        // 4. Mark current user, sort, assign ranks
+        const sorted = entries
+          .map((e) => ({ ...e, isMe: e.id === id }))
+          .sort((a, b) => b.points - a.points)
+          .map((e, i) => ({ ...e, rank: i + 1 }));
+
+        setLeaderboard(sorted);
+        setMyRank(sorted.find((e) => e.isMe)?.rank ?? sorted.length + 1);
+      } catch (err) {
+        console.error('Leaderboard load error', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, []);
+
+  // ── Derived slices ────────────────────────────────────────────────────────
+  const topThree = leaderboard.slice(0, 3);
+  const rest = leaderboard.slice(3);
+  const me = leaderboard.find((e) => e.isMe);
+
+  // ── Render helpers ────────────────────────────────────────────────────────
+
+  const renderMedalBadge = (rank: number) => (
+    <View style={[styles.rankBadge, { backgroundColor: MEDAL[rank as 1 | 2 | 3] ?? '#999' }]}>
+      <Text style={styles.rankBadgeText}>{rank}</Text>
+    </View>
+  );
+
+  const renderTopCard = (user: LeaderboardUser, heightStyle: any, index: number) => (
+    <Animated.View
+      key={user.id}
+      entering={FadeInUp.delay(index * 100).duration(500)}
+      style={[
+        styles.topCard,
+        heightStyle,
+        user.rank === 1 && styles.topCardFirst,
+        user.isMe && styles.topCardMe,
+      ]}
+    >
+      {renderMedalBadge(user.rank!)}
+      {user.rank === 1 && (
+        <Image source={{ uri: LB_CROWN_LOGO }} style={styles.crownLogo} resizeMode="contain" />
+      )}
+      <View style={styles.topAvatarCircle}>
+        <Text style={styles.topAvatarLetter}>{user.name.charAt(0).toUpperCase()}</Text>
+      </View>
+      <Text style={styles.topName} numberOfLines={1}>{user.name}</Text>
+      <Text style={styles.topPoints}>{user.points.toLocaleString()} pts</Text>
+      {user.location ? (
+        <View style={styles.locationRow}>
+          <Ionicons name="location-outline" size={10} color="#888" />
+          <Text style={styles.topLocation} numberOfLines={1}>{user.location}</Text>
+        </View>
+      ) : null}
+    </Animated.View>
+  );
+
+  // ── UI ────────────────────────────────────────────────────────────────────
+
+  const renderHeader = () => (
+    <LinearGradient
+      colors={['#FFD6D6', '#FFF0F0', '#F8F9FA']}
+      locations={[0, 0.55, 1]}
+      style={[styles.header, { paddingTop: insets.top }]}
+    >
+      <View style={styles.headerRow}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backBtn}
+          activeOpacity={0.6}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Feather name="arrow-left" size={24} color="#1F1F1F" />
+        </TouchableOpacity>
+        <View style={styles.headerTextBlock}>
+          <Text style={styles.headerTitle}>Leaderboard</Text>
+          <Text style={styles.headerSub}>All-time rankings</Text>
+        </View>
+        {!loading && leaderboard.length > 0 && (
+          <View style={styles.rankPill}>
+            <Text style={styles.rankPillText}>#{myRank}</Text>
+          </View>
+        )}
+      </View>
+    </LinearGradient>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        {renderHeader()}
+        <View style={styles.loadingBox}>
+          <ActivityIndicator size="large" color="#1A73E8" />
+          <Text style={styles.loadingText}>Loading scores…</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (leaderboard.length === 0) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        {renderHeader()}
+        <View style={styles.emptyBox}>
+          <Image source={{ uri: LB_TROPHY_LOGO }} style={styles.emptyLogo} resizeMode="contain" />
+          <Text style={styles.emptyTitle}>No scores yet</Text>
+          <Text style={styles.emptySub}>Play games to appear on the leaderboard</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={styles.container}>
+        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        {renderHeader()}
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scroll}
+        >
+          {/* ── Top-3 podium ── */}
+          {topThree.length >= 1 && (
+            <View style={styles.podiumWrapper}>
+              <LinearGradient 
+                colors={['#fff', '#fdf2f2', '#fff0f0']} 
+                style={styles.podiumGradient} 
+              />
+              <View style={styles.podium}>
+                {/* Silver – rank 2 (left) */}
+                {topThree[1]
+                  ? renderTopCard(topThree[1], styles.cardSilver, 1)
+                  : <View style={styles.cardSilver} />}
+
+                {/* Gold – rank 1 (centre, tallest) */}
+                {topThree[0] && renderTopCard(topThree[0], styles.cardGold, 0)}
+
+                {/* Bronze – rank 3 (right) */}
+                {topThree[2]
+                  ? renderTopCard(topThree[2], styles.cardBronze, 2)
+                  : <View style={styles.cardBronze} />}
+              </View>
+            </View>
+          )}
+
+          {/* ── Rest of list ── */}
+          {rest.length > 0 && (
+            <View style={styles.listCard}>
+              <View style={styles.listSectionHeader}>
+                <Text style={styles.listSectionTitle}>Rankings</Text>
+                <View style={styles.listSectionLine} />
+              </View>
+              <View style={styles.listHead}>
+                <Text style={[styles.listHeadTxt, { width: 36 }]}>#</Text>
+                <Text style={[styles.listHeadTxt, { flex: 1 }]}>Player</Text>
+                <Text style={[styles.listHeadTxt, { width: 72, textAlign: 'right' }]}>Score</Text>
+                <Text style={[styles.listHeadTxt, { width: 80, textAlign: 'right' }]}>Region</Text>
+              </View>
+
+              {rest.map((user, index) => (
+                <View key={user.id}>
+                <View
+                  style={[styles.row, user.isMe && styles.rowMe]}
+                >
+                  <Text style={[styles.rowRank, user.isMe && { color: '#e60000' }]}>
+                    {user.rank}
+                  </Text>
+                  <View style={styles.rowUser}>
+                    <View style={[styles.miniAvatar, user.isMe && styles.miniAvatarMe]}>
+                      <Text style={styles.miniAvatarLetter}>
+                        {user.name.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text style={[styles.rowName, user.isMe && { fontWeight: '800', color: '#e60000' }]}
+                      numberOfLines={1}>
+                      {user.isMe ? `${user.name} (You)` : user.name}
+                    </Text>
+                  </View>
+                  <Text style={[styles.rowPts, user.isMe && { color: '#e60000' }]}>
+                    {user.points.toLocaleString()}
+                  </Text>
+                  <View style={styles.rowLocRow}>
+                    {user.location ? (
+                      <>
+                        <Ionicons name="location-outline" size={10} color="#aaa" />
+                        <Text style={styles.rowLoc} numberOfLines={1}>{user.location}</Text>
+                      </>
+                    ) : null}
+                  </View>
+                </View>
+                {index < rest.length - 1 && <View style={styles.rowDivider} />}
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+
+        {/* ── Sticky "You" footer ── */}
+        {me && (
+          <View style={styles.footer}>
+            <View style={[styles.miniAvatar, styles.miniAvatarMe, { width: 40, height: 40, borderRadius: 20 }]}>
+              <Text style={[styles.miniAvatarLetter, { fontSize: 18 }]}>
+                {me.name.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={styles.footerName}>{me.name}</Text>
+              {me.location ? (
+                <View style={styles.locationRow}>
+                  <Ionicons name="location-outline" size={11} color="#888" />
+                  <Text style={styles.footerLoc}>{me.location}</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.footerPts}>{myScore.toLocaleString()} pts</Text>
+            <View style={styles.footerRankBadge}>
+              <Text style={styles.footerRankTxt}>#{myRank}</Text>
+            </View>
+          </View>
+        )}
+      </View>
+    </>
+  );
+}
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { color: '#5F6368', marginTop: 12, fontSize: 14 },
+  emptyBox: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyTitle: { fontSize: 18, fontWeight: '500', color: '#1F1F1F', marginTop: 16 },
+  emptySub: { fontSize: 14, color: '#5F6368', marginTop: 8, textAlign: 'center', lineHeight: 20 },
+
+  header: {
+    paddingBottom: 16,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 56,
+    paddingRight: 12,
+  },
+  headerTextBlock: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingVertical: 8,
+    minWidth: 0,
+  },
+  emptyLogo: {
+    width: 72,
+    height: 72,
+    opacity: 0.85,
+  },
+  backBtn: {
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1F1F1F',
+  },
+  headerSub: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#5F6368',
+    marginTop: 2,
+    lineHeight: 20,
+  },
+  rankPill: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E8EAED',
+  },
+  rankPillText: { fontSize: 14, fontWeight: '600', color: '#e60000' },
+
+  scroll: { paddingBottom: 110, paddingTop: 4 },
+
+  // Podium
+  podiumWrapper: {
+    marginHorizontal: 14,
+    marginTop: 4,
+    marginBottom: 12,
+    overflow: 'hidden',
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#E8EAED',
+    elevation: 1,
+    shadowColor: '#3C4043',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+  },
+  podiumGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  podium: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    paddingTop: 36,
+    paddingBottom: 24,
+    gap: 6,
+  },
+  topCard: {
+    width: (SCREEN_WIDTH - 44) / 3, // Fully responsive width
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.03)',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+  },
+  cardGold: { 
+    height: 230, 
+    borderColor: '#FFD700', 
+    borderWidth: 1.5,
+    backgroundColor: '#fff',
+  },
+  cardSilver: { height: 190 },
+  cardBronze: { height: 190 },
+  topCardFirst: { transform: [{ scale: 1.06 }], zIndex: 2 },
+  topCardMe: { borderColor: '#e60000', borderWidth: 1.5, backgroundColor: '#fffcfc' },
+
+  rankBadge: {
+    position: 'absolute',
+    top: -14,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  rankBadgeText: { color: '#fff', fontWeight: '800', fontSize: 13 },
+
+  crownLogo: {
+    width: 28,
+    height: 28,
+    marginBottom: 4,
+  },
+
+  topAvatarCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 6,
+  },
+  topAvatarLetter: { fontSize: 22, fontWeight: '800', color: '#555' },
+
+  topName: { fontSize: 13, fontWeight: '700', color: '#111', textAlign: 'center' },
+  topPoints: { fontSize: 15, fontWeight: '800', color: '#e60000', marginVertical: 3 },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 2 },
+  topLocation: { fontSize: 10, color: '#888', flexShrink: 1 },
+
+  listCard: {
+    marginHorizontal: 14,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingBottom: 8,
+    borderWidth: 1,
+    borderColor: '#E8EAED',
+    elevation: 1,
+    shadowColor: '#3C4043',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    overflow: 'hidden',
+  },
+  listSectionHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 0,
+  },
+  listSectionTitle: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#5F6368',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  listSectionLine: {
+    height: 1,
+    backgroundColor: '#E8EAED',
+    marginBottom: 4,
+  },
+  listHead: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  listHeadTxt: {
+    fontSize: 11,
+    color: '#5F6368',
+    fontWeight: '500',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  rowDivider: {
+    height: 1,
+    backgroundColor: '#E8EAED',
+    marginLeft: 52,
+  },
+  rowMe: { backgroundColor: '#FFF8F8' },
+
+  rowRank: { width: 36, fontSize: 14, fontWeight: '500', color: '#1F1F1F' },
+  rowUser: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
+  miniAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#F1F3F4',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  miniAvatarMe: { backgroundColor: '#FFE8E8' },
+  miniAvatarLetter: { fontSize: 14, fontWeight: '500', color: '#5F6368' },
+  rowName: { fontSize: 14, fontWeight: '500', color: '#1F1F1F', flex: 1 },
+  rowPts: { width: 72, textAlign: 'right', fontSize: 14, fontWeight: '500', color: '#1F1F1F' },
+  rowLocRow: { width: 80, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 2 },
+  rowLoc: { fontSize: 12, color: '#5F6368', flexShrink: 1, textAlign: 'right' },
+
+  footer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderColor: '#E8EAED',
+    shadowColor: '#3C4043',
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  footerName: { fontSize: 15, fontWeight: '600', color: '#1F1F1F' },
+  footerLoc: { fontSize: 12, color: '#5F6368' },
+  footerPts: { fontSize: 16, fontWeight: '600', color: '#e60000', marginHorizontal: 12 },
+  footerRankBadge: {
+    backgroundColor: '#e60000',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  footerRankTxt: { color: '#fff', fontWeight: '600', fontSize: 14 },
+});
