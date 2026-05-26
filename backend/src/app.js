@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -46,12 +47,13 @@ if (process.env.NODE_ENV === 'development') {
 
 // Service root (Render health + quick sanity check)
 app.get('/', (req, res) => {
-  const base = getPublicBaseUrl();
+  const base = getPublicBaseUrl() || `${req.protocol}://${req.get('host')}`;
   res.status(200).json({
     success: true,
     service: 'aarambh-api',
-    health: base ? `${base}/health` : '/health',
-    api: base ? `${base}/api` : '/api',
+    health: `${base}/health`,
+    api: `${base}/api`,
+    admin: `${base}/admin/`,
   });
 });
 
@@ -59,6 +61,14 @@ app.get('/', (req, res) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
+
+// Admin web dashboard (upload videos & PDFs)
+app.use(
+  '/admin',
+  express.static(path.join(__dirname, '..', 'public', 'admin'), {
+    index: 'index.html',
+  })
+);
 
 // Local uploads (videos, PDFs) — no Cloudinary
 app.use(

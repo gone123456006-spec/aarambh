@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aarambh Admin — Upload Videos & PDFs</title>
+    <link rel="stylesheet" href="/admin/admin.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Aarambh Admin</h1>
+      <p>Upload lesson videos & PDFs for your app users</p>
+    </header>
+
+    <main>
+      <div id="globalStatus" class="status hidden"></div>
+
+      <!-- Login -->
+      <section id="loginCard" class="card">
+        <h2>1. Admin login (Gmail OTP)</h2>
+        <p style="font-size: 0.88rem; color: #636e72; margin: 0 0 1rem">
+          Your Gmail must have <strong>role: admin</strong> in MongoDB Atlas.
+        </p>
+        <label for="email">Gmail</label>
+        <input id="email" type="email" placeholder="you@gmail.com" autocomplete="email" />
+
+        <div class="row">
+          <button type="button" id="sendOtpBtn">Send OTP</button>
+        </div>
+
+        <div id="otpRow" class="hidden">
+          <label for="otp">6-digit OTP</label>
+          <input id="otp" type="text" maxlength="6" placeholder="123456" inputmode="numeric" />
+          <button type="button" id="verifyOtpBtn">Verify & enter dashboard</button>
+        </div>
+
+        <div id="loginStatus" class="status hidden"></div>
+      </section>
+
+      <!-- Dashboard -->
+      <div id="dashboard" class="hidden">
+        <div class="card">
+          <p>
+            Signed in as <strong id="userBadge"></strong>
+            <button type="button" id="logoutBtn" class="secondary" style="float: right; padding: 0.4rem 0.8rem">
+              Log out
+            </button>
+          </p>
+        </div>
+
+        <section class="card">
+          <h2>2. Create course (first time only)</h2>
+          <label for="newCourseTitle">Title</label>
+          <input id="newCourseTitle" type="text" placeholder="Beginner English" />
+          <label for="newCourseLevel">Level</label>
+          <select id="newCourseLevel">
+            <option value="beginner">beginner</option>
+            <option value="intermediate">intermediate</option>
+            <option value="advanced">advanced</option>
+          </select>
+          <button type="button" id="createCourseBtn">Create course</button>
+          <div id="createCourseStatus" class="status hidden"></div>
+        </section>
+
+        <section class="card">
+          <h2>3. Upload video</h2>
+          <input id="videoFile" type="file" accept="video/*" />
+          <button type="button" id="uploadVideoBtn">Upload video</button>
+          <div id="videoStatus" class="status hidden"></div>
+          <div id="videoPreview" class="preview"></div>
+        </section>
+
+        <section class="card">
+          <h2>4. Upload PDF</h2>
+          <input id="pdfFile" type="file" accept="application/pdf" />
+          <button type="button" id="uploadPdfBtn">Upload PDF</button>
+          <div id="pdfStatus" class="status hidden"></div>
+          <div id="pdfPreview" class="preview"></div>
+        </section>
+
+        <section class="card">
+          <h2>5. Add lesson to course</h2>
+          <p style="font-size: 0.88rem; color: #636e72; margin: 0 0 1rem">
+            URLs from step 2 & 3 are filled automatically. Media appears in the app after ~30 seconds.
+          </p>
+
+          <label for="courseId">Course</label>
+          <select id="courseId"></select>
+
+          <label for="lessonTitle">Lesson title</label>
+          <input id="lessonTitle" type="text" placeholder="Lesson 1 — Introduction" />
+
+          <label for="lessonDuration">Duration</label>
+          <input id="lessonDuration" type="text" placeholder="12:30" />
+
+          <label for="lessonPdfTitle">PDF title (shown in app)</label>
+          <input id="lessonPdfTitle" type="text" placeholder="Lesson 1 — Notes PDF" />
+
+          <label for="lessonDesc">Description</label>
+          <textarea id="lessonDesc" rows="3" placeholder="Lesson summary…"></textarea>
+
+          <label for="lessonVideoUrl">Video URL (auto-filled)</label>
+          <input id="lessonVideoUrl" type="text" readonly />
+
+          <label for="lessonVideoAt">Video available at (ISO)</label>
+          <input id="lessonVideoAt" type="text" readonly />
+
+          <label for="lessonPdfUrl">PDF URL (auto-filled)</label>
+          <input id="lessonPdfUrl" type="text" readonly />
+
+          <label for="lessonPdfAt">PDF available at (ISO)</label>
+          <input id="lessonPdfAt" type="text" readonly />
+
+          <button type="button" id="addLessonBtn">Save lesson to course</button>
+          <div id="lessonStatus" class="status hidden"></div>
+        </section>
+
+        <section class="card">
+          <h2>Stats</h2>
+          <p style="font-size: 0.88rem; color: #636e72">
+            API stats:
+            <a href="/api/admin/dashboard" target="_blank" rel="noopener">/api/admin/dashboard</a>
+            (JSON, needs login token)
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <footer>Aarambh · <span id="apiHost"></span></footer>
+    <script>
+      document.getElementById('apiHost').textContent = window.location.origin;
+    </script>
+    <script src="/admin/admin.js"></script>
+  </body>
+</html>

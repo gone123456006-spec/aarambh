@@ -1,0 +1,148 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #f5f6fa;
+  color: #2d3436;
+}
+
+header {
+  background: linear-gradient(135deg, #e60000, #c40000);
+  color: #fff;
+  padding: 1.25rem 1.5rem;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+header p {
+  margin: 0.35rem 0 0;
+  opacity: 0.9;
+  font-size: 0.9rem;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.25rem;
+}
+
+.card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+.card h2 {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+  color: #e60000;
+}
+
+label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #dfe6e9;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  margin-bottom: 0.85rem;
+}
+
+button {
+  background: #e60000;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.7rem 1.1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #636e72;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.row button {
+  flex: 1;
+  min-width: 120px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.status {
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  margin-bottom: 0.85rem;
+}
+
+.status.ok {
+  background: #e8f8f5;
+  color: #00b894;
+}
+
+.status.err {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.status.info {
+  background: #fff9f0;
+  color: #e17055;
+}
+
+.preview {
+  font-size: 0.82rem;
+  word-break: break-all;
+  background: #f8f9fa;
+  padding: 0.65rem;
+  border-radius: 8px;
+  margin-top: 0.5rem;
+}
+
+.badge {
+  display: inline-block;
+  background: #e60000;
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+}
+
+footer {
+  text-align: center;
+  font-size: 0.8rem;
+  color: #636e72;
+  padding: 1rem;
+}
