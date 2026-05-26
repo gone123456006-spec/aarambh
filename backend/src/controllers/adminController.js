@@ -70,7 +70,6 @@ const getUsers = asyncHandler(async (req, res) => {
 const createCourse = asyncHandler(async (req, res) => {
   const { title, subtitle, level, color, videoSource, lessons } = req.body;
 
-  // Level unique check
   const existing = await Course.findOne({ level });
   if (existing) {
     throw new ApiError(400, `A course already exists for the level: ${level}`);
@@ -120,7 +119,17 @@ const updateCourse = asyncHandler(async (req, res) => {
  */
 const addLesson = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, duration, description, type, pdfTitle, videoUrl, pdfUrl } = req.body;
+  const {
+    title,
+    duration,
+    description,
+    type,
+    pdfTitle,
+    videoUrl,
+    pdfUrl,
+    videoAvailableAt,
+    pdfAvailableAt,
+  } = req.body;
 
   const course = await Course.findById(id);
 
@@ -136,6 +145,8 @@ const addLesson = asyncHandler(async (req, res) => {
     pdfTitle,
     videoUrl,
     pdfUrl,
+    videoAvailableAt,
+    pdfAvailableAt,
     order: course.lessons.length,
   };
 
@@ -145,9 +156,8 @@ const addLesson = asyncHandler(async (req, res) => {
   res.status(201).json(new ApiResponse(201, course, 'Lesson added successfully'));
 });
 
-
 /**
- * Delete course and clean up assets in Cloudinary
+ * Delete course and local upload files
  */
 const deleteCourse = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -158,27 +168,9 @@ const deleteCourse = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'Course not found');
   }
 
-  // Delete all lesson assets (videos/PDFs) from Cloudinary
   for (const lesson of course.lessons) {
-    if (lesson.videoUrl && lesson.videoUrl.includes('cloudinary')) {
-      try {
-        const parts = lesson.videoUrl.split('/');
-        const publicId = `aarambh/lessons/${parts[parts.length - 1].split('.')[0]}`;
-        await uploadService.deleteFromCloudinary(publicId, 'video');
-      } catch (err) {
-        console.error('Failed to delete lesson video:', err);
-      }
-    }
-
-    if (lesson.pdfUrl && lesson.pdfUrl.includes('cloudinary')) {
-      try {
-        const parts = lesson.pdfUrl.split('/');
-        const publicId = `aarambh/lessons/${parts[parts.length - 1].split('.')[0]}`;
-        await uploadService.deleteFromCloudinary(publicId, 'raw');
-      } catch (err) {
-        console.error('Failed to delete lesson PDF:', err);
-      }
-    }
+    if (lesson.videoUrl) uploadService.deleteLocalAsset(lesson.videoUrl);
+    if (lesson.pdfUrl) uploadService.deleteLocalAsset(lesson.pdfUrl);
   }
 
   await Course.findByIdAndDelete(id);
@@ -187,53 +179,55 @@ const deleteCourse = asyncHandler(async (req, res) => {
 });
 
 /**
- * Upload lesson video to Cloudinary
+ * Upload lesson video (local disk). Available in app after 30 seconds.
  */
 const uploadVideo = asyncHandler(async (req, res) => {
-  if (!req.file) {
-    throw new ApiError(400, 'Please upload a video file');
-  }
+  const payload = uploadService.saveLessonVideo(req);
 
-  const uploadResult = await uploadService.uploadToCloudinary(
-    req.file.buffer,
-    'lessons',
-    'video'
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        ...payload,
+        videoUrl: payload.url,
+        videoAvailableAt: payload.availableAt,
+      },
+      `Video uploaded. Available in app in ${payload.availableInSeconds} seconds.`
+    )
   );
-
-  res.status(200).json(new ApiResponse(200, uploadResult, 'Video uploaded successfully'));
 });
 
 /**
- * Upload lesson PDF to Cloudinary
+ * Upload lesson PDF (local disk). Available in app after 30 seconds.
  */
 const uploadPdf = asyncHandler(async (req, res) => {
-  if (!req.file) {
-    throw new ApiError(400, 'Please upload a PDF file');
-  }
+  const payload = uploadService.saveLessonPdf(req);
 
-  const uploadResult = await uploadService.uploadToCloudinary(
-    req.file.buffer,
-    'lessons',
-    'raw' // Cloudinary raw resource type for PDFs/documents
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        ...payload,
+        pdfUrl: payload.url,
+        pdfAvailableAt: payload.availableAt,
+      },
+      `PDF uploaded. Available in app in ${payload.availableInSeconds} seconds.`
+    )
   );
-
-  res.status(200).json(new ApiResponse(200, uploadResult, 'PDF uploaded successfully'));
 });
 
 /**
  * Get granular analytics data
  */
 const getAnalytics = asyncHandler(async (req, res) => {
-  // Course views aggregate
   const courses = await Course.find({}).select('title level views lessons');
-  const courseViews = courses.map(c => ({
+  const courseViews = courses.map((c) => ({
     title: c.title,
     level: c.level,
     views: c.views,
     lessonsCount: c.lessons.length,
   }));
 
-  // Users level distribution
   const levelDistribution = await User.aggregate([
     { $match: { role: 'user' } },
     { $group: { _id: '$level', count: { $sum: 1 } } },

@@ -5,6 +5,19 @@ const ChatSession = require('../models/ChatSession');
 const chatService = require('../services/chatService');
 const { createNotification } = require('../services/notificationService');
 
+const emitMatchPair = async (socket, peerSocket, sessionId, userId, peerUserId) => {
+  const [peerForSocket, peerForPeerSocket] = await Promise.all([
+    chatService.getPeerProfile(peerUserId),
+    chatService.getPeerProfile(userId),
+  ]);
+
+  if (!peerForSocket || !peerForPeerSocket) return false;
+
+  socket.emit('match:found', { sessionId, peer: peerForSocket });
+  peerSocket.emit('match:found', { sessionId, peer: peerForPeerSocket });
+  return true;
+};
+
 const configureChatSocket = (io) => {
   // Authentication Middleware for Sockets
   io.use(async (socket, next) => {
@@ -66,30 +79,14 @@ const configureChatSocket = (io) => {
         const peerSocket = io.sockets.sockets.get(peer.socketId);
         
         if (peerSocket) {
-          // Join both to session room
           socket.join(`room:${sessionId}`);
           peerSocket.join(`room:${sessionId}`);
 
-          // Emit match details to both
-          socket.emit('match:found', {
-            sessionId,
-            peer: {
-              id: peer.userId,
-              name: peer.name,
-              location: peer.location,
-              avatar: peer.avatar,
-            },
-          });
-
-          peerSocket.emit('match:found', {
-            sessionId,
-            peer: {
-              id: userId,
-              name: socket.user.name || 'Anonymous',
-              location: socket.user.region || 'Unknown',
-              avatar: socket.user.avatar || 'https://i.pravatar.cc/150',
-            },
-          });
+          const sent = await emitMatchPair(socket, peerSocket, sessionId, userId, peer.userId);
+          if (!sent) {
+            await chatService.addToWaitingPool(userId, socket.id);
+            socket.emit('match:searching');
+          }
         } else {
           // Fallback if peer disconnected right before matching
           await chatService.addToWaitingPool(userId, socket.id);
@@ -163,25 +160,16 @@ const configureChatSocket = (io) => {
             socket.join(`room:${newSessionId}`);
             peerSocket.join(`room:${newSessionId}`);
 
-            socket.emit('match:found', {
-              sessionId: newSessionId,
-              peer: {
-                id: peer.userId,
-                name: peer.name,
-                location: peer.location,
-                avatar: peer.avatar,
-              },
-            });
-
-            peerSocket.emit('match:found', {
-              sessionId: newSessionId,
-              peer: {
-                id: userId,
-                name: socket.user.name || 'Anonymous',
-                location: socket.user.region || 'Unknown',
-                avatar: socket.user.avatar || 'https://i.pravatar.cc/150',
-              },
-            });
+            const sent = await emitMatchPair(
+              socket,
+              peerSocket,
+              newSessionId,
+              userId,
+              peer.userId
+            );
+            if (!sent) {
+              await chatService.addToWaitingPool(userId, socket.id);
+            }
           } else {
             await chatService.addToWaitingPool(userId, socket.id);
           }
@@ -193,14 +181,25 @@ const configureChatSocket = (io) => {
       }
     });
 
-    // 6. Manual leave matching search queue
+    // 6. Video practice room (real users in same session — camera on/off signals)
+    socket.on('video:join', ({ sessionId }) => {
+      if (!sessionId) return;
+      socket.to(`room:${sessionId}`).emit('video:peer-joined', { userId });
+    });
+
+    socket.on('video:leave', ({ sessionId }) => {
+      if (!sessionId) return;
+      socket.to(`room:${sessionId}`).emit('video:peer-left', { userId });
+    });
+
+    // 7. Manual leave matching search queue
     socket.on('match:cancel', () => {
       console.log(`User ${userId} cancelled matching queue`);
       chatService.removeFromWaitingPool(userId);
       socket.emit('match:idle');
     });
 
-    // 7. Handle Disconnect
+    // 8. Handle Disconnect
     socket.on('disconnect', async () => {
       console.log(`Socket Disconnected: User ${userId}`);
       

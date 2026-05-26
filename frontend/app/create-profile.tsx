@@ -1,5 +1,17 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable, ScrollView, SafeAreaView, KeyboardAvoidingView, Platform, Dimensions } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  Pressable,
+  ScrollView,
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
+  Dimensions,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -19,6 +31,10 @@ import { useEffect } from 'react';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchMyProfile, updateUserProfile } from '@/utils/authApi';
+import { AUTH_KEYS, getAccessToken } from '@/utils/authStorage';
+import { isProfileCompleteUser } from '@/utils/profile';
+import { syncUserDataFromServer } from '@/utils/userDataSync';
 
 const { width } = Dimensions.get('window');
 
@@ -50,6 +66,37 @@ export default function CreateProfileScreen() {
 
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [checkingProfile, setCheckingProfile] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkExistingProfile = async () => {
+      const token = await getAccessToken();
+      if (!token) {
+        if (!cancelled) setCheckingProfile(false);
+        return;
+      }
+
+      try {
+        const profile = await fetchMyProfile();
+        if (!cancelled && isProfileCompleteUser(profile)) {
+          await syncUserDataFromServer();
+          router.replace('/(tabs)');
+          return;
+        }
+      } catch (e) {
+        console.error('Profile check failed', e);
+      }
+
+      if (!cancelled) setCheckingProfile(false);
+    };
+
+    checkExistingProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const translateY = useSharedValue(0);
   const scrollY = useSharedValue(0);
@@ -104,22 +151,46 @@ export default function CreateProfileScreen() {
   const showPhoneError = phone.length > 0 && !phoneValid;
 
   const handleComplete = async () => {
-    if (name && phoneValid && gender && region && level) {
-      try {
-        await AsyncStorage.setItem('userName', name);
-        await AsyncStorage.setItem('userPhone', phone);
-        await AsyncStorage.setItem('userRegion', region);
-        await AsyncStorage.setItem('gender', gender);
-        await AsyncStorage.setItem('level', level);
-        router.replace('/(tabs)');
-      } catch (e) {
-        console.error('Failed to save profile', e);
-        router.replace('/(tabs)');
+    if (!name || !phoneValid || !gender || !region || !level) return;
+
+    try {
+      const token = await getAccessToken();
+      if (token) {
+        await updateUserProfile({
+          name: name.trim(),
+          phone,
+          gender,
+          region,
+          level,
+          referralCode: referral.trim() || undefined,
+        });
       }
+
+      await AsyncStorage.multiSet([
+        [AUTH_KEYS.userName, name.trim()],
+        [AUTH_KEYS.userPhone, phone],
+        [AUTH_KEYS.userRegion, region],
+        [AUTH_KEYS.gender, gender],
+        [AUTH_KEYS.level, level],
+      ]);
+      await syncUserDataFromServer();
+      router.replace('/(tabs)');
+    } catch (e) {
+      console.error('Failed to save profile', e);
+      router.replace('/(tabs)');
     }
   };
 
   const isFormValid = name && phoneValid && gender && region && level;
+
+  if (checkingProfile) {
+    return (
+      <SafeAreaView style={[styles.container, styles.checkingContainer]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ActivityIndicator size="large" color="#e60000" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -297,6 +368,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  checkingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scrollContent: {
     paddingHorizontal: 24,

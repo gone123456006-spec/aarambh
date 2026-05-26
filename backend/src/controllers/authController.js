@@ -5,6 +5,10 @@ const tokenService = require('../services/tokenService');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
+const {
+  isUserProfileComplete,
+  ensureProfileCompletedFlag,
+} = require('../utils/profileUtils');
 
 // Regular expression to restrict signup/login to Gmail accounts
 const GMAIL_REGEX = /^[^\s@]+@gmail\.com$/i;
@@ -58,9 +62,11 @@ const verifyOtp = asyncHandler(async (req, res) => {
   let isNewUser = false;
 
   if (!user) {
-    user = new User({ email: trimmedEmail });
+    user = new User({ email: trimmedEmail, profileCompleted: false });
     await user.save();
     isNewUser = true;
+  } else {
+    user = await ensureProfileCompletedFlag(user);
   }
 
   // Issue access and refresh tokens
@@ -78,8 +84,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days matching JWT expiration
   };
 
-  // Determine if user profile is completed
-  const isProfileComplete = !!(user.name && user.phone && user.gender && user.region && user.level);
+  const isProfileComplete = isUserProfileComplete(user);
 
   res
     .status(200)
@@ -98,8 +103,10 @@ const verifyOtp = asyncHandler(async (req, res) => {
             level: user.level,
             avatar: user.avatar,
             role: user.role,
+            profileCompleted: user.profileCompleted,
           },
           accessToken,
+          refreshToken,
           isNewUser,
           isProfileComplete,
         },

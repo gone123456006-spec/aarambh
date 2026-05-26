@@ -13,9 +13,12 @@ import {
 import Animated, { FadeInDown, FadeInUp, Layout } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AUTH_KEYS } from '@/utils/authStorage';
+import { getCurrentUserId } from '@/utils/userStorage';
+import { getTotalGameScore } from '@/utils/gameStats';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,26 +36,18 @@ interface LeaderboardUser {
 // Entry shape: { id, name, points, location, updatedAt }
 
 const LB_PREFIX = 'leaderboard:';
-const USER_ID_KEY = 'userId';
-const USER_NAME_KEY = 'userName';
-const USER_REGION_KEY = 'userRegion';
-const SCORE_KEY = 'totalGameScore';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Stable per-device user ID created once at profile setup */
-async function getOrCreateUserId(): Promise<string> {
-  let id = await AsyncStorage.getItem(USER_ID_KEY);
-  if (!id) {
-    id = `user_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
-    await AsyncStorage.setItem(USER_ID_KEY, id);
-  }
-  return id;
+async function getAuthenticatedUserId(): Promise<string> {
+  const id = await getCurrentUserId();
+  return id ?? '';
 }
 
 /** Write this user's latest score into the shared leaderboard store */
 async function pushMyScore(name: string, points: number, location: string) {
-  const id = await getOrCreateUserId();
+  const id = await getAuthenticatedUserId();
+  if (!id) return;
   const entry = JSON.stringify({ id, name, points, location, updatedAt: Date.now() });
   await AsyncStorage.setItem(`${LB_PREFIX}${id}`, entry);
 }
@@ -94,48 +89,47 @@ export default function LeaderboardScreen() {
   const [myScore, setMyScore] = React.useState(0);
   const [myRank, setMyRank] = React.useState(0);
 
-  // ── Load & build leaderboard ──────────────────────────────────────────────
-  React.useEffect(() => {
-    const load = async () => {
-      try {
-        // 1. Read profile info saved during account creation
-        const [rawScore, name, region, id] = await Promise.all([
-          AsyncStorage.getItem(SCORE_KEY),
-          AsyncStorage.getItem(USER_NAME_KEY),
-          AsyncStorage.getItem(USER_REGION_KEY),
-          getOrCreateUserId(),
-        ]);
+  const loadLeaderboard = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [score, name, region, id] = await Promise.all([
+        getTotalGameScore(),
+        AsyncStorage.getItem(AUTH_KEYS.userName),
+        AsyncStorage.getItem(AUTH_KEYS.userRegion),
+        getAuthenticatedUserId(),
+      ]);
+      const displayName = name?.trim() || 'You';
+      const displayRegion = region?.trim() || '';
 
-        const score = rawScore ? parseInt(rawScore, 10) : 0;
-        const displayName = name?.trim() || 'You';
-        const displayRegion = region?.trim() || '';
+      setMyId(id);
+      setMyScore(score);
 
-        setMyId(id);
-        setMyScore(score);
+      await pushMyScore(displayName, score, displayRegion);
 
-        // 2. Push current user's fresh score so it's reflected immediately
-        await pushMyScore(displayName, score, displayRegion);
+      const entries = await fetchAllEntries();
+      const sorted = entries
+        .map((e) => ({ ...e, isMe: e.id === id }))
+        .sort((a, b) => b.points - a.points)
+        .map((e, i) => ({ ...e, rank: i + 1 }));
 
-        // 3. Read all stored entries
-        const entries = await fetchAllEntries();
-
-        // 4. Mark current user, sort, assign ranks
-        const sorted = entries
-          .map((e) => ({ ...e, isMe: e.id === id }))
-          .sort((a, b) => b.points - a.points)
-          .map((e, i) => ({ ...e, rank: i + 1 }));
-
-        setLeaderboard(sorted);
-        setMyRank(sorted.find((e) => e.isMe)?.rank ?? sorted.length + 1);
-      } catch (err) {
-        console.error('Leaderboard load error', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    load();
+      setLeaderboard(sorted);
+      setMyRank(sorted.find((e) => e.isMe)?.rank ?? sorted.length + 1);
+    } catch (err) {
+      console.error('Leaderboard load error', err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  React.useEffect(() => {
+    loadLeaderboard();
+  }, [loadLeaderboard]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadLeaderboard();
+    }, [loadLeaderboard])
+  );
 
   // ── Derived slices ────────────────────────────────────────────────────────
   const topThree = leaderboard.slice(0, 3);

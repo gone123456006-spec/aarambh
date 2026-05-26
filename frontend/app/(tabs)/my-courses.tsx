@@ -18,7 +18,6 @@ import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode, Audio } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser';
@@ -30,7 +29,13 @@ import {
   Lesson,
   SAMPLE_PDF_URL,
 } from '@/constants/courseData';
-import { isLevelUnlocked } from '@/utils/courseProgress';
+import {
+  isLevelUnlocked,
+  loadCourseProgress,
+  saveCourseProgress,
+  syncLessonToServer,
+} from '@/utils/courseProgress';
+import { useFocusEffect } from 'expo-router';
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PLAYLIST_PLAYER_HEIGHT = SCREEN_WIDTH * (9 / 16);
 
@@ -508,9 +513,8 @@ export default function MyCoursesScreen() {
           playThroughEarpieceAndroid: false,
         });
 
-        const saved = await AsyncStorage.getItem('completedLessons');
-        const last = await AsyncStorage.getItem('lastLessonId');
-        if (saved) setCompletedLessons(JSON.parse(saved));
+        const { completedLessons: saved, lastLessonId: last } = await loadCourseProgress();
+        setCompletedLessons(saved);
         if (last) setLastLessonId(last);
       } catch (e) {
         console.error('Failed to load progress', e);
@@ -520,6 +524,15 @@ export default function MyCoursesScreen() {
     };
     init();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadCourseProgress().then(({ completedLessons: saved, lastLessonId: last }) => {
+        setCompletedLessons(saved);
+        setLastLessonId(last);
+      });
+    }, [])
+  );
 
   // Timer to hide controls
   const startHideTimer = () => {
@@ -551,28 +564,47 @@ export default function MyCoursesScreen() {
   // Save progress
   const toggleCompletion = async (lessonId: string) => {
     const isCompleted = completedLessons.includes(lessonId);
-    let newList;
+    let newList: string[];
+    let lastId = lastLessonId;
     if (isCompleted) {
-      newList = completedLessons.filter(id => id !== lessonId);
+      newList = completedLessons.filter((id) => id !== lessonId);
+      try {
+        await syncLessonToServer(lessonId, false);
+      } catch (e) {
+        console.error('Failed to sync lesson removal', e);
+      }
     } else {
       newList = [...completedLessons, lessonId];
+      lastId = lessonId;
       setLastLessonId(lessonId);
-      await AsyncStorage.setItem('lastLessonId', lessonId);
+      try {
+        await syncLessonToServer(lessonId, true);
+      } catch (e) {
+        console.error('Failed to sync lesson completion', e);
+      }
     }
     setCompletedLessons(newList);
-    await AsyncStorage.setItem('completedLessons', JSON.stringify(newList));
+    await saveCourseProgress(newList, lastId);
   };
 
-  const markLessonComplete = useCallback(async (lessonId: string) => {
-    setCompletedLessons((prev) => {
-      if (prev.includes(lessonId)) return prev;
-      const newList = [...prev, lessonId];
-      AsyncStorage.setItem('completedLessons', JSON.stringify(newList));
-      AsyncStorage.setItem('lastLessonId', lessonId);
-      return newList;
-    });
-    setLastLessonId(lessonId);
-  }, []);
+  const markLessonComplete = useCallback(
+    async (lessonId: string) => {
+      if (completedLessons.includes(lessonId)) {
+        setLastLessonId(lessonId);
+        return;
+      }
+      const newList = [...completedLessons, lessonId];
+      setCompletedLessons(newList);
+      setLastLessonId(lessonId);
+      await saveCourseProgress(newList, lessonId);
+      try {
+        await syncLessonToServer(lessonId, true);
+      } catch (e) {
+        console.error('Failed to sync lesson completion', e);
+      }
+    },
+    [completedLessons]
+  );
 
   const isLevelUnlockedForUser = (levelId: LevelId) =>
     isLevelUnlocked(levelId, completedLessons);
@@ -648,7 +680,7 @@ export default function MyCoursesScreen() {
   const activeLevel = COURSE_DATA.find((l) => l.id === selectedCategory)!;
 
   const handlePlay = (lessonId: string) => {
-    AsyncStorage.setItem('lastLessonId', lessonId);
+    saveCourseProgress(completedLessons, lessonId);
     setLastLessonId(lessonId);
 
     if (lessonId === playingLessonId) {
@@ -683,7 +715,10 @@ export default function MyCoursesScreen() {
     if (currentIndex < level.lessons.length - 1) {
       const nextLesson = level.lessons[currentIndex + 1];
       setRoadmapFocusIndex(currentIndex + 1);
-      AsyncStorage.setItem('lastLessonId', nextLesson.id);
+      const newList = completedLessons.includes(lessonId)
+        ? completedLessons
+        : [...completedLessons, lessonId];
+      await saveCourseProgress(newList, nextLesson.id);
       setLastLessonId(nextLesson.id);
       setPlayingLessonId(nextLesson.id);
       setIsPaused(false);

@@ -26,9 +26,15 @@ const lessonSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  videoAvailableAt: {
+    type: Date,
+  },
   pdfUrl: {
     type: String,
     trim: true,
+  },
+  pdfAvailableAt: {
+    type: Date,
   },
   order: {
     type: Number,

@@ -1,9 +1,30 @@
 const ChatSession = require('../models/ChatSession');
 const User = require('../models/User');
 
+const LEVEL_LABELS = {
+  starting: 'Starting',
+  beginner: 'Beginner',
+  intermediate: 'Intermediate',
+  advanced: 'Advanced',
+};
+
 // In-memory pools for quick matchmaking and socket referencing
-const waitingPool = new Map(); // userId -> { socketId, name, location, avatar }
+const waitingPool = new Map(); // userId -> peer snapshot from DB
 const activeConnections = new Map(); // userId -> socketId
+
+const toPeerProfile = (user) => {
+  const id = user._id.toString();
+  const levelKey = user.level || '';
+  return {
+    id,
+    name: (user.name && user.name.trim()) || 'Learner',
+    location: (user.region && user.region.trim()) || 'Not set',
+    region: (user.region && user.region.trim()) || 'Not set',
+    gender: user.gender || '',
+    level: LEVEL_LABELS[levelKey] || levelKey || '',
+    avatar: (user.avatar && user.avatar.trim()) || '',
+  };
+};
 
 /**
  * Add user to the general online socket registry
@@ -31,15 +52,23 @@ const getSocketIdByUserId = (userId) => {
  * Add a user to the matching waiting pool
  */
 const addToWaitingPool = async (userId, socketId) => {
-  const user = await User.findById(userId).select('name region avatar');
+  const user = await User.findById(userId).select('name region gender level avatar');
   if (!user) return;
 
   waitingPool.set(userId.toString(), {
     socketId,
-    name: user.name || 'Anonymous',
-    location: user.region || 'Unknown',
-    avatar: user.avatar || 'https://i.pravatar.cc/150',
+    userId: userId.toString(),
+    ...toPeerProfile(user),
   });
+};
+
+/**
+ * Latest profile from DB (same fields as /api/users/me & app profile screen).
+ */
+const getPeerProfile = async (userId) => {
+  const user = await User.findById(userId).select('name region gender level avatar');
+  if (!user) return null;
+  return toPeerProfile(user);
 };
 
 /**
@@ -64,10 +93,8 @@ const findRandomMatch = (userId) => {
   const randomIdx = Math.floor(Math.random() * candidates.length);
   const matchUserId = candidates[randomIdx];
 
-  return {
-    userId: matchUserId,
-    ...waitingPool.get(matchUserId),
-  };
+  const entry = waitingPool.get(matchUserId);
+  return entry ? { userId: matchUserId, ...entry } : null;
 };
 
 /**
@@ -115,6 +142,7 @@ module.exports = {
   addToWaitingPool,
   removeFromWaitingPool,
   findRandomMatch,
+  getPeerProfile,
   createSession,
   endSession,
   waitingPool,

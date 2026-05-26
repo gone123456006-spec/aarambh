@@ -28,7 +28,11 @@ const userSchema = new mongoose.Schema(
     level: {
       type: String,
       enum: ['starting', 'beginner', 'intermediate', 'advanced'],
-      default: 'starting',
+    },
+    profileCompleted: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
     referralCode: {
       type: String,

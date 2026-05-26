@@ -48,7 +48,7 @@ export default function IntroScreen() {
 
       {/* Header Logo */}
       <View style={styles.logoContainer}>
-        <Image source={require('../assets/images/app_logo.png')} style={styles.logoImage} resizeMode="contain" />
+        <Image source={require('../assets/images/aarambh-icon.png')} style={styles.logoImage} resizeMode="contain" />
       </View>
 
       {/* Dashed Separator Line */}
@@ -107,7 +107,7 @@ export default function IntroScreen() {
           <Text style={styles.buttonText}>Get started</Text>
         </Pressable>
 
-        <Pressable style={styles.signInContainer}>
+        <Pressable style={styles.signInContainer} onPress={() => router.push('/login')}>
           <Text style={styles.signInText}>
             Already have an account? <Text style={styles.signInLink}>Sign in</Text>
           </Text>
@@ -137,8 +137,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   logoImage: {
-    width: 140,
-    height: 40,
+    width: 48,
+    height: 48,
   },
   separatorLine: {
     borderBottomColor: '#e0e0e0',

@@ -2,7 +2,7 @@ const express = require('express');
 const { body } = require('express-validator');
 const adminController = require('../controllers/adminController');
 const { protect, adminOnly } = require('../middleware/auth');
-const upload = require('../middleware/upload');
+const { uploadVideo, uploadPdf } = require('../middleware/upload');
 const validate = require('../middleware/validate');
 
 const router = express.Router();
@@ -49,9 +49,9 @@ router.post(
 
 router.delete('/courses/:id', adminController.deleteCourse);
 
-router.post('/upload/video', upload.single('video'), adminController.uploadVideo);
+router.post('/upload/video', uploadVideo.single('video'), adminController.uploadVideo);
 
-router.post('/upload/pdf', upload.single('pdf'), adminController.uploadPdf);
+router.post('/upload/pdf', uploadPdf.single('pdf'), adminController.uploadPdf);
 
 router.get('/analytics', adminController.getAnalytics);
 

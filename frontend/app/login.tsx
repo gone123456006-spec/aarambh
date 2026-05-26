@@ -1,9 +1,29 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, Pressable, SafeAreaView, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  Pressable,
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
+import {
+  fetchMyProfile,
+  resolveProfileComplete,
+  sendOtpEmail,
+  verifyOtpCode,
+} from '@/utils/authApi';
+import { isProfileCompleteUser } from '@/utils/profile';
+import { saveAuthSession } from '@/utils/authStorage';
+import { syncUserDataFromServer } from '@/utils/userDataSync';
+import { checkApiHealth } from '@/utils/checkApiHealth';
+import { API_BASE_URL, getApiConnectionHint } from '@/constants/api';
 
 type LoginStep = 'EMAIL_INPUT' | 'OTP_INPUT';
 
@@ -17,26 +37,84 @@ export default function LoginScreen() {
   const [step, setStep] = useState<LoginStep>('EMAIL_INPUT');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [serverOk, setServerOk] = useState<boolean | null>(null);
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const gmailValid = isValidGmail(email);
+  useEffect(() => {
+    let cancelled = false;
+    checkApiHealth().then((result) => {
+      if (cancelled) return;
+      setServerOk(result.ok);
+      if (!result.ok) setError(result.message);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  const handleSendOTP = () => {
-    if (gmailValid) {
+  const gmailValid = isValidGmail(email);
+  const trimmedEmail = email.trim().toLowerCase();
+
+  const handleSendOTP = async () => {
+    if (!gmailValid || loading || serverOk === false) return;
+    setLoading(true);
+    setError('');
+    try {
+      await sendOtpEmail(trimmedEmail);
       setStep('OTP_INPUT');
+      setOtp('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to send OTP. Check backend & SMTP settings.');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleVerifyOTP = async () => {
-    if (otp.length === 6) {
-      try {
-        await AsyncStorage.setItem('userEmail', email.trim().toLowerCase());
-        router.replace('/create-profile');
-      } catch (e) {
-        console.error('Failed to save email', e);
+    if (otp.length !== 6 || loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await verifyOtpCode(trimmedEmail, otp);
+      const userId = String(data.user.id ?? data.user._id ?? '');
+      await saveAuthSession({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        user: {
+          id: userId,
+          email: data.user.email,
+          name: data.user.name,
+          phone: data.user.phone,
+          gender: data.user.gender,
+          region: data.user.region,
+          level: data.user.level,
+        },
+      });
+
+      let profileComplete = resolveProfileComplete(data);
+
+      if (!profileComplete) {
+        try {
+          const profile = await fetchMyProfile();
+          profileComplete = isProfileCompleteUser(profile);
+        } catch {
+          // Keep profileComplete false for new users
+        }
+      }
+
+      if (profileComplete) {
+        await syncUserDataFromServer();
+        router.replace('/(tabs)');
+      } else {
         router.replace('/create-profile');
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Invalid or expired OTP. Try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -47,7 +125,7 @@ export default function LoginScreen() {
   const renderHeaderSubtitle = () => {
     return step === 'EMAIL_INPUT'
       ? 'We will send a 6-digit code to verify your Gmail.'
-      : `Code sent to ${email.trim().toLowerCase()}`;
+      : `Code sent to ${trimmedEmail}`;
   };
 
   return (
@@ -59,6 +137,7 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <Pressable
             onPress={() => {
+              if (loading) return;
               step === 'OTP_INPUT' ? setStep('EMAIL_INPUT') : router.back();
             }}
             style={styles.backButton}
@@ -70,6 +149,13 @@ export default function LoginScreen() {
         <View style={styles.titleContainer}>
           <Text style={styles.title}>{renderHeaderTitle()}</Text>
           <Text style={styles.subtitle}>{renderHeaderSubtitle()}</Text>
+          {serverOk === true ? (
+            <Text style={styles.serverOkText}>Server connected · {API_BASE_URL}</Text>
+          ) : null}
+          {getApiConnectionHint() ? (
+            <Text style={styles.hintText}>{getApiConnectionHint()}</Text>
+          ) : null}
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
         <View style={styles.inputContainer}>
@@ -84,8 +170,12 @@ export default function LoginScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(text) => {
+                  setEmail(text);
+                  if (error) setError('');
+                }}
                 autoFocus
+                editable={!loading}
                 numberOfLines={1}
                 scrollEnabled
               />
@@ -100,8 +190,12 @@ export default function LoginScreen() {
                 keyboardType="number-pad"
                 maxLength={6}
                 value={otp}
-                onChangeText={setOtp}
+                onChangeText={(text) => {
+                  setOtp(text.replace(/\D/g, ''));
+                  if (error) setError('');
+                }}
                 autoFocus
+                editable={!loading}
                 textAlign="center"
               />
             </View>
@@ -113,25 +207,33 @@ export default function LoginScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.button,
-                !gmailValid && styles.buttonDisabled,
-                pressed && styles.buttonPressed,
+                (!gmailValid || loading) && styles.buttonDisabled,
+                pressed && !loading && styles.buttonPressed,
               ]}
               onPress={handleSendOTP}
-              disabled={!gmailValid}
+              disabled={!gmailValid || loading}
             >
-              <Text style={styles.buttonText}>Send OTP</Text>
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Send OTP</Text>
+              )}
             </Pressable>
           ) : (
             <Pressable
               style={({ pressed }) => [
                 styles.button,
-                otp.length < 6 && styles.buttonDisabled,
-                pressed && styles.buttonPressed,
+                (otp.length < 6 || loading) && styles.buttonDisabled,
+                pressed && !loading && styles.buttonPressed,
               ]}
               onPress={handleVerifyOTP}
-              disabled={otp.length < 6}
+              disabled={otp.length < 6 || loading}
             >
-              <Text style={styles.buttonText}>Verify & Login</Text>
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Verify & Login</Text>
+              )}
             </Pressable>
           )}
         </View>
@@ -172,6 +274,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666666',
     lineHeight: 24,
+  },
+  hintText: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#636e72',
+    lineHeight: 18,
+  },
+  serverOkText: {
+    marginTop: 10,
+    fontSize: 13,
+    color: '#00b894',
+    lineHeight: 18,
+  },
+  errorText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#e60000',
+    lineHeight: 20,
   },
   inputContainer: {
     paddingHorizontal: 24,

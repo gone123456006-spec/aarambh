@@ -1,24 +1,43 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   View,
   Text,
-  SafeAreaView,
   Platform,
   StatusBar,
   TouchableOpacity,
   TextInput,
   FlatList,
-  ActivityIndicator,
-  Animated,
   Image,
-  Keyboard,
-  Alert
+  KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
-import { Feather, Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
+import {
+  KeyboardStickyView,
+  useKeyboardHandler,
+  useResizeMode,
+} from 'react-native-keyboard-controller';
+import { runOnJS } from 'react-native-reanimated';
+import {
+  connectChatSocket,
+  disconnectChatSocket,
+  startMatchmaking,
+  cancelMatchmaking,
+  sendChatMessage,
+  skipChatPartner,
+  emitTypingStart,
+  emitTypingStop,
+  getChatSocket,
+  type ChatPeer,
+} from '@/utils/chatSocket';
+import { getAccessToken } from '@/utils/authStorage';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AUTH_KEYS } from '@/utils/authStorage';
+import { MatchmakingScene } from '@/components/MatchmakingScene';
 
 interface Message {
   id: string;
@@ -27,559 +46,598 @@ interface Message {
   time: string;
 }
 
-const PEER_PROFILES = [
-  { name: 'Alex', location: 'Canada', avatar: 'https://i.pravatar.cc/150?img=11' },
-  { name: 'Sarah', location: 'UK', avatar: 'https://i.pravatar.cc/150?img=5' },
-  { name: 'Miguel', location: 'Spain', avatar: 'https://i.pravatar.cc/150?img=12' },
-  { name: 'Yuki', location: 'Japan', avatar: 'https://i.pravatar.cc/150?img=9' },
-  { name: 'Emma', location: 'Australia', avatar: 'https://i.pravatar.cc/150?img=1' },
-];
+const EXTRA_LIST_SPACING = 16;
+const DEFAULT_INPUT_DOCK_HEIGHT = 56;
 
-const SIMULATED_REPLIES = [
-  "That's interesting! Tell me more.",
-  "I agree with you.",
-  "Wow, I didn't know that.",
-  "How's the weather there?",
-  "I'm learning English too! It's fun but challenging.",
-  "Could you explain that?",
-  "Haha, nice one!",
-  "What do you like to do in your free time?",
-  "Have you watched any good movies lately?",
-];
+const LEVEL_LABELS: Record<string, string> = {
+  starting: 'Starting',
+  beginner: 'Beginner',
+  intermediate: 'Intermediate',
+  advanced: 'Advanced',
+};
+
+function formatPeerLevel(level?: string) {
+  if (!level) return '';
+  return LEVEL_LABELS[level] || level;
+}
+
+function PeerAvatar({ peer }: { peer: ChatPeer }) {
+  if (peer.avatar) {
+    return <Image source={{ uri: peer.avatar }} style={styles.peerAvatar} />;
+  }
+  return (
+    <View style={[styles.peerAvatar, styles.peerAvatarPlaceholder]}>
+      <Ionicons name="person" size={22} color="#fff" />
+    </View>
+  );
+}
+
+function peerStatusLine(peer: ChatPeer, isTyping: boolean) {
+  if (isTyping) return 'typing...';
+  const region = peer.region || peer.location;
+  const level = formatPeerLevel(peer.level);
+  const parts = [region, level, peer.gender].filter(Boolean);
+  return parts.length > 0 ? parts.join(' · ') : 'English learner';
+}
 
 export default function RandomChatScreen() {
   const router = useRouter();
-  const [isConnecting, setIsConnecting] = useState(true);
-  const [peer, setPeer] = useState<any>(null);
+  const insets = useSafeAreaInsets();
+  const [status, setStatus] = useState<'connecting' | 'searching' | 'chat' | 'error'>('connecting');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [peer, setPeer] = useState<ChatPeer | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [myUserId, setMyUserId] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const flatListRef = useRef<FlatList>(null);
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const insets = useSafeAreaInsets();
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [inputDockHeight, setInputDockHeight] = useState(DEFAULT_INPUT_DOCK_HEIGHT);
 
-  const handleFeatureNotAdded = () => {
-    Alert.alert('Feature Coming Soon', 'This feature is not added yet.');
-  };
-
-  useEffect(() => {
-    if (Platform.OS !== 'ios') return;
-
-    const showSub = Keyboard.addListener('keyboardWillShow', (e) => {
-      setKeyboardHeight(e.endCoordinates.height);
-    });
-    const hideSub = Keyboard.addListener('keyboardWillHide', () => {
-      setKeyboardHeight(0);
-    });
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
-  useEffect(() => {
-    // Pulse animation for connecting state
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.2,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-
-    // Simulate finding a peer
-    const connectTimer = setTimeout(() => {
-      const randomPeer = PEER_PROFILES[Math.floor(Math.random() * PEER_PROFILES.length)];
-      setPeer(randomPeer);
-      setIsConnecting(false);
-
-      // Peer sends first message after connecting
-      setTimeout(() => {
-        setIsTyping(true);
-        setTimeout(() => {
-          setIsTyping(false);
-          addMessage(`Hi there! I'm ${randomPeer.name} from ${randomPeer.location}. Nice to meet you!`, false);
-        }, 1500);
-      }, 1000);
-
-    }, 3000);
-
-    return () => clearTimeout(connectTimer);
-  }, []);
+  useResizeMode();
 
   const getCurrentTime = () => {
     const now = new Date();
     return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
   };
 
-  const addMessage = (text: string, isSelf: boolean) => {
+  const appendMessage = useCallback((text: string, isSelf: boolean, id?: string) => {
     const newMessage: Message = {
-      id: Date.now().toString() + Math.random().toString(),
+      id: id ?? `${Date.now()}-${Math.random()}`,
       text,
       isSelf,
       time: getCurrentTime(),
     };
-    setMessages(prev => [...prev, newMessage]);
+    setMessages((prev) => [...prev, newMessage]);
+  }, []);
 
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
-  };
+  const resetChat = useCallback(() => {
+    setPeer(null);
+    setSessionId(null);
+    setMessages([]);
+    setIsTyping(false);
+  }, []);
+
+  const beginSearch = useCallback(() => {
+    const sock = getChatSocket();
+    if (!sock?.connected) return;
+    resetChat();
+    setStatus('searching');
+    startMatchmaking(sock);
+  }, [resetChat]);
+
+  const scrollToEnd = useCallback((animated = true) => {
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
+
+  const onKeyboardHeightChange = useCallback(
+    (height: number) => {
+      setKeyboardHeight(height);
+      if (messages.length > 0) scrollToEnd(true);
+    },
+    [messages.length, scrollToEnd]
+  );
+
+  useKeyboardHandler(
+    {
+      onStart: (e) => {
+        'worklet';
+        runOnJS(onKeyboardHeightChange)(e.height);
+      },
+      onEnd: (e) => {
+        'worklet';
+        runOnJS(onKeyboardHeightChange)(e.height);
+      },
+    },
+    [onKeyboardHeightChange]
+  );
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    scrollToEnd(true);
+  }, [messages.length, keyboardHeight, inputDockHeight, isTyping, scrollToEnd]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const setup = async () => {
+      try {
+        const token = await getAccessToken();
+        if (!token) {
+          if (mounted) {
+            setErrorMsg('Please sign in to chat with real learners.');
+            setStatus('error');
+          }
+          return;
+        }
+
+        const uid = await AsyncStorage.getItem(AUTH_KEYS.userId);
+        if (uid && mounted) setMyUserId(uid);
+
+        const sock = await connectChatSocket();
+        if (!mounted) return;
+
+        sock.on('match:searching', () => {
+          setStatus('searching');
+          resetChat();
+        });
+
+        sock.on('match:found', (data: { sessionId: string; peer: ChatPeer }) => {
+          setSessionId(data.sessionId);
+          setPeer(data.peer);
+          setStatus('chat');
+          setMessages([]);
+        });
+
+        sock.on('message:receive', (payload: { id: string; text: string; senderId: string }) => {
+          const currentUid = uid ?? myUserId;
+          if (payload.senderId === currentUid) return;
+          appendMessage(payload.text, false, payload.id);
+          setIsTyping(false);
+        });
+
+        sock.on('peer:typing', ({ isTyping: typing }: { isTyping: boolean }) => {
+          setIsTyping(typing);
+        });
+
+        sock.on('peer:disconnected', () => {
+          Alert.alert('Partner left', 'Your chat partner disconnected. Finding someone new...');
+          beginSearch();
+        });
+
+        setStatus('searching');
+        startMatchmaking(sock);
+      } catch (e) {
+        if (mounted) {
+          setErrorMsg(e instanceof Error ? e.message : 'Could not connect to chat server.');
+          setStatus('error');
+        }
+      }
+    };
+
+    setup();
+
+    return () => {
+      mounted = false;
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      disconnectChatSocket();
+    };
+  }, [appendMessage, beginSearch, resetChat]);
 
   const handleSend = () => {
-    if (inputText.trim().length === 0) return;
+    const text = inputText.trim();
+    const sock = getChatSocket();
+    if (!text || !sock || !sessionId) return;
 
-    addMessage(inputText.trim(), true);
+    appendMessage(text, true);
+    sendChatMessage(sock, sessionId, text);
     setInputText('');
+    emitTypingStop(sock, sessionId);
+    setTimeout(() => scrollToEnd(true), 50);
+  };
 
-    // Simulate peer replying
-    setTimeout(() => {
-      setIsTyping(true);
-      setTimeout(() => {
-        setIsTyping(false);
-        const randomReply = SIMULATED_REPLIES[Math.floor(Math.random() * SIMULATED_REPLIES.length)];
-        addMessage(randomReply, false);
-      }, 1500 + Math.random() * 2000);
-    }, 1000);
+  const handleInputChange = (text: string) => {
+    setInputText(text);
+    const sock = getChatSocket();
+    if (!sock || !sessionId) return;
+
+    if (text.length > 0) {
+      emitTypingStart(sock, sessionId);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        emitTypingStop(sock, sessionId);
+      }, 2000);
+    } else {
+      emitTypingStop(sock, sessionId);
+    }
   };
 
   const handleSkip = () => {
-    setIsConnecting(true);
-    setPeer(null);
-    setMessages([]);
-    setIsTyping(false);
-
-    setTimeout(() => {
-      const randomPeer = PEER_PROFILES[Math.floor(Math.random() * PEER_PROFILES.length)];
-      setPeer(randomPeer);
-      setIsConnecting(false);
-
-      setTimeout(() => {
-        setIsTyping(true);
-        setTimeout(() => {
-          setIsTyping(false);
-          addMessage(`Hey! I'm ${randomPeer.name}. How are you doing?`, false);
-        }, 1500);
-      }, 1000);
-    }, 2500);
+    const sock = getChatSocket();
+    if (!sock || !sessionId) {
+      beginSearch();
+      return;
+    }
+    skipChatPartner(sock, sessionId);
+    setStatus('searching');
+    resetChat();
   };
 
-  if (isConnecting) {
-    return (
-      <View style={[styles.safeArea, { paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : insets.top }]}>
-        <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.connectingBackBtn}>
-            <Feather name="arrow-left" size={24} color="#000" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Random Chat</Text>
-          <View style={styles.headerRight} />
+  const handleBack = () => {
+    const sock = getChatSocket();
+    if (sock) cancelMatchmaking(sock);
+    disconnectChatSocket();
+    router.back();
+  };
+
+  const renderMessage = ({ item }: { item: Message }) => (
+    <View style={[styles.messageWrapper, item.isSelf ? styles.messageWrapperSelf : styles.messageWrapperPeer]}>
+      <View style={[styles.messageBubble, item.isSelf ? styles.messageBubbleSelf : styles.messageBubblePeer]}>
+        <Text style={[styles.messageText, item.isSelf ? styles.messageTextSelf : styles.messageTextPeer]}>
+          {item.text}
+        </Text>
+      </View>
+    </View>
+  );
+
+  const renderChatInputBar = () => (
+    <View style={styles.inputRow}>
+      <View style={styles.inputPill}>
+        <TextInput
+          style={styles.textInput}
+          placeholder="Message"
+          placeholderTextColor="#8696a0"
+          value={inputText}
+          onChangeText={handleInputChange}
+          onFocus={scrollToEnd}
+          multiline
+          maxLength={500}
+          blurOnSubmit={false}
+        />
+      </View>
+      {inputText.trim().length > 0 && (
+        <TouchableOpacity style={styles.sendBtn} onPress={handleSend} activeOpacity={0.85}>
+          <Ionicons name="send" size={20} color="#fff" />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  const listBottomPadding =
+    inputDockHeight + keyboardHeight + EXTRA_LIST_SPACING + (isTyping ? 28 : 0);
+
+  const stickyOffset = { closed: Math.max(insets.bottom, 8), opened: 0 };
+
+  const renderNavHeader = (
+    title: string,
+    subtitle: string,
+    options?: { peer?: ChatPeer; onSkip?: () => void }
+  ) => (
+    <LinearGradient
+      colors={['#FFD6D6', '#FFF0F0', '#F8F9FA']}
+      locations={[0, 0.55, 1]}
+      style={[styles.header, { paddingTop: insets.top }]}
+    >
+      <View style={styles.headerRow}>
+        <TouchableOpacity
+          onPress={handleBack}
+          style={styles.backBtn}
+          activeOpacity={0.6}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Feather name="arrow-left" size={24} color="#1F1F1F" />
+        </TouchableOpacity>
+
+        {options?.peer ? (
+          <View style={styles.headerAvatarWrap}>
+            <PeerAvatar peer={options.peer} />
+            <View style={styles.onlineBadge} />
+          </View>
+        ) : null}
+
+        <View style={styles.headerTextBlock}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          {subtitle ? (
+            <Text
+              style={[styles.headerSub, isTyping && options?.peer && styles.headerSubTyping]}
+              numberOfLines={1}
+            >
+              {subtitle}
+            </Text>
+          ) : null}
         </View>
-        <View style={styles.connectingContainer}>
-          <Animated.View style={[styles.radarCircle, { transform: [{ scale: pulseAnim }] }]}>
-            <Ionicons name="earth" size={60} color="#e60000" />
-          </Animated.View>
-          <Text style={styles.connectingTitle}>Looking for someone...</Text>
-          <Text style={styles.connectingSub}>Matching you with an English speaker</Text>
-          <ActivityIndicator size="large" color="#e60000" style={{ marginTop: 30 }} />
+
+        {options?.onSkip ? (
+          <TouchableOpacity
+            onPress={options.onSkip}
+            style={styles.actionPill}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="play-skip-forward" size={16} color="#e60000" />
+            <Text style={styles.actionPillText}>Skip</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerRightSpacer} />
+        )}
+      </View>
+    </LinearGradient>
+  );
+
+  if (status === 'error') {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        {renderNavHeader('Chat in English', 'Connection issue')}
+        <View style={styles.centeredBody}>
+          <Feather name="wifi-off" size={48} color="#e60000" />
+          <Text style={styles.centeredTitle}>{errorMsg}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={() => router.replace('/login')}>
+            <Text style={styles.retryBtnText}>Sign in</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  const renderMessage = ({ item }: { item: Message }) => {
+  if (status === 'connecting' || status === 'searching') {
     return (
-      <View style={[
-        styles.messageWrapper,
-        item.isSelf ? styles.messageWrapperSelf : styles.messageWrapperPeer
-      ]}>
-        <View style={[
-          styles.messageBubble,
-          item.isSelf ? styles.messageBubbleSelf : styles.messageBubblePeer
-        ]}>
-          <Text style={[styles.messageText, item.isSelf ? { color: '#fff' } : { color: '#000' }]}>{item.text}</Text>
-        </View>
+      <View style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        {renderNavHeader(
+          'Chat in English',
+          status === 'connecting' ? 'Connecting to server…' : ''
+        )}
+        <MatchmakingScene />
       </View>
     );
-  };
+  }
 
-  const iosBottomPadding = insets.bottom > 0 ? insets.bottom : 10;
-  const bottomPadding = Platform.OS === 'ios' && keyboardHeight > 0
-    ? keyboardHeight + 10
-    : iosBottomPadding;
+  if (!peer) return null;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : insets.top }}>
+    <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={styles.chatHeader}>
-        <View style={styles.chatHeaderLeft}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Feather name="chevron-left" size={32} color="#000" />
-          </TouchableOpacity>
-          <View style={styles.avatarContainer}>
-            <Image source={{ uri: peer.avatar }} style={styles.peerAvatar} />
-            <View style={styles.disappearingBadge}>
-              <Feather name="clock" size={10} color="#fff" />
-            </View>
-          </View>
-          <View style={styles.headerTextContainer}>
-            <Text style={styles.peerName} numberOfLines={1}>{peer.name}</Text>
-            <Text style={[styles.peerStatus, isTyping && { color: '#00b894', fontWeight: '500' }]}>
-              {isTyping ? 'typing...' : 'online'}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.chatHeaderRight}>
-          <TouchableOpacity onPress={handleFeatureNotAdded} style={styles.headerIcon}>
-            <Feather name="video" size={24} color="#000" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleFeatureNotAdded} style={styles.headerIcon}>
-            <Feather name="phone" size={24} color="#000" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleSkip} style={styles.headerIcon}>
-            <Ionicons name="play-skip-forward" size={26} color="#000" />
-          </TouchableOpacity>
-        </View>
-      </View>
+      <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
 
-      {/* Info Banner */}
+      {renderNavHeader(peer.name, peerStatusLine(peer, isTyping), {
+        peer,
+        onSkip: handleSkip,
+      })}
+
       <View style={styles.infoBanner}>
-        <Feather name="shield" size={14} color="#00b894" />
-        <Text style={styles.infoBannerText}>Messages are end-to-end encrypted. Be polite and respectful.</Text>
+        <Feather name="users" size={14} color="#00b894" />
+        <Text style={styles.infoBannerText}>
+          You are chatting with a real signed-in learner. Be polite and respectful.
+        </Text>
       </View>
 
-      {/* Chat Area */}
-      <View style={styles.chatBackground}>
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMessage}
-          contentContainerStyle={styles.chatContent}
-          showsVerticalScrollIndicator={false}
-          ListFooterComponent={() => (
-            isTyping ? (
-              <View style={styles.typingIndicatorContainer}>
-                <Text style={styles.typingText}>{peer.name} is typing...</Text>
-              </View>
-            ) : null
-          )}
-        />
-      </View>
-
-      {/* Input Area */}
-      <View style={[styles.inputContainer, { paddingBottom: bottomPadding }]}>
-        <TouchableOpacity onPress={handleFeatureNotAdded} style={styles.plusBtn}>
-          <Feather name="plus" size={28} color="#000" />
-        </TouchableOpacity>
-        <View style={styles.inputWrapper}>
-          <TextInput
-            style={styles.textInput}
-            placeholder=""
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={500}
+      <KeyboardAvoidingView style={styles.flex1} behavior="padding" enabled={false}>
+        <View style={styles.messagesArea}>
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderMessage}
+            style={styles.messageList}
+            contentContainerStyle={[
+              styles.chatContent,
+              { paddingBottom: listBottomPadding },
+            ]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            onContentSizeChange={() => scrollToEnd(false)}
+            ListEmptyComponent={
+              <Text style={styles.emptyChat}>Say hello to {peer.name}!</Text>
+            }
+            ListFooterComponent={
+              isTyping ? (
+                <View style={styles.typingIndicatorContainer}>
+                  <Text style={styles.typingText}>{peer.name} is typing...</Text>
+                </View>
+              ) : null
+            }
           />
-          <TouchableOpacity onPress={handleFeatureNotAdded} style={styles.inputRightIcon}>
-            <Ionicons name="document-outline" size={22} color="#000" />
-          </TouchableOpacity>
+
+          <KeyboardStickyView offset={stickyOffset} style={styles.stickyWrapper}>
+            <View
+              onLayout={(e) => {
+                const h = Math.ceil(e.nativeEvent.layout.height);
+                if (h > 0 && h !== inputDockHeight) setInputDockHeight(h);
+              }}
+              style={styles.inputDock}
+            >
+              {renderChatInputBar()}
+            </View>
+          </KeyboardStickyView>
         </View>
-        {inputText.trim().length > 0 ? (
-          <TouchableOpacity style={styles.sendBtnActive} onPress={handleSend}>
-            <Ionicons name="send" size={20} color="#fff" />
-          </TouchableOpacity>
-        ) : (
-          <>
-            <TouchableOpacity onPress={handleFeatureNotAdded} style={styles.actionBtn}>
-              <Feather name="camera" size={24} color="#000" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={handleFeatureNotAdded} style={styles.actionBtn}>
-              <Feather name="mic" size={24} color="#000" />
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
-  container: {
-    flex: 1,
-  },
-  header: {
+  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  flex1: { flex: 1 },
+  header: { paddingBottom: 16 },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  connectingBackBtn: {
-    padding: 8,
-    marginLeft: -8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  headerRight: {
-    width: 40,
-  },
-  connectingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fafafa',
-  },
-  radarCircle: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: 'rgba(230, 0, 0, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 40,
-    borderWidth: 1,
-    borderColor: 'rgba(230, 0, 0, 0.3)',
-  },
-  connectingTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  connectingSub: {
-    fontSize: 14,
-    color: '#666',
-  },
-  chatHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 8,
-    paddingVertical: 10,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E0E0E0',
-  },
-  chatHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
+    minHeight: 56,
+    paddingRight: 12,
   },
   backBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingRight: 4,
-  },
-  unreadCount: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#000',
-    marginLeft: -4,
-    marginRight: 6,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginRight: 10,
-  },
-  peerAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#ccc',
-  },
-  disappearingBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: '#888',
-    borderRadius: 8,
-    width: 16,
-    height: 16,
+    width: 48,
+    height: 48,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderColor: '#F5F5F5',
+    marginLeft: 4,
   },
-  headerTextContainer: {
+  headerAvatarWrap: { position: 'relative', marginRight: 10 },
+  headerTextBlock: {
     flex: 1,
-    marginRight: 10,
+    justifyContent: 'center',
+    paddingVertical: 8,
+    minWidth: 0,
   },
-  peerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#000',
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1F1F1F',
   },
-  peerStatus: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 1,
+  headerSub: {
+    fontSize: 14,
+    fontWeight: '400',
+    color: '#5F6368',
+    marginTop: 2,
+    lineHeight: 20,
   },
-  chatHeaderRight: {
+  headerSubTyping: { color: '#00b894', fontWeight: '500' },
+  headerRightSpacer: { width: 12 },
+  actionPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    marginRight: 4,
-  },
-  headerIcon: {
-    padding: 4,
-  },
-  skipBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ffe5e5',
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 16,
-    gap: 4,
+    borderWidth: 1,
+    borderColor: '#E8EAED',
   },
-  skipBtnText: {
-    color: '#e60000',
-    fontWeight: 'bold',
-    fontSize: 13,
+  actionPillText: { fontSize: 14, fontWeight: '600', color: '#e60000' },
+  centeredBody: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  centeredTitle: {
+    fontSize: 16,
+    color: '#5F6368',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 22,
+  },
+  retryBtn: {
+    marginTop: 24,
+    backgroundColor: '#e60000',
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  peerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' },
+  peerAvatarPlaceholder: {
+    backgroundColor: '#e60000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  onlineBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: '#00b894',
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   infoBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#D1F4CC',
-    paddingHorizontal: 16,
+    backgroundColor: '#f0fff4',
+    paddingHorizontal: 14,
     paddingVertical: 8,
-    justifyContent: 'center',
-    gap: 6,
+    gap: 8,
   },
-  infoBannerText: {
-    fontSize: 11,
-    color: '#00b894',
-    fontWeight: '500',
-  },
-  chatBackground: {
+  infoBannerText: { flex: 1, fontSize: 12, color: '#2d6a4f' },
+  messagesArea: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#efeae2',
+  },
+  messageList: { flex: 1 },
+  stickyWrapper: {
+    width: '100%',
   },
   chatContent: {
-    padding: 16,
-    paddingBottom: 32,
+    paddingHorizontal: 10,
+    paddingTop: 12,
+    flexGrow: 1,
   },
-  messageWrapper: {
-    flexDirection: 'row',
-    marginBottom: 20,
-    alignItems: 'flex-end',
-  },
-  messageWrapperSelf: {
-    justifyContent: 'flex-end',
-  },
-  messageWrapperPeer: {
-    justifyContent: 'flex-start',
-  },
-  chatAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 8,
-    backgroundColor: '#ccc',
-  },
+  emptyChat: { textAlign: 'center', color: '#667781', marginTop: 40, fontSize: 15 },
+  messageWrapper: { marginBottom: 4, maxWidth: '82%' },
+  messageWrapperSelf: { alignSelf: 'flex-end' },
+  messageWrapperPeer: { alignSelf: 'flex-start' },
   messageBubble: {
-    maxWidth: '75%',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    maxWidth: '100%',
   },
   messageBubbleSelf: {
-    backgroundColor: '#e60000',
-    borderBottomRightRadius: 4,
+    backgroundColor: '#d9fdd3',
+    borderTopRightRadius: 0,
   },
   messageBubblePeer: {
-    backgroundColor: '#f0f0f0',
-    borderBottomLeftRadius: 4,
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 0,
   },
-  messageText: {
-    fontSize: 15,
-    lineHeight: 22,
+  messageText: { fontSize: 16, lineHeight: 21 },
+  messageTextSelf: { color: '#111b21' },
+  messageTextPeer: { color: '#111b21' },
+  typingIndicatorContainer: { paddingVertical: 6, paddingHorizontal: 4 },
+  typingText: { fontSize: 13, color: '#667781', fontStyle: 'italic' },
+  inputDock: {
+    backgroundColor: '#f0f2f5',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#d1d7db',
+    paddingTop: 6,
+    paddingHorizontal: 8,
+    paddingBottom: 6,
+    justifyContent: 'center',
   },
-
-  typingIndicatorContainer: {
-    marginLeft: 16,
-    marginBottom: 10,
-  },
-  typingText: {
-    fontSize: 12,
-    color: '#888',
-    fontStyle: 'italic',
-  },
-  inputContainer: {
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#ffffff',
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
+    gap: 8,
   },
-  plusBtn: {
-    padding: 8,
-    paddingBottom: 10,
-  },
-  inputWrapper: {
+  inputPill: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#fff',
     borderRadius: 24,
-    minHeight: 48,
+    paddingHorizontal: 16,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    minHeight: 44,
     maxHeight: 120,
-    marginHorizontal: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e9edef',
   },
   textInput: {
-    flex: 1,
     fontSize: 16,
-    color: '#333',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-    minHeight: 48,
+    lineHeight: 20,
+    color: '#111b21',
+    maxHeight: 100,
+    padding: 0,
+    margin: 0,
   },
-  inputRightIcon: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-  },
-  actionBtn: {
-    padding: 10,
-    paddingBottom: 12,
-  },
-  sendBtnActive: {
+  sendBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
     backgroundColor: '#e60000',
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 4,
     marginBottom: 2,
   },
 });

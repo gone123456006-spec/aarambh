@@ -4,6 +4,8 @@ import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AUTH_KEYS } from '@/utils/authStorage';
+import { useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
 export default function ProfileScreen() {
@@ -18,16 +20,15 @@ export default function ProfileScreen() {
     level: '',
   });
 
-  useEffect(() => {
-    const loadProfile = async () => {
+  const loadProfile = React.useCallback(async () => {
       try {
         const [name, region, gender, email, phone, level] = await Promise.all([
-          AsyncStorage.getItem('userName'),
-          AsyncStorage.getItem('userRegion'),
-          AsyncStorage.getItem('gender'),
-          AsyncStorage.getItem('userEmail'),
-          AsyncStorage.getItem('userPhone'),
-          AsyncStorage.getItem('level'),
+          AsyncStorage.getItem(AUTH_KEYS.userName),
+          AsyncStorage.getItem(AUTH_KEYS.userRegion),
+          AsyncStorage.getItem(AUTH_KEYS.gender),
+          AsyncStorage.getItem(AUTH_KEYS.userEmail),
+          AsyncStorage.getItem(AUTH_KEYS.userPhone),
+          AsyncStorage.getItem(AUTH_KEYS.level),
         ]);
         setProfile({
           name: name || 'User',
@@ -40,9 +41,17 @@ export default function ProfileScreen() {
       } catch (e) {
         console.error('Failed to load profile', e);
       }
-    };
-    loadProfile();
   }, []);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      loadProfile();
+    }, [loadProfile])
+  );
 
   return (
     <View style={styles.container}>

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,8 +13,9 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AUTH_KEYS } from '@/utils/authStorage';
 import Sidebar from '@/components/Sidebar';
 
 const { width } = Dimensions.get('window');
@@ -74,7 +75,7 @@ const LEARNING_ACTIONS = [
     title: 'Chat in English',
     imageUrl: 'https://img.icons8.com/3d-fluency/94/speech-bubble.png',
     bg: '#F3F0FF',
-    desc: 'Improve vocabulary by chatting',
+    desc: 'Chat with real learners live',
   },
   {
     id: 2,
@@ -95,7 +96,7 @@ const LEARNING_ACTIONS = [
 export default function HomeScreen() {
   const [isSidebarVisible, setSidebarVisible] = useState(false);
   const [activeBannerIndex, setActiveBannerIndex] = useState(0);
-  const [userName, setUserName] = useState('Shyam');
+  const [userName, setUserName] = useState('User');
   const router = useRouter();
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -112,21 +113,28 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [activeBannerIndex]);
 
-  useEffect(() => {
-    const loadUserName = async () => {
-      try {
-        const storedName = await AsyncStorage.getItem('userName');
-        if (storedName) {
-          // Get first name
-          const firstName = storedName.split(' ')[0];
-          setUserName(firstName);
-        }
-      } catch (e) {
-        console.error('Failed to load user name', e);
+  const loadUserName = useCallback(async () => {
+    try {
+      const storedName = await AsyncStorage.getItem(AUTH_KEYS.userName);
+      if (storedName?.trim()) {
+        setUserName(storedName.trim().split(' ')[0]);
+      } else {
+        setUserName('User');
       }
-    };
-    loadUserName();
+    } catch (e) {
+      console.error('Failed to load user name', e);
+    }
   }, []);
+
+  useEffect(() => {
+    loadUserName();
+  }, [loadUserName]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUserName();
+    }, [loadUserName])
+  );
 
   const [greetingIconFailed, setGreetingIconFailed] = useState(false);
 
@@ -172,7 +180,7 @@ export default function HomeScreen() {
           {/* Header navigation as a card */}
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <Image source={require('../../assets/images/app_logo.png')} style={styles.logoImage} resizeMode="contain" />
+              <Image source={require('../../assets/images/aarambh-icon.png')} style={styles.logoImage} resizeMode="contain" />
             </View>
             <View style={styles.headerRight}>
               <TouchableOpacity onPress={() => setSidebarVisible(true)}>
@@ -359,8 +367,8 @@ const styles = StyleSheet.create({
     marginLeft: -10,
   },
   logoImage: {
-    width: 130,
-    height: 40,
+    width: 44,
+    height: 44,
   },
   headerRight: {
     flexDirection: 'row',

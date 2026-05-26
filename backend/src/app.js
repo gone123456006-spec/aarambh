@@ -3,7 +3,10 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
+const { UPLOAD_ROOT, ensureUploadDirs } = require('./config/uploads');
 
+const { getPublicBaseUrl } = require('./config/env');
+const { getCorsOptions } = require('./config/cors');
 const errorHandler = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimiter');
 const ApiError = require('./utils/ApiError');
@@ -20,27 +23,53 @@ const notificationRoutes = require('./routes/notificationRoutes');
 
 const app = express();
 
-// Security Headers
-app.use(helmet());
+// Render / reverse proxy (rate limit + client IP)
+app.set('trust proxy', 1);
 
-// Cross-Origin Resource Sharing (CORS) Configuration
-const corsOptions = {
-  origin: process.env.CLIENT_URL === '*' ? true : process.env.CLIENT_URL,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-};
-app.use(cors(corsOptions));
+ensureUploadDirs();
+
+// Security Headers (allow mobile app to load /uploads videos & PDFs)
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
+
+app.use(cors(getCorsOptions()));
 
 // HTTP request logger
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
+} else {
+  app.use(morgan('combined'));
 }
+
+// Service root (Render health + quick sanity check)
+app.get('/', (req, res) => {
+  const base = getPublicBaseUrl();
+  res.status(200).json({
+    success: true,
+    service: 'aarambh-api',
+    health: base ? `${base}/health` : '/health',
+    api: base ? `${base}/api` : '/api',
+  });
+});
 
 // Body parsers & Cookie parser
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
+
+// Local uploads (videos, PDFs) — no Cloudinary
+app.use(
+  '/uploads',
+  (req, res, next) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    next();
+  },
+  express.static(UPLOAD_ROOT)
+);
 
 // Apply global rate limiting for general API calls
 app.use('/api', apiLimiter);

@@ -1,39 +1,59 @@
 require('dotenv').config();
-// Trigger restart
+
 const http = require('http');
 const { Server } = require('socket.io');
 const app = require('./src/app');
 const connectDB = require('./src/config/db');
+const { validateEnv, getPublicBaseUrl } = require('./src/config/env');
+const { ensureUploadDirs } = require('./src/config/uploads');
+const { getCorsOptions } = require('./src/config/cors');
 const configureChatSocket = require('./src/sockets/chatSocket');
+const { startKeepAlive, stopKeepAlive } = require('./src/utils/keepAlive');
 
-// Connect to MongoDB
-connectDB();
+validateEnv();
 
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT) || 5000;
+let keepAliveTimer = null;
 
-// Create HTTP server
-const server = http.createServer(app);
+async function startServer() {
+  ensureUploadDirs();
+  await connectDB();
 
-// Initialize Socket.io
-const io = new Server(server, {
-  cors: {
-    origin: process.env.CLIENT_URL === '*' ? true : process.env.CLIENT_URL,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    credentials: true,
-  },
-});
+  const server = http.createServer(app);
 
-// Configure Socket.io features (e.g. Chat System, matchmaking)
-configureChatSocket(io);
+  const io = new Server(server, {
+    cors: getCorsOptions(),
+  });
 
-// Start Server
-server.listen(PORT, () => {
-  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-});
+  configureChatSocket(io);
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err, promise) => {
-  console.error(`Unhandled Rejection Error: ${err.message}`);
-  // Close server & exit process
-  server.close(() => process.exit(1));
+  server.listen(PORT, '0.0.0.0', () => {
+    const publicUrl = getPublicBaseUrl();
+    console.log(
+      `Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`
+    );
+    if (publicUrl) {
+      console.log(`Public URL: ${publicUrl}`);
+      console.log(`Health: ${publicUrl}/health`);
+    } else {
+      console.log(`Health: http://localhost:${PORT}/health`);
+    }
+    keepAliveTimer = startKeepAlive();
+  });
+
+  server.on('close', () => {
+    stopKeepAlive(keepAliveTimer);
+  });
+
+  process.on('unhandledRejection', (err) => {
+    console.error(`Unhandled Rejection: ${err?.message || err}`);
+    server.close(() => process.exit(1));
+  });
+
+  return server;
+}
+
+startServer().catch((err) => {
+  console.error(`Failed to start server: ${err.message}`);
+  process.exit(1);
 });

@@ -1,4 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiFetch } from '@/utils/api';
+import { getAccessToken } from '@/utils/authStorage';
+import { userScopedKey } from '@/utils/userStorage';
 import { POINTS_PER_CORRECT_LEVEL } from '@/constants/gameData';
 import { GameId } from '@/utils/gameProgress';
 
@@ -14,7 +17,8 @@ const EMPTY: GameStats = { correct: 0, incorrect: 0, points: 0 };
 
 async function readAll(): Promise<Partial<Record<GameId, GameStats>>> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const key = await userScopedKey(STORAGE_KEY);
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) return {};
     return JSON.parse(raw);
   } catch {
@@ -48,10 +52,33 @@ export async function recordGameAnswer(gameId: GameId, correct: boolean): Promis
       stats.incorrect += 1;
     }
     all[gameId] = stats;
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    const key = await userScopedKey(STORAGE_KEY);
+    await AsyncStorage.setItem(key, JSON.stringify(all));
+    const token = await getAccessToken();
+    if (token) {
+      await apiFetch('/api/games/score', {
+        method: 'POST',
+        body: JSON.stringify({ gameId, isCorrect: correct }),
+      });
+    }
   } catch (e) {
     console.error('Failed to record game stats', e);
   }
+}
+
+export async function getTotalGameScore(): Promise<number> {
+  try {
+    const key = await userScopedKey('totalGameScore');
+    const raw = await AsyncStorage.getItem(key);
+    return raw ? parseInt(raw, 10) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function setTotalGameScore(score: number): Promise<void> {
+  const key = await userScopedKey('totalGameScore');
+  await AsyncStorage.setItem(key, String(score));
 }
 
 export function getTotals(stats: Record<GameId, GameStats>) {

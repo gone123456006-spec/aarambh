@@ -5,6 +5,7 @@ const uploadService = require('../services/uploadService');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
+const { isUserProfileComplete } = require('../utils/profileUtils');
 
 /**
  * Get authenticated user profile
@@ -28,6 +29,10 @@ const updateProfile = asyncHandler(async (req, res) => {
   if (level !== undefined) updateData.level = level;
   if (referralCode !== undefined) updateData.referralCode = referralCode;
 
+  if (isUserProfileComplete({ ...req.user.toObject(), ...updateData })) {
+    updateData.profileCompleted = true;
+  }
+
   const updatedUser = await User.findByIdAndUpdate(
     req.user._id,
     { $set: updateData },
@@ -38,35 +43,16 @@ const updateProfile = asyncHandler(async (req, res) => {
 });
 
 /**
- * Upload and update user avatar image
+ * Upload and update user avatar image (local disk)
  */
 const updateAvatar = asyncHandler(async (req, res) => {
-  if (!req.file) {
-    throw new ApiError(400, 'Please provide an image file');
-  }
+  const uploadResult = uploadService.saveAvatar(req);
 
-  // Upload file buffer to Cloudinary
-  const uploadResult = await uploadService.uploadToCloudinary(
-    req.file.buffer,
-    'avatars',
-    'image'
-  );
-
-  // If user already had an avatar in Cloudinary, we should ideally delete it
   const user = await User.findById(req.user._id);
-  if (user.avatar && user.avatar.includes('cloudinary')) {
-    // Extract public_id from secure URL
-    try {
-      const parts = user.avatar.split('/');
-      const filename = parts[parts.length - 1];
-      const publicId = `aarambh/avatars/${filename.split('.')[0]}`;
-      await uploadService.deleteFromCloudinary(publicId, 'image');
-    } catch (err) {
-      console.error('Failed to delete old avatar:', err);
-    }
+  if (user.avatar) {
+    uploadService.deleteLocalAsset(user.avatar);
   }
 
-  // Save new URL to user profile
   user.avatar = uploadResult.url;
   await user.save();
 

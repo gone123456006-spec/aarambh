@@ -3,12 +3,12 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity, TouchableWithoutFeedba
 import { Feather, Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
 
 
-import { useRouter, router as expoRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AUTH_KEYS } from '@/utils/authStorage';
+import { performLogout } from '@/utils/session';
 
 const { width } = Dimensions.get('window');
-
-const SESSION_KEYS = ['userName', 'userRegion', 'gender', 'level', 'userEmail', 'userPhone'];
 
 interface SidebarProps {
   visible: boolean;
@@ -22,8 +22,8 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
 
   React.useEffect(() => {
     const loadUser = async () => {
-      const name = await AsyncStorage.getItem('userName');
-      if (name) setUserName(name);
+      const name = await AsyncStorage.getItem(AUTH_KEYS.userName);
+      setUserName(name?.trim() || 'User');
     };
     if (visible) loadUser();
   }, [visible]);
@@ -38,13 +38,14 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
     setIsLoggingOut(true);
     onClose();
     try {
-      await AsyncStorage.multiRemove(SESSION_KEYS);
+      await performLogout();
     } catch (e) {
-      console.error('Failed to clear session on logout', e);
+      console.error('Logout failed', e);
+    } finally {
+      setUserName('User');
+      router.replace('/intro');
+      setIsLoggingOut(false);
     }
-    expoRouter.dismissAll();
-    expoRouter.replace('/intro');
-    setIsLoggingOut(false);
   };
 
   return (

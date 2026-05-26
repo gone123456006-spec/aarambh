@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const Otp = require('../models/Otp');
 const transporter = require('../config/nodemailer');
+const { smtpConfigured } = require('../config/nodemailer');
 const ApiError = require('../utils/ApiError');
 const { OTP_EXPIRY_MINUTES, MAX_OTP_ATTEMPTS } = require('../utils/constants');
 
@@ -15,19 +16,44 @@ const generateOtpCode = () => {
  * Send OTP to the specified Gmail address
  */
 const sendOtpEmail = async (email, otpCode) => {
+  if (!smtpConfigured) {
+    throw new ApiError(
+      500,
+      'Email service is not configured. Set SMTP_USER and SMTP_PASS in backend/.env (Gmail App Password).'
+    );
+  }
+
   const mailOptions = {
     from: `"Aarambh English" <${process.env.SMTP_USER}>`,
     to: email,
-    subject: 'Aarambh English - Verification OTP',
+    subject: 'Verification code',
+    text: `Your verification code ${otpCode} for verification of Aarambh app.\n\nDo not share this verification code with anyone. Valid for ${OTP_EXPIRY_MINUTES} minutes.\n\nIf you did not request this, ignore this email.`,
     html: `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 500px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #ffffff;">
-        <h2 style="color: #e60000; text-align: center; margin-bottom: 20px;">Aarambh English Verification</h2>
-        <p style="font-size: 16px; color: #333333; line-height: 1.5;">Hello,</p>
-        <p style="font-size: 16px; color: #333333; line-height: 1.5;">Thank you for choosing Aarambh. Use the following 6-digit OTP to complete your verification. This code is valid for <b>${OTP_EXPIRY_MINUTES} minutes</b>:</p>
-        <div style="text-align: center; margin: 30px 0;">
-          <span style="font-size: 32px; font-weight: bold; color: #e60000; letter-spacing: 5px; padding: 10px 20px; background-color: #fff0f0; border-radius: 5px; border: 1px dashed #e60000;">${otpCode}</span>
+      <div style="margin:0;padding:32px 16px;background-color:#f5f5f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;border:1px solid #e8e8e8;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <div style="height:4px;background:linear-gradient(90deg,#e60000,#ff4d4d);"></div>
+          <div style="padding:28px 24px 20px;">
+            <p style="margin:0 0 20px;font-size:17px;line-height:1.6;color:#1a1a1a;">
+              Your verification code
+              <strong style="font-size:22px;color:#e60000;letter-spacing:3px;font-weight:700;">${otpCode}</strong>
+              for verification of Aarambh app.
+            </p>
+            <p style="margin:0;font-size:13px;line-height:1.5;color:#888;">
+              Valid for ${OTP_EXPIRY_MINUTES} minutes.
+            </p>
+          </div>
+          <div style="padding:16px 24px 24px;background:#fafafa;border-top:1px solid #eee;">
+            <p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#555;font-weight:600;">
+              Disclaimer
+            </p>
+            <p style="margin:0;font-size:13px;line-height:1.55;color:#666;">
+              Do not share this verification code with anyone — not even Aarambh staff. We will never ask for your code by phone, chat, or email.
+            </p>
+            <p style="margin:14px 0 0;font-size:12px;line-height:1.5;color:#999;">
+              If you did not request this code, you can safely ignore this email.
+            </p>
+          </div>
         </div>
-        <p style="font-size: 14px; color: #666666; line-height: 1.5; border-top: 1px solid #eeeeee; padding-top: 15px; margin-top: 30px;">If you did not request this verification, please ignore this email.</p>
       </div>
     `,
   };
@@ -36,7 +62,11 @@ const sendOtpEmail = async (email, otpCode) => {
     await transporter.sendMail(mailOptions);
   } catch (error) {
     console.error('SMTP Email Error:', error);
-    throw new ApiError(500, 'Failed to send OTP email. Please check SMTP configuration.');
+    const hint =
+      error.code === 'EAUTH'
+        ? 'Gmail login failed. Use an App Password (not your normal password) in SMTP_PASS.'
+        : 'Check SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS in backend/.env.';
+    throw new ApiError(500, `Failed to send OTP email. ${hint}`);
   }
 };
 

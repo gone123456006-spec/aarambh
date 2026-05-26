@@ -1,16 +1,39 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COURSE_DATA, LevelId, TOTAL_LESSONS } from '@/constants/courseData';
+import { apiFetch } from '@/utils/api';
+import { getAccessToken } from '@/utils/authStorage';
+import { userScopedKey } from '@/utils/userStorage';
 
 export const COMPLETED_LESSONS_KEY = 'completedLessons';
 export const LAST_LESSON_KEY = 'lastLessonId';
 
 export async function loadCourseProgress() {
-  const saved = await AsyncStorage.getItem(COMPLETED_LESSONS_KEY);
-  const last = await AsyncStorage.getItem(LAST_LESSON_KEY);
+  const completedKey = await userScopedKey(COMPLETED_LESSONS_KEY);
+  const lastKey = await userScopedKey(LAST_LESSON_KEY);
+  const saved = await AsyncStorage.getItem(completedKey);
+  const last = await AsyncStorage.getItem(lastKey);
   return {
     completedLessons: saved ? (JSON.parse(saved) as string[]) : [],
-    lastLessonId: last,
+    lastLessonId: last || null,
   };
+}
+
+export async function saveCourseProgress(completedLessons: string[], lastLessonId: string | null) {
+  const completedKey = await userScopedKey(COMPLETED_LESSONS_KEY);
+  const lastKey = await userScopedKey(LAST_LESSON_KEY);
+  await AsyncStorage.multiSet([
+    [completedKey, JSON.stringify(completedLessons)],
+    [lastKey, lastLessonId ?? ''],
+  ]);
+}
+
+export async function syncLessonToServer(lessonId: string, isCompleted = true) {
+  const token = await getAccessToken();
+  if (!token) return;
+  await apiFetch('/api/courses/progress', {
+    method: 'POST',
+    body: JSON.stringify({ lessonId, isCompleted }),
+  });
 }
 
 export function getOverallProgress(completedLessons: string[]) {

@@ -1,4 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiFetch } from '@/utils/api';
+import { getAccessToken } from '@/utils/authStorage';
+import { userScopedKey } from '@/utils/userStorage';
 
 export type GameId = 'quiz' | 'scramble' | 'fill' | 'flash';
 
@@ -13,7 +16,8 @@ const DEFAULT: GameProgress = { level: 0, score: 0 };
 
 async function readAll(): Promise<Partial<Record<GameId, GameProgress>>> {
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const key = await userScopedKey(STORAGE_KEY);
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) return {};
     return JSON.parse(raw);
   } catch {
@@ -48,7 +52,19 @@ export async function saveGameProgress(gameId: GameId, progress: GameProgress): 
       level: Math.max(0, progress.level),
       score: Math.max(0, progress.score),
     };
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    const key = await userScopedKey(STORAGE_KEY);
+    await AsyncStorage.setItem(key, JSON.stringify(all));
+    const token = await getAccessToken();
+    if (token) {
+      await apiFetch('/api/games/progress', {
+        method: 'POST',
+        body: JSON.stringify({
+          gameId,
+          level: progress.level,
+          score: progress.score,
+        }),
+      });
+    }
   } catch (e) {
     console.error('Failed to save game progress', e);
   }
@@ -58,7 +74,8 @@ export async function clearGameProgress(gameId: GameId): Promise<void> {
   try {
     const all = await readAll();
     delete all[gameId];
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    const key = await userScopedKey(STORAGE_KEY);
+    await AsyncStorage.setItem(key, JSON.stringify(all));
   } catch (e) {
     console.error('Failed to clear game progress', e);
   }

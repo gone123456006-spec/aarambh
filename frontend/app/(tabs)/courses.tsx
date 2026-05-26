@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet, View, Text, ScrollView, TouchableOpacity,
   Platform, StatusBar, Dimensions,
@@ -21,9 +21,8 @@ import {
   getQuizExplanation,
   shortExplanation,
 } from '@/constants/gameData';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const TOTAL_SCORE_KEY = 'totalGameScore';
+import { getTotalGameScore, setTotalGameScore } from '@/utils/gameStats';
+import { useFocusEffect } from 'expo-router';
 import { useGameProgress } from '@/hooks/use-game-progress';
 import { GameId, loadAllGameProgress, GameProgress } from '@/utils/gameProgress';
 import { recordGameAnswer } from '@/utils/gameStats';
@@ -664,20 +663,27 @@ export default function GamesScreen() {
     }
   }, [activeGame]);
 
-  useEffect(() => {
+  const refreshScores = useCallback(async () => {
     loadAllGameProgress().then(setSavedProgress);
-    AsyncStorage.getItem(TOTAL_SCORE_KEY).then((raw) => {
-      setTotalScore(raw ? parseInt(raw, 10) || 0 : 0);
-    });
+    setTotalScore(await getTotalGameScore());
   }, []);
+
+  useEffect(() => {
+    refreshScores();
+  }, [refreshScores]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshScores();
+    }, [refreshScores])
+  );
 
   const handleScore = async (points: number) => {
     if (points <= 0) return;
     try {
-      const raw = await AsyncStorage.getItem(TOTAL_SCORE_KEY);
-      const current = raw ? parseInt(raw, 10) || 0 : 0;
+      const current = await getTotalGameScore();
       const next = current + points;
-      await AsyncStorage.setItem(TOTAL_SCORE_KEY, String(next));
+      await setTotalGameScore(next);
       setTotalScore(next);
     } catch (e) {
       console.error('Failed to save game score', e);

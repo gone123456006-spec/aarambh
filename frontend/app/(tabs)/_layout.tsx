@@ -1,7 +1,9 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
+import { Tabs, useRouter } from 'expo-router';
+import React, { useCallback } from 'react';
 import { Platform, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
+import { getAccessToken } from '@/utils/authStorage';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
@@ -9,8 +11,23 @@ import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function TabLayout() {
+  const router = useRouter();
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      getAccessToken().then((token) => {
+        if (active && !token) {
+          router.replace('/intro');
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }, [router])
+  );
   const tabBarMargin = Platform.OS === 'ios' ? 26 : 20;
   const tabBarBottom = Math.max(insets.bottom - 30, 0);
   const tabBarTotalHeight = 50 + tabBarBottom + tabBarMargin;

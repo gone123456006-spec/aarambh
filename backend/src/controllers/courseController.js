@@ -3,13 +3,15 @@ const CourseProgress = require('../models/CourseProgress');
 const ApiResponse = require('../utils/ApiResponse');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
+const { applyCourseMediaAvailability } = require('../utils/mediaAvailability');
 
 /**
  * Get all courses, grouped or sorted by level
  */
 const getCourses = asyncHandler(async (req, res) => {
   const courses = await Course.find({}).sort({ createdAt: 1 });
-  res.status(200).json(new ApiResponse(200, courses, 'Courses retrieved successfully'));
+  const withMedia = courses.map(applyCourseMediaAvailability);
+  res.status(200).json(new ApiResponse(200, withMedia, 'Courses retrieved successfully'));
 });
 
 /**
@@ -34,7 +36,9 @@ const getCourseById = asyncHandler(async (req, res) => {
   course.views += 1;
   await course.save();
 
-  res.status(200).json(new ApiResponse(200, course, 'Course retrieved successfully'));
+  res.status(200).json(
+    new ApiResponse(200, applyCourseMediaAvailability(course), 'Course retrieved successfully')
+  );
 });
 
 /**
