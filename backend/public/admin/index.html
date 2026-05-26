@@ -3,128 +3,188 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Aarambh Admin — Upload Videos & PDFs</title>
+    <title>Aarambh Admin Dashboard</title>
     <link rel="stylesheet" href="/admin/admin.css" />
   </head>
   <body>
     <header>
-      <h1>Aarambh Admin</h1>
-      <p>Upload lesson videos & PDFs for your app users</p>
+      <h1>Aarambh Admin Dashboard</h1>
+      <p>Users, stats, and lesson uploads</p>
     </header>
 
     <main>
       <div id="globalStatus" class="status hidden"></div>
 
-      <!-- Login -->
       <section id="loginCard" class="card">
-        <h2>1. Admin login (Gmail OTP)</h2>
+        <h2>Admin login</h2>
         <p style="font-size: 0.88rem; color: #636e72; margin: 0 0 1rem">
-          Your Gmail must have <strong>role: admin</strong> in MongoDB Atlas.
+          Sign in with your <strong>User ID</strong> and <strong>Password</strong> (no Gmail).
         </p>
-        <label for="email">Gmail</label>
-        <input id="email" type="email" placeholder="you@gmail.com" autocomplete="email" />
-
-        <div class="row">
-          <button type="button" id="sendOtpBtn">Send OTP</button>
-        </div>
-
-        <div id="otpRow" class="hidden">
-          <label for="otp">6-digit OTP</label>
-          <input id="otp" type="text" maxlength="6" placeholder="123456" inputmode="numeric" />
-          <button type="button" id="verifyOtpBtn">Verify & enter dashboard</button>
-        </div>
-
+        <form id="loginForm">
+          <label for="username">User ID</label>
+          <input
+            id="username"
+            type="text"
+            placeholder="Aarambh@12342"
+            autocomplete="username"
+            required
+          />
+          <label for="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            placeholder="••••••••"
+            autocomplete="current-password"
+            required
+          />
+          <button type="submit" id="loginBtn">Sign in</button>
+        </form>
         <div id="loginStatus" class="status hidden"></div>
       </section>
 
-      <!-- Dashboard -->
       <div id="dashboard" class="hidden">
-        <div class="card">
-          <p>
-            Signed in as <strong id="userBadge"></strong>
-            <button type="button" id="logoutBtn" class="secondary" style="float: right; padding: 0.4rem 0.8rem">
-              Log out
-            </button>
-          </p>
+        <div class="card top-bar">
+          <div>
+            <span>Signed in as <strong id="userBadge"></strong></span>
+            <p id="autoRefreshHint" style="font-size: 0.8rem; color: #636e72; margin: 0.35rem 0 0">
+              Auto-refresh every 1 minute
+            </p>
+          </div>
+          <div class="row">
+            <button type="button" id="refreshBtn" class="ghost">Refresh</button>
+            <button type="button" id="logoutBtn" class="secondary">Log out</button>
+          </div>
         </div>
 
-        <section class="card">
-          <h2>2. Create course (first time only)</h2>
-          <label for="newCourseTitle">Title</label>
-          <input id="newCourseTitle" type="text" placeholder="Beginner English" />
-          <label for="newCourseLevel">Level</label>
-          <select id="newCourseLevel">
-            <option value="beginner">beginner</option>
-            <option value="intermediate">intermediate</option>
-            <option value="advanced">advanced</option>
-          </select>
-          <button type="button" id="createCourseBtn">Create course</button>
-          <div id="createCourseStatus" class="status hidden"></div>
-        </section>
+        <nav class="tabs" role="tablist">
+          <button type="button" class="tab active" data-tab="overview">Overview</button>
+          <button type="button" class="tab" data-tab="users">Users</button>
+          <button type="button" class="tab" data-tab="content">Upload content</button>
+        </nav>
 
-        <section class="card">
-          <h2>3. Upload video</h2>
-          <input id="videoFile" type="file" accept="video/*" />
-          <button type="button" id="uploadVideoBtn">Upload video</button>
-          <div id="videoStatus" class="status hidden"></div>
-          <div id="videoPreview" class="preview"></div>
-        </section>
+        <!-- OVERVIEW -->
+        <div id="panel-overview" class="tab-panel">
+          <section class="card">
+            <h2>User statistics</h2>
+            <div id="statsGrid" class="stats-grid">
+              <p style="color: #636e72">Loading…</p>
+            </div>
+            <p id="statsUpdated" style="font-size: 0.8rem; color: #636e72; margin: 0.5rem 0 0"></p>
+          </section>
+          <section class="card">
+            <h2>Quick legend</h2>
+            <ul style="font-size: 0.88rem; color: #636e72; margin: 0; padding-left: 1.2rem">
+              <li><strong>Total users</strong> — registered app users</li>
+              <li><strong>Online now</strong> — connected via chat socket</li>
+              <li><strong>Logged in</strong> — has an active refresh session</li>
+              <li><strong>Active (24h)</strong> — seen in the last 24 hours</li>
+            </ul>
+          </section>
+        </div>
 
-        <section class="card">
-          <h2>4. Upload PDF</h2>
-          <input id="pdfFile" type="file" accept="application/pdf" />
-          <button type="button" id="uploadPdfBtn">Upload PDF</button>
-          <div id="pdfStatus" class="status hidden"></div>
-          <div id="pdfPreview" class="preview"></div>
-        </section>
+        <!-- USERS -->
+        <div id="panel-users" class="tab-panel hidden">
+          <section class="card">
+            <h2>All users</h2>
+            <div class="toolbar">
+              <input id="userSearch" type="search" placeholder="Search email, name, phone…" />
+              <select id="userFilter">
+                <option value="all">All users</option>
+                <option value="online">Online now</option>
+                <option value="logged_in">Logged in (session)</option>
+                <option value="profile_complete">Profile complete</option>
+              </select>
+              <button type="button" id="searchUsersBtn">Search</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Level</th>
+                    <th>Status</th>
+                    <th>Last seen</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                  <tr><td colspan="6">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="pagination">
+              <span id="usersPageInfo">Page 1</span>
+              <div class="row">
+                <button type="button" id="prevPageBtn" class="secondary" disabled>Previous</button>
+                <button type="button" id="nextPageBtn" class="secondary">Next</button>
+              </div>
+            </div>
+          </section>
+        </div>
 
-        <section class="card">
-          <h2>5. Add lesson to course</h2>
-          <p style="font-size: 0.88rem; color: #636e72; margin: 0 0 1rem">
-            URLs from step 2 & 3 are filled automatically. Media appears in the app after ~30 seconds.
-          </p>
+        <!-- CONTENT UPLOAD -->
+        <div id="panel-content" class="tab-panel hidden">
+          <section class="card">
+            <h2>Create course</h2>
+            <label for="newCourseTitle">Title</label>
+            <input id="newCourseTitle" type="text" placeholder="Beginner English" />
+            <label for="newCourseLevel">Level</label>
+            <select id="newCourseLevel">
+              <option value="beginner">beginner</option>
+              <option value="intermediate">intermediate</option>
+              <option value="advanced">advanced</option>
+            </select>
+            <button type="button" id="createCourseBtn">Create course</button>
+            <div id="createCourseStatus" class="status hidden"></div>
+          </section>
 
-          <label for="courseId">Course</label>
-          <select id="courseId"></select>
+          <section class="card">
+            <h2>Upload video</h2>
+            <input id="videoFile" type="file" accept="video/*" />
+            <button type="button" id="uploadVideoBtn">Upload video</button>
+            <div id="videoStatus" class="status hidden"></div>
+            <div id="videoPreview" class="preview"></div>
+          </section>
 
-          <label for="lessonTitle">Lesson title</label>
-          <input id="lessonTitle" type="text" placeholder="Lesson 1 — Introduction" />
+          <section class="card">
+            <h2>Upload PDF</h2>
+            <input id="pdfFile" type="file" accept="application/pdf" />
+            <button type="button" id="uploadPdfBtn">Upload PDF</button>
+            <div id="pdfStatus" class="status hidden"></div>
+            <div id="pdfPreview" class="preview"></div>
+          </section>
 
-          <label for="lessonDuration">Duration</label>
-          <input id="lessonDuration" type="text" placeholder="12:30" />
-
-          <label for="lessonPdfTitle">PDF title (shown in app)</label>
-          <input id="lessonPdfTitle" type="text" placeholder="Lesson 1 — Notes PDF" />
-
-          <label for="lessonDesc">Description</label>
-          <textarea id="lessonDesc" rows="3" placeholder="Lesson summary…"></textarea>
-
-          <label for="lessonVideoUrl">Video URL (auto-filled)</label>
-          <input id="lessonVideoUrl" type="text" readonly />
-
-          <label for="lessonVideoAt">Video available at (ISO)</label>
-          <input id="lessonVideoAt" type="text" readonly />
-
-          <label for="lessonPdfUrl">PDF URL (auto-filled)</label>
-          <input id="lessonPdfUrl" type="text" readonly />
-
-          <label for="lessonPdfAt">PDF available at (ISO)</label>
-          <input id="lessonPdfAt" type="text" readonly />
-
-          <button type="button" id="addLessonBtn">Save lesson to course</button>
-          <div id="lessonStatus" class="status hidden"></div>
-        </section>
-
-        <section class="card">
-          <h2>Stats</h2>
-          <p style="font-size: 0.88rem; color: #636e72">
-            API stats:
-            <a href="/api/admin/dashboard" target="_blank" rel="noopener">/api/admin/dashboard</a>
-            (JSON, needs login token)
-          </p>
-        </section>
+          <section class="card">
+            <h2>Add lesson to course</h2>
+            <label for="courseId">Course</label>
+            <select id="courseId"></select>
+            <label for="lessonTitle">Lesson title</label>
+            <input id="lessonTitle" type="text" />
+            <label for="lessonDuration">Duration</label>
+            <input id="lessonDuration" type="text" placeholder="12:30" />
+            <label for="lessonPdfTitle">PDF title</label>
+            <input id="lessonPdfTitle" type="text" />
+            <label for="lessonDesc">Description</label>
+            <textarea id="lessonDesc" rows="3"></textarea>
+            <input id="lessonVideoUrl" type="hidden" />
+            <input id="lessonVideoAt" type="hidden" />
+            <input id="lessonPdfUrl" type="hidden" />
+            <input id="lessonPdfAt" type="hidden" />
+            <button type="button" id="addLessonBtn">Save lesson</button>
+            <div id="lessonStatus" class="status hidden"></div>
+          </section>
+        </div>
       </div>
     </main>
+
+    <div id="userModal" class="modal-backdrop hidden" aria-hidden="true">
+      <div class="modal" role="dialog">
+        <h3>User details</h3>
+        <div id="userModalBody">Loading…</div>
+        <button type="button" id="closeModalBtn" class="secondary" style="margin-top: 1rem">Close</button>
+      </div>
+    </div>
 
     <footer>Aarambh · <span id="apiHost"></span></footer>
     <script>

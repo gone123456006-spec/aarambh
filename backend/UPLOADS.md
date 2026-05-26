@@ -1,5 +1,13 @@
 # Local uploads (videos & PDFs)
 
+## Web dashboard (easiest)
+
+**https://aarambh-api.onrender.com/admin/**
+
+Log in with admin username & password → upload video/PDF → add lesson to a course.
+
+---
+
 Cloudinary has been removed. Files are stored under `backend/uploads/` and served at `/uploads/...`.
 
 ## Admin upload (Bearer token, admin role)

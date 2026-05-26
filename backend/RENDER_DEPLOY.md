@@ -52,10 +52,29 @@ Render injects automatically:
 - `RENDER=true`
 - `RENDER_EXTERNAL_URL` → `https://your-service.onrender.com`
 
-## 5. Verify deploy
+## 5. Admin dashboard (users + uploads)
+
+Open in your browser:
+
+**https://aarambh-api.onrender.com/admin/**
+
+1. Log in with **User ID** + **password** (`ADMIN_USERNAME` / `ADMIN_PASSWORD` in Render env — no Gmail).
+2. **Overview** — total users, online, logged in, active (24h), etc.
+3. **Users** — search, filter, view details (profile, progress, games).
+4. **Upload content** — videos, PDFs, lessons.
+
+Set in Render → Environment:
+
+```env
+ADMIN_USERNAME=Aarambh@12342
+ADMIN_PASSWORD=your_strong_password_here
+ADMIN_DB_EMAIL=aarambh-admin@system.local
+```
+
+## 6. Verify deploy
 
 ```text
-https://YOUR-SERVICE.onrender.com/health
+https://aarambh-api.onrender.com/health
 ```
 
 Expected JSON: `"status": "UP"`.
@@ -63,18 +82,18 @@ Expected JSON: `"status": "UP"`.
 Test OTP:
 
 ```text
-POST https://YOUR-SERVICE.onrender.com/api/auth/send-otp
+POST https://aarambh-api.onrender.com/api/auth/send-otp
 Content-Type: application/json
 
 {"email":"you@gmail.com"}
 ```
 
-## 6. Connect Expo frontend (two phones / any network)
+## 7. Connect Expo frontend (two phones / any network)
 
 In `frontend/.env`:
 
 ```env
-EXPO_PUBLIC_REMOTE_API_URL=https://YOUR-SERVICE.onrender.com
+EXPO_PUBLIC_REMOTE_API_URL=https://aarambh-api.onrender.com
 EXPO_PUBLIC_API_PORT=5000
 ```
 
@@ -87,16 +106,13 @@ npx expo start --clear
 
 Login screen should show **Server connected** with the `onrender.com` URL.
 
-## 7. Admin user
+## 8. Admin login
 
-There is no password login UI. After deploy, in MongoDB Atlas → **Browse Collections** → `users`:
+Dashboard: **https://aarambh-api.onrender.com/admin/** — sign in with User ID `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
 
-- Find your Gmail user after first OTP login, set `role` to `"admin"`,  
-  **or** insert a user document with `email`, `role: "admin"`, `profileCompleted: true`.
+Gmail is **not** used for admin login. A system admin record is stored in MongoDB under `ADMIN_DB_EMAIL`.
 
-Admin API: `GET /api/admin/dashboard` with `Authorization: Bearer <accessToken>`.
-
-## 8. Free tier notes
+## 9. Free tier notes
 
 - Service sleeps after ~15 min idle; first request may take 30–60s.
 - Keep-alive pings `/health` every 60s when `KEEP_ALIVE_ENABLED=true`.

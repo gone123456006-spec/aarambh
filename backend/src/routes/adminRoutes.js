@@ -4,15 +4,28 @@ const adminController = require('../controllers/adminController');
 const { protect, adminOnly } = require('../middleware/auth');
 const { uploadVideo, uploadPdf } = require('../middleware/upload');
 const validate = require('../middleware/validate');
+const { authLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
-// Apply admin protection middleware globally to all sub-routes
+router.post(
+  '/login',
+  authLimiter,
+  [
+    body('username').trim().notEmpty().withMessage('Username is required'),
+    body('password').notEmpty().withMessage('Password is required'),
+  ],
+  validate,
+  adminController.adminLogin
+);
+
 router.use(protect, adminOnly);
 
 router.get('/dashboard', adminController.getDashboardStats);
 
 router.get('/users', adminController.getUsers);
+
+router.get('/users/:id', adminController.getUserById);
 
 router.post(
   '/courses',

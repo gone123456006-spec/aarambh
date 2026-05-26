@@ -39,12 +39,18 @@ function parseEnv(content) {
   return map;
 }
 
+const RENDER_API_URL = 'https://aarambh-api.onrender.com';
+
 const ip = pickLanIpv4();
 const port = process.env.EXPO_PUBLIC_API_PORT || '5000';
 const envPath = path.join(__dirname, '..', '.env');
 
 const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
 const vars = parseEnv(existing);
+
+if (!vars.EXPO_PUBLIC_REMOTE_API_URL) {
+  vars.EXPO_PUBLIC_REMOTE_API_URL = RENDER_API_URL;
+}
 
 if (!ip) {
   console.warn('[sync-api-env] No LAN IPv4 found. Set EXPO_PUBLIC_API_URL manually.');
@@ -55,13 +61,10 @@ vars.EXPO_PUBLIC_API_URL = `http://${ip}:${port}`;
 vars.EXPO_PUBLIC_API_PORT = port;
 
 const lines = [
-  '# Auto-generated LAN API (PC on same Wi‑Fi as phones).',
-  '# For 2 phones on Expo tunnel / different networks, set EXPO_PUBLIC_REMOTE_API_URL (see .env.example).',
+  '# Render API (used by app — phones anywhere)',
+  `EXPO_PUBLIC_REMOTE_API_URL=${vars.EXPO_PUBLIC_REMOTE_API_URL}`,
+  '# Local LAN fallback (same Wi‑Fi as PC)',
 ];
-
-if (vars.EXPO_PUBLIC_REMOTE_API_URL) {
-  lines.push(`EXPO_PUBLIC_REMOTE_API_URL=${vars.EXPO_PUBLIC_REMOTE_API_URL}`);
-}
 lines.push(`EXPO_PUBLIC_API_URL=${vars.EXPO_PUBLIC_API_URL}`);
 lines.push(`EXPO_PUBLIC_API_PORT=${vars.EXPO_PUBLIC_API_PORT}`);
 lines.push('');

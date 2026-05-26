@@ -38,7 +38,5 @@ services:
         sync: false
       - key: SMTP_PASS
         sync: false
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
+      # Admin login — add ONLY ONCE in Render Dashboard (do not duplicate keys):
+      # ADMIN_USERNAME, ADMIN_PASSWORD, ADMIN_DB_EMAIL

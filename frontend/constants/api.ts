@@ -3,6 +3,9 @@ import Constants from 'expo-constants';
 
 const API_PORT = process.env.EXPO_PUBLIC_API_PORT ?? '5000';
 
+/** Deployed backend on Render */
+export const RENDER_API_URL = 'https://aarambh-api.onrender.com';
+
 /** True for 192.168.x.x / 172.x.x.x style hosts from `expo start --lan`. */
 function isLanIpHost(host: string): boolean {
   if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)) return false;
@@ -46,13 +49,18 @@ function getFallbackDevHost(): string {
  * 3. EXPO_PUBLIC_API_URL in .env — your PC LAN IP
  */
 function resolveApiBaseUrl(): string {
-  const remoteUrl = process.env.EXPO_PUBLIC_REMOTE_API_URL?.trim();
-  if (__DEV__ && remoteUrl) {
-    return remoteUrl.replace(/\/$/, '');
+  const remoteFromEnv = process.env.EXPO_PUBLIC_REMOTE_API_URL?.trim();
+  if (remoteFromEnv) {
+    return remoteFromEnv.replace(/\/$/, '');
+  }
+
+  // Production builds: default to Render when env is baked in at build time
+  if (!__DEV__) {
+    return RENDER_API_URL.replace(/\/$/, '');
   }
 
   const lanFromExpo = getExpoLanHost();
-  if (__DEV__ && lanFromExpo) {
+  if (lanFromExpo) {
     return `http://${lanFromExpo}:${API_PORT}`;
   }
 
@@ -68,7 +76,7 @@ function resolveApiBaseUrl(): string {
 export const API_BASE_URL = resolveApiBaseUrl();
 
 export function isUsingRemoteApiInDev(): boolean {
-  return __DEV__ && Boolean(process.env.EXPO_PUBLIC_REMOTE_API_URL?.trim());
+  return __DEV__ && API_BASE_URL.includes('onrender.com');
 }
 
 /** Hint when tunnel + local-only API (second phone on another network will fail). */

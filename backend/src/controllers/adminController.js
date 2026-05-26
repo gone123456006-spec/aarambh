@@ -1,18 +1,129 @@
+const crypto = require('crypto');
 const User = require('../models/User');
 const Course = require('../models/Course');
 const ChatSession = require('../models/ChatSession');
+const CourseProgress = require('../models/CourseProgress');
+const GameProgress = require('../models/GameProgress');
 const uploadService = require('../services/uploadService');
+const tokenService = require('../services/tokenService');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
+
+function safeCompare(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Admin dashboard login — username + password only (no Gmail / OTP)
+ */
+const adminLogin = asyncHandler(async (req, res) => {
+  const { username, password } = req.body;
+
+  if (!username?.trim() || !password) {
+    throw new ApiError(400, 'User ID and password are required');
+  }
+
+  const expectedUsername = process.env.ADMIN_USERNAME?.trim();
+  const expectedPassword = process.env.ADMIN_PASSWORD?.trim();
+  const adminDbEmail =
+    process.env.ADMIN_DB_EMAIL?.trim() || 'aarambh-admin@system.local';
+
+  if (!expectedUsername || !expectedPassword) {
+    throw new ApiError(
+      500,
+      'Admin login not configured (set ADMIN_USERNAME and ADMIN_PASSWORD in .env)'
+    );
+  }
+
+  if (username.trim() !== expectedUsername || !safeCompare(password, expectedPassword)) {
+    throw new ApiError(401, 'Invalid user ID or password');
+  }
+
+  let admin = await User.findOne({ role: 'admin' });
+
+  if (!admin) {
+    admin = await User.findOne({ email: adminDbEmail.toLowerCase() });
+  }
+
+  if (!admin) {
+    admin = await User.create({
+      email: adminDbEmail.toLowerCase(),
+      name: 'Aarambh Admin',
+      role: 'admin',
+      profileCompleted: true,
+    });
+  } else if (admin.role !== 'admin') {
+    admin.role = 'admin';
+    await admin.save();
+  }
+
+  const accessToken = tokenService.generateAccessToken(admin._id);
+
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        accessToken,
+        user: {
+          id: admin._id,
+          username: expectedUsername,
+          name: admin.name,
+          role: admin.role,
+        },
+      },
+      'Admin login successful'
+    )
+  );
+});
+
+const USER_ROLE_QUERY = { role: 'user' };
+
+function hasSessionQuery() {
+  return {
+    ...USER_ROLE_QUERY,
+    $expr: { $gt: [{ $size: { $ifNull: ['$refreshTokens', []] } }, 0] },
+  };
+}
+
+function formatUserRow(doc) {
+  const u = doc.toObject ? doc.toObject() : doc;
+  const sessions = u.refreshTokens || [];
+  delete u.refreshTokens;
+  return {
+    ...u,
+    hasActiveSession: sessions.length > 0,
+    sessionCount: sessions.length,
+  };
+}
 
 /**
  * Get aggregated dashboard statistics
  */
 const getDashboardStats = asyncHandler(async (req, res) => {
-  const [totalUsers, activeUsers, totalCourses, activeChatSessions] = await Promise.all([
-    User.countDocuments({ role: 'user' }),
-    User.countDocuments({ isOnline: true }),
+  const now = new Date();
+  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const last7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+  const [
+    totalUsers,
+    onlineUsers,
+    loggedInUsers,
+    activeLast24h,
+    profileCompleted,
+    newUsersThisWeek,
+    totalCourses,
+    activeChatSessions,
+  ] = await Promise.all([
+    User.countDocuments(USER_ROLE_QUERY),
+    User.countDocuments({ ...USER_ROLE_QUERY, isOnline: true }),
+    User.countDocuments(hasSessionQuery()),
+    User.countDocuments({ ...USER_ROLE_QUERY, lastSeen: { $gte: last24h } }),
+    User.countDocuments({ ...USER_ROLE_QUERY, profileCompleted: true }),
+    User.countDocuments({ ...USER_ROLE_QUERY, createdAt: { $gte: last7d } }),
     Course.countDocuments({}),
     ChatSession.countDocuments({ status: 'active' }),
   ]);
@@ -22,9 +133,15 @@ const getDashboardStats = asyncHandler(async (req, res) => {
       200,
       {
         totalUsers,
-        activeUsers,
+        onlineUsers,
+        loggedInUsers,
+        activeLast24h,
+        profileCompleted,
+        newUsersThisWeek,
         totalCourses,
         activeChatSessions,
+        // legacy alias
+        activeUsers: onlineUsers,
       },
       'Dashboard stats retrieved successfully'
     )
@@ -32,34 +149,81 @@ const getDashboardStats = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get paginated list of users
+ * Get paginated list of users with search & filters
  */
 const getUsers = asyncHandler(async (req, res) => {
   const page = parseInt(req.query.page || '1', 10);
-  const limit = parseInt(req.query.limit || '10', 10);
+  const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
   const skip = (page - 1) * limit;
+  const search = req.query.search?.trim();
+  const filter = req.query.filter || 'all';
 
-  const users = await User.find({ role: 'user' })
-    .select('-refreshTokens')
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(limit);
+  const query = { ...USER_ROLE_QUERY };
 
-  const total = await User.countDocuments({ role: 'user' });
+  if (search) {
+    query.$or = [
+      { email: { $regex: search, $options: 'i' } },
+      { name: { $regex: search, $options: 'i' } },
+      { phone: { $regex: search, $options: 'i' } },
+    ];
+  }
+
+  if (filter === 'online') {
+    query.isOnline = true;
+  } else if (filter === 'logged_in') {
+    Object.assign(query, {
+      $expr: { $gt: [{ $size: { $ifNull: ['$refreshTokens', []] } }, 0] },
+    });
+  } else if (filter === 'profile_complete') {
+    query.profileCompleted = true;
+  }
+
+  const [users, total] = await Promise.all([
+    User.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    User.countDocuments(query),
+  ]);
 
   res.status(200).json(
     new ApiResponse(
       200,
       {
-        users,
+        users: users.map(formatUserRow),
         pagination: {
           total,
           page,
           limit,
-          pages: Math.ceil(total / limit),
+          pages: Math.ceil(total / limit) || 1,
         },
       },
       'Users retrieved successfully'
+    )
+  );
+});
+
+/**
+ * Single user detail + learning progress
+ */
+const getUserById = asyncHandler(async (req, res) => {
+  const user = await User.findOne({ _id: req.params.id, role: 'user' });
+
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const [courseProgress, gameProgress] = await Promise.all([
+    CourseProgress.findOne({ user: user._id }).lean(),
+    GameProgress.find({ user: user._id }).select('gameId level score completed stats').lean(),
+  ]);
+
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        user: formatUserRow(user),
+        courseProgress: courseProgress || { completedLessons: [], lastLessonId: null },
+        gameProgress,
+      },
+      'User details retrieved successfully'
     )
   );
 });
@@ -246,8 +410,10 @@ const getAnalytics = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+  adminLogin,
   getDashboardStats,
   getUsers,
+  getUserById,
   createCourse,
   updateCourse,
   addLesson,
