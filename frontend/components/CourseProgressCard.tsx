@@ -1,16 +1,30 @@
 import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { StyleSheet, View, Text, Pressable, Platform } from 'react-native';
+import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { TOTAL_LESSONS } from '@/constants/courseData';
 
-function SectionHeading({ title }: { title: string }) {
-  return (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionHeaderText}>{title}</Text>
-      <View style={styles.sectionHeaderLine} />
-    </View>
-  );
-}
+const UI = {
+  text: '#101010',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
+  surface: '#FFFFFF',
+  accent: '#e60000',
+  blue: '#1B6EF3',
+  blueSoft: '#E8F1FE',
+  shadow: '#000000',
+};
+
+const cardShadow = Platform.select({
+  ios: {
+    shadowColor: UI.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+  },
+  android: { elevation: 3 },
+  default: {},
+});
 
 export function CourseProgressCard({
   overallProgress,
@@ -25,111 +39,151 @@ export function CourseProgressCard({
 }) {
   return (
     <View style={styles.card}>
-      <SectionHeading title="Course progress" />
-      <View style={styles.hero}>
-        <Text style={styles.heroValue}>{overallProgress}%</Text>
-        <Text style={styles.heroCaption}>Overall completion</Text>
-      </View>
-      <View style={styles.track}>
-        <View
-          style={[
-            styles.fill,
-            { width: `${Math.max(overallProgress, overallProgress > 0 ? 4 : 0)}%` },
-          ]}
-        />
-      </View>
-      <Text style={styles.meta}>
-        {completedCount} of {TOTAL_LESSONS} lessons completed
-      </Text>
-      {lastLessonTitle ? (
-        <Text style={styles.last} numberOfLines={1}>
-          Last: {lastLessonTitle}
+      <LinearGradient
+        colors={['#FFFFFF', '#F8FBFF', '#EEF4FF']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.gradient}
+      >
+        <Text style={styles.eyebrow}>Course progress</Text>
+        <View style={styles.heroRow}>
+          <View>
+            <Text style={styles.heroValue}>{overallProgress}%</Text>
+            <Text style={styles.heroCaption}>Overall completion</Text>
+          </View>
+          <View style={styles.heroIcon}>
+            <Feather name="book-open" size={26} color={UI.blue} />
+          </View>
+        </View>
+
+        <View style={styles.track}>
+          <LinearGradient
+            colors={[UI.blue, '#5B9FFF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[
+              styles.fill,
+              { width: `${Math.max(overallProgress, overallProgress > 0 ? 4 : 0)}%` },
+            ]}
+          />
+        </View>
+
+        <Text style={styles.meta}>
+          {completedCount} of {TOTAL_LESSONS} lessons completed
         </Text>
-      ) : null}
-      <TouchableOpacity style={styles.continueBtn} onPress={onContinue} activeOpacity={0.7}>
-        <MaterialCommunityIcons name="play-circle-outline" size={20} color="#1A73E8" />
-        <Text style={styles.continueBtnText}>Continue learning</Text>
-      </TouchableOpacity>
+        {lastLessonTitle ? (
+          <Text style={styles.last} numberOfLines={1}>
+            Last lesson: {lastLessonTitle}
+          </Text>
+        ) : null}
+
+        <Pressable
+          style={({ pressed }) => [styles.continueBtn, pressed && styles.continueBtnPressed]}
+          onPress={onContinue}
+        >
+          <Feather name="play-circle" size={20} color={UI.blue} />
+          <Text style={styles.continueBtnText}>Continue learning</Text>
+          <Feather name="chevron-right" size={20} color={UI.textTertiary} style={styles.continueChevron} />
+        </Pressable>
+      </LinearGradient>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 16,
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 20,
+    ...cardShadow,
+  },
+  gradient: {
+    padding: 22,
+  },
+  eyebrow: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: UI.textSecondary,
+    marginBottom: 8,
+  },
+  heroRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 1,
   },
-  sectionHeader: { paddingTop: 2, paddingBottom: 0, marginBottom: 8 },
-  sectionHeaderText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#5F6368',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 10,
-  },
-  sectionHeaderLine: { height: 1, backgroundColor: '#E8EAED', marginBottom: 6 },
-  hero: { alignItems: 'center', marginBottom: 8 },
   heroValue: {
-    fontSize: 36,
-    fontWeight: '400',
-    color: '#1F1F1F',
-    letterSpacing: -0.5,
+    fontSize: 44,
+    fontWeight: '700',
+    color: UI.text,
+    letterSpacing: -1.5,
   },
   heroCaption: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#5F6368',
-    marginTop: 2,
+    fontSize: 14,
+    color: UI.textSecondary,
+    marginTop: 4,
+  },
+  heroIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    backgroundColor: UI.blueSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   track: {
-    height: 4,
-    backgroundColor: '#E8EAED',
-    borderRadius: 2,
+    height: 8,
+    backgroundColor: '#ECEEF2',
+    borderRadius: 4,
     overflow: 'hidden',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   fill: {
     height: '100%',
-    backgroundColor: '#1A73E8',
-    borderRadius: 2,
+    borderRadius: 4,
+    minWidth: 8,
   },
   meta: {
-    fontSize: 12,
-    color: '#5F6368',
-    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+    color: UI.text,
     marginBottom: 4,
   },
   last: {
-    fontSize: 12,
-    color: '#80868B',
-    textAlign: 'center',
-    marginBottom: 12,
+    fontSize: 13,
+    color: UI.textSecondary,
+    marginBottom: 16,
   },
   continueBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    borderRadius: 10,
-    backgroundColor: '#E8F0FE',
+    gap: 10,
+    backgroundColor: UI.surface,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     marginTop: 4,
+    ...Platform.select({
+      ios: {
+        shadowColor: UI.shadow,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
+  },
+  continueBtnPressed: {
+    opacity: 0.9,
   },
   continueBtnText: {
-    color: '#1A73E8',
-    fontWeight: '600',
-    fontSize: 14,
+    flex: 1,
+    color: UI.blue,
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  continueChevron: {
+    marginLeft: 'auto',
   },
 });

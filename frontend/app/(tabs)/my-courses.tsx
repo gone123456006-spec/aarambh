@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Stack } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Video, ResizeMode, Audio } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -36,8 +36,25 @@ import {
   syncLessonToServer,
 } from '@/utils/courseProgress';
 import { useFocusEffect } from 'expo-router';
+import { apiFetch } from '@/utils/api';
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PLAYLIST_PLAYER_HEIGHT = SCREEN_WIDTH * (9 / 16);
+
+/** Matches Rewards / Games screen background */
+const UI = {
+  bg: '#F2F3F7',
+  surface: '#FFFFFF',
+  surfaceMuted: '#ECEEF2',
+  divider: 'rgba(0,0,0,0.06)',
+};
+
+type ServerLessonMedia = {
+  _id?: string;
+  videoUrl?: string | null;
+  videoAvailableIn?: number;
+  pdfUrl?: string | null;
+  pdfAvailableIn?: number;
+};
 
 function isLessonUnlockedInRoadmap(
   lessons: Lesson[],
@@ -198,7 +215,7 @@ function PlaylistLessonRow({
               {lesson.title}
             </Text>
             <Text style={styles.playlistRowChannel} numberOfLines={1}>
-              Aarambh English
+              Ohm&apos;s English
             </Text>
             <Text style={styles.playlistRowMeta} numberOfLines={1}>
               {unlocked
@@ -291,6 +308,9 @@ function CoursePlaylistView({
   focusIndex,
   playingLessonId,
   lessonReviewId,
+  selectedLevel,
+  onSelectLevel,
+  isLevelUnlocked,
   onPlay,
   onClosePlayer,
   onDownloadPdf,
@@ -306,6 +326,9 @@ function CoursePlaylistView({
   focusIndex: number;
   playingLessonId: string | null;
   lessonReviewId: string | null;
+  selectedLevel: LevelId;
+  onSelectLevel: (id: LevelId) => void;
+  isLevelUnlocked: (id: LevelId) => boolean;
   onPlay: (lessonId: string) => void;
   onClosePlayer: () => void;
   onDownloadPdf: (lesson: Lesson) => void;
@@ -428,8 +451,23 @@ function CoursePlaylistView({
         </View>
       )}
 
-      <View style={[styles.playlistSheet, !inPlayerMode && styles.playlistSheetFull]}>
-        <View style={styles.playlistSheetHeader}>
+      <View
+        style={[
+          styles.playlistSheet,
+          !inPlayerMode ? styles.playlistSheetFull : styles.playlistSheetPlayer,
+        ]}
+      >
+        {!inPlayerMode ? (
+          <View style={styles.levelTabsInSheet}>
+            <CategoryTabs
+              selected={selectedLevel}
+              onSelect={onSelectLevel}
+              isLevelUnlocked={isLevelUnlocked}
+            />
+          </View>
+        ) : null}
+
+        <View style={[styles.playlistSheetHeader, !inPlayerMode && styles.playlistSheetHeaderAfterTabs]}>
           <View style={[styles.playlistSheetIcon, { backgroundColor: `${level.color[0]}18` }]}>
             <MaterialCommunityIcons name={levelIcon} size={22} color={level.color[0]} />
           </View>
@@ -476,6 +514,10 @@ export default function MyCoursesScreen() {
   const [completedLessons, setCompletedLessons] = useState<string[]>([]);
   const [lastLessonId, setLastLessonId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [serverCoursesByLevel, setServerCoursesByLevel] = useState<
+    Partial<Record<LevelId, { lessons: ServerLessonMedia[] }>>
+  >({});
+  const [serverCoursesError, setServerCoursesError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<LevelId>('beginner');
   const [roadmapFocusIndex, setRoadmapFocusIndex] = useState(0);
   const [lessonReviewId, setLessonReviewId] = useState<string | null>(null);
@@ -525,12 +567,42 @@ export default function MyCoursesScreen() {
     init();
   }, []);
 
+  const loadServerCourses = useCallback(async () => {
+    try {
+      setServerCoursesError(null);
+      const res = await apiFetch<{ data: { level?: string; lessons?: ServerLessonMedia[] }[] }>(
+        '/api/courses'
+      );
+      const byLevel: Partial<Record<LevelId, { lessons: ServerLessonMedia[] }>> = {};
+
+      for (const c of res.data ?? []) {
+        if (!c?.level) continue;
+        const level = c.level as LevelId;
+        if (level !== 'beginner' && level !== 'intermediate' && level !== 'advanced') continue;
+        byLevel[level] = { lessons: c.lessons ?? [] };
+      }
+
+      setServerCoursesByLevel(byLevel);
+    } catch (e) {
+      console.warn('Failed to load server courses', e);
+      setServerCoursesError(e instanceof Error ? e.message : 'Failed to load server courses');
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       loadCourseProgress().then(({ completedLessons: saved, lastLessonId: last }) => {
         setCompletedLessons(saved);
         setLastLessonId(last);
       });
+
+      // Refresh server-driven lesson media frequently so add/delete updates reflect quickly.
+      loadServerCourses();
+      const interval = setInterval(() => {
+        loadServerCourses();
+      }, 5000);
+
+      return () => clearInterval(interval);
     }, [])
   );
 
@@ -618,8 +690,21 @@ export default function MyCoursesScreen() {
 
   const getVideoSourceForLesson = (lessonId: string | null) => {
     if (!lessonId) return LECTURE_VIDEO;
-    const level = COURSE_DATA.find((l) => l.lessons.some((lesson) => lesson.id === lessonId));
-    return level?.videoSource ?? LECTURE_VIDEO;
+
+    const localLevel = COURSE_DATA.find((l) => l.lessons.some((lesson) => lesson.id === lessonId));
+    if (!localLevel) return LECTURE_VIDEO;
+
+    const lessonIndex = localLevel.lessons.findIndex((l) => l.id === lessonId);
+    const serverLevel = localLevel.id ? serverCoursesByLevel[localLevel.id] : undefined;
+    const serverLesson = serverLevel?.lessons?.[lessonIndex];
+
+    // If the server has a matching lesson record but no videoUrl (yet or deleted),
+    // hide the video instead of falling back to the bundled lecture.
+    if (serverLesson) {
+      return serverLesson.videoUrl ? { uri: serverLesson.videoUrl } : null;
+    }
+
+    return localLevel.videoSource ?? LECTURE_VIDEO;
   };
 
   const pauseVideo = useCallback(() => {
@@ -630,6 +715,29 @@ export default function MyCoursesScreen() {
     videoRef.current?.playAsync().catch(() => {});
   }, []);
 
+  const lockPortraitOrientation = useCallback(async () => {
+    try {
+      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+    } catch {
+      try {
+        await ScreenOrientation.unlockAsync();
+      } catch {
+        /* ignore */
+      }
+    }
+    setIsLandscape(false);
+  }, []);
+
+  const lockLandscapeOrientation = useCallback(async () => {
+    await ScreenOrientation.unlockAsync();
+    const lock = ScreenOrientation.OrientationLock.LANDSCAPE;
+    const supported = await ScreenOrientation.supportsOrientationLockAsync(lock);
+    await ScreenOrientation.lockAsync(
+      supported ? lock : ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT
+    );
+    setIsLandscape(true);
+  }, []);
+
   const closePlayer = useCallback(() => {
     pauseVideo();
     setPlayingLessonId(null);
@@ -637,7 +745,8 @@ export default function MyCoursesScreen() {
     setIsPaused(true);
     setIsVideoLoaded(false);
     setControlsVisible(true);
-  }, [pauseVideo]);
+    lockPortraitOrientation();
+  }, [pauseVideo, lockPortraitOrientation]);
 
   const syncRoadmapFocus = useCallback((levelId: LevelId, completed: string[]) => {
     const level = COURSE_DATA.find((l) => l.id === levelId);
@@ -664,11 +773,20 @@ export default function MyCoursesScreen() {
 
   const handleDownloadPdf = useCallback(async (lesson: Lesson) => {
     try {
-      await WebBrowser.openBrowserAsync(SAMPLE_PDF_URL);
+      const localLevel = COURSE_DATA.find((l) => l.lessons.some((x) => x.id === lesson.id));
+      const lessonIndex = localLevel?.lessons?.findIndex((x) => x.id === lesson.id) ?? -1;
+      const serverLesson =
+        localLevel?.id && lessonIndex >= 0
+          ? serverCoursesByLevel[localLevel.id]?.lessons?.[lessonIndex]
+          : undefined;
+
+      const url =
+        serverLesson?.pdfUrl || SAMPLE_PDF_URL;
+      await WebBrowser.openBrowserAsync(url);
     } catch {
       alert(`Could not open PDF for ${lesson.pdfTitle}`);
     }
-  }, []);
+  }, [serverCoursesByLevel]);
 
   const handleContinueToReview = useCallback((lessonId: string) => {
     pauseVideo();
@@ -777,6 +895,7 @@ export default function MyCoursesScreen() {
   }, [isVideoLoaded, isPaused, pauseVideo, playVideo]);
 
   const openFullscreen = useCallback(() => {
+    ScreenOrientation.unlockAsync().catch(() => {});
     videoRef.current?.getStatusAsync().then((s) => {
       if (s.isLoaded && 'positionMillis' in s) {
         savedPositionRef.current = s.positionMillis;
@@ -793,8 +912,12 @@ export default function MyCoursesScreen() {
       }
       needsSeekOnLoadRef.current = true;
       setIsFullscreen(false);
-    }).catch(() => setIsFullscreen(false));
-  }, []);
+      lockPortraitOrientation();
+    }).catch(() => {
+      setIsFullscreen(false);
+      lockPortraitOrientation();
+    });
+  }, [lockPortraitOrientation]);
 
   const seekTo = useCallback((seconds: number) => {
     const clamped = Math.max(0, Math.min(duration || 0, seconds));
@@ -820,32 +943,57 @@ export default function MyCoursesScreen() {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  const toggleRotation = async () => {
-    if (isLandscape) {
-      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      setIsLandscape(false);
-    } else {
-      await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-      setIsLandscape(true);
+  const toggleRotation = useCallback(async () => {
+    try {
+      if (isLandscape) {
+        await lockPortraitOrientation();
+      } else {
+        await lockLandscapeOrientation();
+      }
+    } catch (e) {
+      console.warn('Video rotation failed', e);
     }
-  };
+  }, [isLandscape, lockPortraitOrientation, lockLandscapeOrientation]);
 
-  // Reset orientation on unmount or player close
   useEffect(() => {
     if (!isFullscreen && isLandscape) {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-      setIsLandscape(false);
+      lockPortraitOrientation();
     }
-  }, [isFullscreen]);
+  }, [isFullscreen, isLandscape, lockPortraitOrientation]);
+
+  useEffect(() => {
+    return () => {
+      lockPortraitOrientation();
+    };
+  }, [lockPortraitOrientation]);
 
   const renderPlayer = (isFull: boolean = false) => {
     const lesson = COURSE_DATA.flatMap(l => l.lessons).find(l => l.id === playingLessonId);
     if (!lesson) return null;
 
     const videoSource = getVideoSourceForLesson(playingLessonId);
+    const localLevel = COURSE_DATA.find((l) => l.lessons.some((lesson) => lesson.id === playingLessonId));
+    const lessonIndex =
+      localLevel?.lessons?.findIndex((l) => l.id === playingLessonId) ?? -1;
+    const serverLesson = localLevel?.id ? serverCoursesByLevel[localLevel.id]?.lessons?.[lessonIndex] : null;
     const progressPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
     const showCenterControls = controlsVisible || !isVideoLoaded;
     const cinemaMode = isPaused && !controlsVisible && isVideoLoaded;
+
+    if (!videoSource) {
+      const msg =
+        serverLesson?.videoAvailableIn && serverLesson.videoAvailableIn > 0
+          ? `Video will be available soon (~${serverLesson.videoAvailableIn}s)`
+          : 'Video not available';
+
+      return (
+        <View style={isFull ? styles.fullPlayerContainer : styles.playlistPlayerVideoWrap}>
+          <View style={styles.playerLoading}>
+            <Text style={styles.playerLoadingText}>{msg}</Text>
+          </View>
+        </View>
+      );
+    }
 
     return (
       <View style={isFull ? styles.fullPlayerContainer : styles.playlistPlayerVideoWrap}>
@@ -1006,7 +1154,7 @@ export default function MyCoursesScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+      <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
 
       {loading ? (
         <View style={styles.loadingBox}>
@@ -1014,13 +1162,7 @@ export default function MyCoursesScreen() {
         </View>
       ) : (
         <View style={styles.mainColumn}>
-          <View style={[styles.categoryBar, { paddingTop: insets.top + 4 }]}>
-            <CategoryTabs
-              selected={selectedCategory}
-              onSelect={handleSelectCategory}
-              isLevelUnlocked={isLevelUnlockedForUser}
-            />
-          </View>
+          <SafeAreaView edges={['top']} style={styles.safeTop} />
 
           <CoursePlaylistView
             level={activeLevel}
@@ -1029,6 +1171,9 @@ export default function MyCoursesScreen() {
             focusIndex={roadmapFocusIndex}
             playingLessonId={playingLessonId}
             lessonReviewId={lessonReviewId}
+            selectedLevel={selectedCategory}
+            onSelectLevel={handleSelectCategory}
+            isLevelUnlocked={isLevelUnlockedForUser}
             onPlay={handlePlay}
             onClosePlayer={closePlayer}
             onDownloadPdf={handleDownloadPdf}
@@ -1043,12 +1188,19 @@ export default function MyCoursesScreen() {
 
       <Modal
         visible={isFullscreen && !!playingLessonId}
-        animationType="none"
+        animationType="fade"
         onRequestClose={closeFullscreen}
         statusBarTranslucent
+        supportedOrientations={['portrait', 'landscape', 'landscape-left', 'landscape-right']}
       >
-        <View style={[styles.fullscreenModalContainer, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-          <StatusBar barStyle="light-content" backgroundColor="#000" />
+        <View
+          style={[
+            styles.fullscreenModalContainer,
+            isLandscape ? styles.fullscreenModalLandscape : null,
+            !isLandscape && { paddingTop: insets.top, paddingBottom: insets.bottom },
+          ]}
+        >
+          <StatusBar barStyle="light-content" backgroundColor="#000" hidden={isLandscape} />
           {playingLessonId ? renderPlayer(true) : null}
         </View>
       </Modal>
@@ -1059,23 +1211,31 @@ export default function MyCoursesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: UI.bg,
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: UI.bg },
   scrollBody: { flex: 1 },
-  mainColumn: { flex: 1 },
-  categoryBar: {
-    paddingHorizontal: 12,
-    paddingBottom: 4,
-    backgroundColor: '#F8F9FA',
+  mainColumn: { flex: 1, backgroundColor: UI.bg },
+  safeTop: {
+    backgroundColor: UI.bg,
+  },
+  levelTabsInSheet: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 12,
+    backgroundColor: UI.bg,
+  },
+  playlistSheetHeaderAfterTabs: {
+    paddingTop: 4,
+    borderTopWidth: 0,
   },
   playlistLayout: {
     flex: 1,
     backgroundColor: '#000',
   },
   playlistLayoutList: {
-    backgroundColor: '#F8F9FA',
+    backgroundColor: UI.bg,
   },
   playlistPlayerWrap: {
     width: '100%',
@@ -1117,7 +1277,7 @@ const styles = StyleSheet.create({
   },
   playlistSheet: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI.bg,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     marginTop: -12,
@@ -1125,10 +1285,10 @@ const styles = StyleSheet.create({
   },
   playlistSheetFull: {
     marginTop: 0,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
+    backgroundColor: UI.bg,
+  },
+  playlistSheetPlayer: {
+    backgroundColor: UI.surface,
   },
   playlistSheetHeader: {
     flexDirection: 'row',
@@ -1136,9 +1296,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
     gap: 12,
+    backgroundColor: UI.bg,
   },
   playlistSheetIcon: {
     width: 40,
@@ -1177,14 +1336,17 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   playlistRowWrap: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI.surface,
+    marginHorizontal: 12,
+    marginBottom: 8,
+    borderRadius: 14,
+    overflow: 'hidden',
   },
   playlistRowWrapActive: {
-    backgroundColor: '#F2F2E6',
+    backgroundColor: '#FFF8F8',
   },
   playlistRowDivider: {
-    height: 1,
-    backgroundColor: '#F0F0F0',
+    height: 0,
     marginLeft: 148,
   },
   playlistSummaryLink: {
@@ -1333,22 +1495,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    backgroundColor: '#FFFFFF',
+    gap: 4,
+    backgroundColor: UI.surface,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#DADCE0',
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-    minHeight: 24,
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-    elevation: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    minHeight: 36,
   },
   categoryBtnActive: {
-    borderWidth: 1,
     shadowOpacity: 0.1,
     elevation: 2,
   },
@@ -1356,7 +1510,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   categoryBtnLabel: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '600',
     color: '#5F6368',
     textAlign: 'center',
@@ -1947,6 +2101,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
     justifyContent: 'center',
+  },
+  fullscreenModalLandscape: {
+    paddingTop: 0,
+    paddingBottom: 0,
   },
   fullPlayerContainer: {
     width: '100%',

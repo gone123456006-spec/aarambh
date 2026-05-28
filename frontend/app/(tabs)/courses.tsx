@@ -4,7 +4,9 @@ import {
   Platform, StatusBar, Dimensions,
   TextInput, ActivityIndicator,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { useGameTabBar } from '@/contexts/game-tab-bar-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,7 +30,11 @@ import { GameId, loadAllGameProgress, GameProgress } from '@/utils/gameProgress'
 import { recordGameAnswer } from '@/utils/gameStats';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const GAME_CARD_WIDTH = (SCREEN_WIDTH - 14 * 2 - 12) / 2;
+const CONTENT_H_PADDING = 20;
+const GAME_GRID_GAP = 14;
+const GAME_CARD_WIDTH = Math.floor(
+  (SCREEN_WIDTH - CONTENT_H_PADDING * 2 - GAME_GRID_GAP) / 2
+);
 
 /** Icons8 3D Fluency — https://icons8.com */
 const GAMES = [
@@ -72,40 +78,126 @@ const GAMES = [
 
 const SCORE_TROPHY_LOGO = 'https://img.icons8.com/3d-fluency/48/trophy.png';
 
-function GamesStickyHeader({
-  insetsTop,
+const UI = {
+  bg: '#F2F3F7',
+  surface: '#FFFFFF',
+  surfaceMuted: '#F7F8FA',
+  text: '#101010',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
+  accent: '#e60000',
+  accentGlow: 'rgba(230, 0, 0, 0.12)',
+  divider: 'rgba(0,0,0,0.06)',
+  shadow: '#000000',
+};
+
+/** Aptitude-style MCQ (purple, white, radio options) */
+const MCQ = {
+  purple: '#7B61FF',
+  purpleDark: '#6B4FE8',
+  purpleLight: '#F3EEFF',
+  purpleTrack: '#E8E4F5',
+  border: '#E5E7EB',
+  bg: '#FFFFFF',
+  correctBg: '#E8F8F0',
+  correctBorder: '#34C759',
+  wrongBg: '#FFF0F0',
+  wrongBorder: '#FF6B6B',
+};
+
+const cardShadow = Platform.select({
+  ios: {
+    shadowColor: UI.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+  },
+  android: { elevation: 3 },
+  default: {},
+});
+
+export type GameHeaderMeta = {
+  level: number;
+  total: number;
+  accentColor: string;
+  /** e.g. "Lv" or "Card" */
+  levelPrefix?: string;
+};
+
+function useSyncGameHeader(
+  onHeaderMeta: ((meta: GameHeaderMeta | null) => void) | undefined,
+  meta: GameHeaderMeta | null,
+) {
+  useEffect(() => {
+    onHeaderMeta?.(meta);
+    return () => onHeaderMeta?.(null);
+  }, [onHeaderMeta, meta?.level, meta?.total, meta?.accentColor, meta?.levelPrefix]);
+}
+
+function GamesHeader({
   title,
   subtitle,
   onBack,
+  gameMeta,
+  aptitudeStyle,
 }: {
-  insetsTop: number;
   title: string;
   subtitle: string;
   onBack?: () => void;
+  gameMeta?: GameHeaderMeta | null;
+  aptitudeStyle?: boolean;
 }) {
-  return (
-    <LinearGradient
-      colors={['#FFD6D6', '#FFF0F0', '#F8F9FA']}
-      locations={[0, 0.55, 1]}
-      style={[ui.stickyHeader, { paddingTop: insetsTop }]}
-    >
-      <View style={ui.headerRow}>
-        {onBack ? (
-          <TouchableOpacity
-            onPress={onBack}
-            style={ui.backBtn}
-            activeOpacity={0.6}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Feather name="arrow-left" size={24} color="#1F1F1F" />
+  if (onBack) {
+    if (aptitudeStyle) {
+      return (
+        <View style={ui.aptitudeHeader}>
+          <TouchableOpacity onPress={onBack} style={ui.aptitudeBackBtn} activeOpacity={0.7} hitSlop={12}>
+            <Feather name="chevron-left" size={22} color={UI.text} />
           </TouchableOpacity>
-        ) : null}
-        <View style={[ui.headerTextBlock, !onBack && ui.headerTextBlockMain]}>
-          <Text style={ui.headerTitle} numberOfLines={1}>{title}</Text>
-          <Text style={ui.headerSub}>{subtitle}</Text>
+          <Text style={ui.aptitudeHeaderTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          {gameMeta ? (
+            <View style={ui.aptitudeHeaderRight}>
+              <Feather name="clock" size={16} color={UI.text} />
+              <Text style={ui.aptitudeHeaderTimer}>
+                {gameMeta.level}/{gameMeta.total}
+              </Text>
+            </View>
+          ) : (
+            <View style={ui.aptitudeHeaderRightPlaceholder} />
+          )}
         </View>
+      );
+    }
+
+    return (
+      <View style={ui.navBar}>
+        <TouchableOpacity onPress={onBack} style={ui.backBtn} activeOpacity={0.65} hitSlop={12}>
+          <Feather name="arrow-left" size={24} color={UI.text} strokeWidth={3} />
+        </TouchableOpacity>
+        <Text style={ui.navTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {gameMeta ? (
+          <View style={ui.navMeta}>
+            <Text style={[ui.navLevel, { color: gameMeta.accentColor }]}>
+              {gameMeta.levelPrefix ?? 'Lv'} {gameMeta.level}/{gameMeta.total}
+            </Text>
+            <Text style={[ui.navPts, { color: gameMeta.accentColor }]}>
+              +{POINTS_PER_CORRECT_LEVEL} pts
+            </Text>
+          </View>
+        ) : null}
       </View>
-    </LinearGradient>
+    );
+  }
+
+  return (
+    <View style={ui.pageHeader}>
+      <Text style={ui.pageTitle}>Games</Text>
+      <Text style={ui.pageSubtitle}>{subtitle}</Text>
+    </View>
   );
 }
 
@@ -138,25 +230,34 @@ function GameLogosStrip({ size = 30 }: { size?: number }) {
   );
 }
 
-function SectionHeading({ title, inset }: { title: string; inset?: boolean }) {
-  return (
-    <View style={[ui.cardSectionHeader, inset && ui.cardSectionHeaderInset]}>
-      <Text style={ui.cardSectionHeaderText}>{title}</Text>
-      <View style={[ui.cardSectionHeaderLine, inset && ui.cardSectionHeaderLineInset]} />
-    </View>
-  );
+function SectionHeading({ title }: { title: string }) {
+  return <Text style={ui.sectionTitle}>{title}</Text>;
 }
 
 function ScoreBoard({ points }: { points: number }) {
   return (
-    <View style={ui.scoreBoardWrap}>
-      <View style={ui.scoreBoard}>
-        <Image source={{ uri: SCORE_TROPHY_LOGO }} style={ui.scoreBoardIcon} contentFit="contain" />
-        <Text style={ui.scoreBoardLabel}>Your score</Text>
-        <Text style={ui.scoreBoardPoints}>{points.toLocaleString()}</Text>
-        <Text style={ui.scoreBoardUnit}>pts</Text>
-      </View>
-      <GameLogosStrip />
+    <View style={ui.scoreHero}>
+      <LinearGradient
+        colors={['#FFFFFF', '#FFF8F8', '#FFEFEF']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={ui.scoreHeroGradient}
+      >
+        <View style={ui.scoreHeroTop}>
+          <View>
+            <Text style={ui.scoreHeroLabel}>Your score</Text>
+            <View style={ui.scoreHeroRow}>
+              <Text style={ui.scoreHeroPoints}>{points.toLocaleString()}</Text>
+              <Text style={ui.scoreHeroUnit}>pts</Text>
+            </View>
+          </View>
+          <View style={ui.scoreHeroIcon}>
+            <Image source={{ uri: SCORE_TROPHY_LOGO }} style={ui.scoreBoardIcon} contentFit="contain" />
+          </View>
+        </View>
+        <View style={ui.scoreHeroDivider} />
+        <GameLogosStrip size={28} />
+      </LinearGradient>
     </View>
   );
 }
@@ -173,7 +274,7 @@ function GameCard({
   const hasProgress = savedLevel > 0;
   return (
     <TouchableOpacity
-      style={[ui.gameCard, { width: GAME_CARD_WIDTH }]}
+      style={[ui.gameCard, cardShadow, { width: GAME_CARD_WIDTH }]}
       onPress={onPress}
       activeOpacity={0.88}
     >
@@ -191,11 +292,12 @@ function GameCard({
         )}
       </View>
       <View style={ui.gameCardBody}>
-        <View style={ui.gameCardTitleRow}>
-          <Image source={{ uri: game.imageUrl }} style={ui.gameCardTitleLogo} contentFit="contain" />
-          <Text style={ui.gameCardTitle} numberOfLines={1}>{game.title}</Text>
-        </View>
-        <Text style={ui.gameCardDesc} numberOfLines={2}>{game.desc}</Text>
+        <Text style={ui.gameCardTitle} numberOfLines={2}>
+          {game.title}
+        </Text>
+        <Text style={ui.gameCardDesc} numberOfLines={2}>
+          {game.desc}
+        </Text>
         <View style={[ui.gameCardCta, { backgroundColor: game.color }]}>
           <Text style={ui.gameCardCtaText}>
             {hasProgress ? 'Continue' : 'Play'}
@@ -209,7 +311,7 @@ function GameCard({
 
 function GameLoading({ color }: { color: string }) {
   return (
-    <View style={[gs.gameContainer, gs.loadingBox]}>
+    <View style={[gs.mcqGameContainer, gs.loadingBox]}>
       <ActivityIndicator size="large" color={color} />
       <Text style={gs.loadingText}>Loading your progress…</Text>
     </View>
@@ -221,18 +323,6 @@ function scoreEmoji(score: number, total: number) {
   if (pct >= 0.8) return '🎉';
   if (pct >= 0.5) return '👍';
   return '😅';
-}
-
-function LevelProgress({ current, total, color }: { current: number; total: number; color: string }) {
-  const pct = Math.min(100, ((current + 1) / total) * 100);
-  return (
-    <View style={gs.progressWrap}>
-      <View style={gs.progressTrack}>
-        <View style={[gs.progressFill, { width: `${pct}%`, backgroundColor: color }]} />
-      </View>
-      <Text style={gs.questionNum}>Level {current + 1} of {total}</Text>
-    </View>
-  );
 }
 
 function WrongAnswerHint({ correctText, explanation }: { correctText: string; explanation: string }) {
@@ -290,8 +380,329 @@ function shuffleOptions(options: string[], correctIndex: number) {
   };
 }
 
+function McqRadio({
+  checked,
+  state,
+}: {
+  checked: boolean;
+  state: 'idle' | 'selected' | 'correct' | 'wrong';
+}) {
+  const ringColor =
+    state === 'correct'
+      ? MCQ.correctBorder
+      : state === 'wrong'
+        ? MCQ.wrongBorder
+        : checked
+          ? MCQ.purple
+          : MCQ.border;
+
+  return (
+    <View
+      style={[
+        gs.mcqRadioOuter,
+        { borderColor: ringColor },
+        checked && state !== 'wrong' && state !== 'correct' && gs.mcqRadioOuterSelected,
+        state === 'correct' && gs.mcqRadioOuterCorrect,
+        state === 'wrong' && gs.mcqRadioOuterWrong,
+      ]}
+    >
+      {checked ? <View style={[gs.mcqRadioInner, state === 'correct' && { backgroundColor: MCQ.correctBorder }, state === 'wrong' && { backgroundColor: MCQ.wrongBorder }]} /> : null}
+    </View>
+  );
+}
+
+function getMcqOptionState(
+  selected: number | null,
+  index: number,
+  correctIndex: number,
+): 'idle' | 'selected' | 'correct' | 'wrong' {
+  if (selected === null) return 'idle';
+  if (index === correctIndex) return 'correct';
+  if (index === selected) return 'wrong';
+  return 'idle';
+}
+
+type AptitudeGameShellProps = {
+  idx: number;
+  total: number;
+  levelLabel?: string;
+  footerLabel: string;
+  footerDisabled?: boolean;
+  onFooterPress: () => void;
+  children: React.ReactNode;
+};
+
+function AptitudeGameShell({
+  idx,
+  total,
+  levelLabel = 'Question',
+  footerLabel,
+  footerDisabled = false,
+  onFooterPress,
+  children,
+}: AptitudeGameShellProps) {
+  const insets = useSafeAreaInsets();
+  const progress = total > 0 ? (idx + 1) / total : 0;
+
+  return (
+    <View style={gs.mcqScreen}>
+      <View style={gs.mcqProgressTrack}>
+        <View style={[gs.mcqProgressFill, { width: `${Math.min(100, progress * 100)}%` }]} />
+      </View>
+
+      <ScrollView
+        style={gs.mcqScroll}
+        contentContainerStyle={gs.mcqScrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={gs.mcqQuestionLabel}>
+          {levelLabel} {idx + 1} of {total}
+        </Text>
+        {children}
+      </ScrollView>
+
+      <View style={[gs.mcqFooter, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+        <TouchableOpacity
+          style={[gs.mcqNextBtn, footerDisabled && gs.mcqNextBtnDisabled]}
+          onPress={onFooterPress}
+          disabled={footerDisabled}
+          activeOpacity={0.85}
+        >
+          <Text style={gs.mcqNextBtnText}>{footerLabel}</Text>
+          <Feather name="arrow-right" size={20} color="#fff" />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+type McqGameplayProps = {
+  accentColor: string;
+  idx: number;
+  total: number;
+  question: string;
+  shuffled: { options: string[]; correctIndex: number };
+  selected: number | null;
+  onPick: (i: number) => void;
+  isCorrect: boolean;
+  correctText: string;
+  explanation: string;
+  onNext: () => void;
+  isLastLevel: boolean;
+};
+
+function McqGameplay({
+  accentColor: _accentColor,
+  idx,
+  total,
+  question,
+  shuffled,
+  selected,
+  onPick,
+  isCorrect,
+  correctText,
+  explanation,
+  onNext,
+  isLastLevel,
+}: McqGameplayProps) {
+  return (
+    <AptitudeGameShell
+      idx={idx}
+      total={total}
+      footerLabel={isLastLevel ? 'Finish' : 'Next'}
+      footerDisabled={selected === null}
+      onFooterPress={onNext}
+    >
+      <Text style={gs.mcqQuestionText}>{question}</Text>
+
+      <View style={gs.mcqOptionsBlock}>
+        {shuffled.options.map((opt, i) => {
+          const state = getMcqOptionState(selected, i, shuffled.correctIndex);
+          const isChosen = selected === i;
+          const showResult = selected !== null;
+
+          return (
+            <TouchableOpacity
+              key={`${idx}-${i}-${opt}`}
+              style={[
+                gs.mcqOptionCard,
+                isChosen && selected !== null && !showResult && gs.mcqOptionCardSelected,
+                state === 'correct' && gs.mcqOptionCardCorrect,
+                state === 'wrong' && gs.mcqOptionCardWrong,
+              ]}
+              onPress={() => onPick(i)}
+              disabled={selected !== null}
+              activeOpacity={0.75}
+            >
+              <Text
+                style={[
+                  gs.mcqOptionText,
+                  (isChosen || state === 'correct') && gs.mcqOptionTextActive,
+                ]}
+              >
+                {opt}
+              </Text>
+              <McqRadio
+                checked={isChosen || state === 'correct'}
+                state={showResult ? state : isChosen ? 'selected' : 'idle'}
+              />
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {selected !== null && !isCorrect ? (
+        <View style={gs.mcqHintBox}>
+          <Text style={gs.mcqHintCorrect}>
+            Correct: <Text style={gs.mcqHintBold}>{correctText}</Text>
+          </Text>
+          <Text style={gs.mcqHintDetail}>{shortExplanation(explanation)}</Text>
+        </View>
+      ) : null}
+
+      {selected !== null && isCorrect ? (
+        <Text style={gs.mcqCorrectBanner}>
+          Correct · +{POINTS_PER_CORRECT_LEVEL} pts
+        </Text>
+      ) : null}
+    </AptitudeGameShell>
+  );
+}
+
+type ScrambleGameplayProps = {
+  idx: number;
+  total: number;
+  hint: string;
+  scrambled: string;
+  input: string;
+  onChangeInput: (text: string) => void;
+  result: 'correct' | 'wrong' | null;
+  correctWord: string;
+  onCheck: () => void;
+  onNext: () => void;
+  isLastLevel: boolean;
+};
+
+function ScrambleGameplay({
+  idx,
+  total,
+  hint,
+  scrambled,
+  input,
+  onChangeInput,
+  result,
+  correctWord,
+  onCheck,
+  onNext,
+  isLastLevel,
+}: ScrambleGameplayProps) {
+  const canCheck = input.trim().length > 0 && result === null;
+  const footerLabel = result === null ? 'Check' : isLastLevel ? 'Finish' : 'Next';
+  const onFooterPress = result === null ? onCheck : onNext;
+
+  return (
+    <AptitudeGameShell
+      idx={idx}
+      total={total}
+      levelLabel="Level"
+      footerLabel={footerLabel}
+      footerDisabled={result === null && !canCheck}
+      onFooterPress={onFooterPress}
+    >
+      <Text style={gs.mcqScrambleHint}>{hint}</Text>
+      <Text style={gs.mcqScrambleWord}>{scrambled}</Text>
+
+      <TextInput
+        style={[
+          gs.mcqTextInput,
+          result === 'correct' && gs.mcqTextInputCorrect,
+          result === 'wrong' && gs.mcqTextInputWrong,
+        ]}
+        value={input}
+        onChangeText={onChangeInput}
+        placeholder="Type the word..."
+        autoCapitalize="characters"
+        placeholderTextColor={UI.textTertiary}
+        editable={result === null}
+      />
+
+      {result === 'wrong' ? (
+        <View style={gs.mcqHintBox}>
+          <Text style={gs.mcqHintCorrect}>
+            Correct: <Text style={gs.mcqHintBold}>{correctWord}</Text>
+          </Text>
+          <Text style={gs.mcqHintDetail}>{hint}</Text>
+        </View>
+      ) : null}
+
+      {result === 'correct' ? (
+        <Text style={gs.mcqCorrectBanner}>
+          Correct · +{POINTS_PER_CORRECT_LEVEL} pts
+        </Text>
+      ) : null}
+    </AptitudeGameShell>
+  );
+}
+
+type FlashcardGameplayProps = {
+  idx: number;
+  total: number;
+  word: string;
+  meaning: string;
+  example: string;
+  flipped: boolean;
+  onFlip: () => void;
+  onNext: () => void;
+  isLastLevel: boolean;
+};
+
+function FlashcardGameplay({
+  idx,
+  total,
+  word,
+  meaning,
+  example,
+  flipped,
+  onFlip,
+  onNext,
+  isLastLevel,
+}: FlashcardGameplayProps) {
+  return (
+    <AptitudeGameShell
+      idx={idx}
+      total={total}
+      levelLabel="Card"
+      footerLabel={isLastLevel ? 'Finish' : 'Next'}
+      onFooterPress={onNext}
+    >
+      <TouchableOpacity
+        style={gs.mcqFlashCard}
+        onPress={onFlip}
+        activeOpacity={0.92}
+      >
+        <Text style={gs.mcqFlashLabel}>{flipped ? 'Meaning' : 'Word'}</Text>
+        <Text style={gs.mcqFlashMain}>{flipped ? meaning : word}</Text>
+        {flipped ? (
+          <Text style={gs.mcqFlashExample}>&quot;{example}&quot;</Text>
+        ) : (
+          <Text style={gs.mcqFlashTap}>Tap to reveal meaning</Text>
+        )}
+      </TouchableOpacity>
+    </AptitudeGameShell>
+  );
+}
+
 // ─── Quiz Game ────────────────────────────────────────────────────────────────
-function QuizGame({ onClose, onScore }: { onClose: () => void; onScore: (n: number) => void }) {
+function QuizGame({
+  onClose,
+  onScore,
+  onHeaderMeta,
+}: {
+  onClose: () => void;
+  onScore: (n: number) => void;
+  onHeaderMeta?: (meta: GameHeaderMeta | null) => void;
+}) {
   const { idx, setIdx, score, setScore, ready, completeGame } = useGameProgress('quiz', QUIZ_QUESTIONS.length);
   const [selected, setSelected] = useState<number | null>(null);
   const [done, setDone] = useState(false);
@@ -307,7 +718,14 @@ function QuizGame({ onClose, onScore }: { onClose: () => void; onScore: (n: numb
     [idx, q.options, q.answer],
   );
 
-  if (!ready) return <GameLoading color="#e60000" />;
+  useSyncGameHeader(
+    onHeaderMeta,
+    ready && !done
+      ? { level: idx + 1, total: QUIZ_QUESTIONS.length, accentColor: '#e60000' }
+      : null,
+  );
+
+  if (!ready) return <GameLoading color={MCQ.purple} />;
 
   const isCorrect = selected !== null && selected === shuffled.correctIndex;
   const isLastLevel = idx + 1 >= QUIZ_QUESTIONS.length;
@@ -334,7 +752,7 @@ function QuizGame({ onClose, onScore }: { onClose: () => void; onScore: (n: numb
   };
 
   return (
-    <View style={gs.gameContainer}>
+    <View style={gs.mcqGameContainer}>
       {done ? (
         <View style={gs.doneBox}>
           <Text style={gs.doneEmoji}>{scoreEmoji(score, QUIZ_QUESTIONS.length)}</Text>
@@ -342,57 +760,40 @@ function QuizGame({ onClose, onScore }: { onClose: () => void; onScore: (n: numb
           <Text style={gs.doneScore}>
             {score * POINTS_PER_CORRECT_LEVEL} pts · {score} / {QUIZ_QUESTIONS.length} correct
           </Text>
-          <TouchableOpacity style={gs.doneBtn} onPress={finishAndClose}>
+          <TouchableOpacity style={gs.mcqDoneBtn} onPress={finishAndClose}>
             <Text style={gs.doneBtnText}>Back to Games</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <>
-          {idx > 0 && <Text style={gs.resumeHint}>Resuming from level {idx + 1}</Text>}
-          <LevelProgress current={idx} total={QUIZ_QUESTIONS.length} color="#e60000" />
-          <Text style={gs.pointsHint}>+{POINTS_PER_CORRECT_LEVEL} pts per correct answer</Text>
-          <Text style={gs.questionText}>{q.q}</Text>
-          {shuffled.options.map((opt, i) => {
-            let bg = '#fff';
-            if (selected !== null) {
-              if (i === shuffled.correctIndex) bg = '#d4edda';
-              else if (i === selected) bg = '#f8d7da';
-            }
-            return (
-              <TouchableOpacity
-                key={`${idx}-${i}-${opt}`}
-                style={[gs.optionBtn, { backgroundColor: bg }, selected !== null && gs.optionDisabled]}
-                onPress={() => pick(i)}
-                disabled={selected !== null}
-              >
-                <Text style={gs.optionText}>{opt}</Text>
-              </TouchableOpacity>
-            );
-          })}
-          {selected !== null && (
-            <>
-              <Text style={[gs.answerFeedback, isCorrect ? gs.answerCorrect : gs.answerWrong]}>
-                {isCorrect
-                  ? `✅ Correct! +${POINTS_PER_CORRECT_LEVEL} pts`
-                  : '❌ Wrong · No points'}
-              </Text>
-              {!isCorrect && (
-                <WrongAnswerHint
-                  correctText={correctText}
-                  explanation={getQuizExplanation(q)}
-                />
-              )}
-              <NextLevelButton onPress={goNext} color="#e60000" isLast={isLastLevel} />
-            </>
-          )}
-        </>
+        <McqGameplay
+          accentColor="#e60000"
+          idx={idx}
+          total={QUIZ_QUESTIONS.length}
+          question={q.q}
+          shuffled={shuffled}
+          selected={selected}
+          onPick={pick}
+          isCorrect={isCorrect}
+          correctText={correctText}
+          explanation={getQuizExplanation(q)}
+          onNext={goNext}
+          isLastLevel={isLastLevel}
+        />
       )}
     </View>
   );
 }
 
 // ─── Scramble Game ────────────────────────────────────────────────────────────
-function ScrambleGame({ onClose, onScore }: { onClose: () => void; onScore: (n: number) => void }) {
+function ScrambleGame({
+  onClose,
+  onScore,
+  onHeaderMeta,
+}: {
+  onClose: () => void;
+  onScore: (n: number) => void;
+  onHeaderMeta?: (meta: GameHeaderMeta | null) => void;
+}) {
   const { idx, setIdx, score, setScore, ready, completeGame } = useGameProgress('scramble', WORD_SCRAMBLES.length);
   const [input, setInput] = useState('');
   const [result, setResult] = useState<'correct' | 'wrong' | null>(null);
@@ -404,7 +805,14 @@ function ScrambleGame({ onClose, onScore }: { onClose: () => void; onScore: (n: 
     onClose();
   };
 
-  if (!ready) return <GameLoading color="#6C5CE7" />;
+  useSyncGameHeader(
+    onHeaderMeta,
+    ready && !done
+      ? { level: idx + 1, total: WORD_SCRAMBLES.length, accentColor: '#6C5CE7' }
+      : null,
+  );
+
+  if (!ready) return <GameLoading color={MCQ.purple} />;
 
   const item = WORD_SCRAMBLES[idx];
   const isLastLevel = idx + 1 >= WORD_SCRAMBLES.length;
@@ -431,7 +839,7 @@ function ScrambleGame({ onClose, onScore }: { onClose: () => void; onScore: (n: 
   };
 
   return (
-    <View style={gs.gameContainer}>
+    <View style={gs.mcqGameContainer}>
       {done ? (
         <View style={gs.doneBox}>
           <Text style={gs.doneEmoji}>{scoreEmoji(score, WORD_SCRAMBLES.length)}</Text>
@@ -439,50 +847,39 @@ function ScrambleGame({ onClose, onScore }: { onClose: () => void; onScore: (n: 
           <Text style={gs.doneScore}>
             {score * POINTS_PER_CORRECT_LEVEL} pts · {score} / {WORD_SCRAMBLES.length} correct
           </Text>
-          <TouchableOpacity style={gs.doneBtn} onPress={finishAndClose}><Text style={gs.doneBtnText}>Back to Games</Text></TouchableOpacity>
+          <TouchableOpacity style={gs.mcqDoneBtn} onPress={finishAndClose}>
+            <Text style={gs.doneBtnText}>Back to Games</Text>
+          </TouchableOpacity>
         </View>
       ) : (
-        <>
-          {idx > 0 && <Text style={gs.resumeHint}>Resuming from level {idx + 1}</Text>}
-          <LevelProgress current={idx} total={WORD_SCRAMBLES.length} color="#6C5CE7" />
-          <Text style={gs.pointsHint}>+{POINTS_PER_CORRECT_LEVEL} pts per correct answer</Text>
-          <Text style={gs.hintText}>💡 {item.hint}</Text>
-          <Text style={gs.scrambledWord}>{scrambled}</Text>
-          <TextInput
-            style={[gs.scrambleInput, result === 'correct' && { borderColor: '#00b894' }, result === 'wrong' && { borderColor: '#e60000' }]}
-            value={input}
-            onChangeText={setInput}
-            placeholder="Type the word..."
-            autoCapitalize="characters"
-            placeholderTextColor="#aaa"
-            editable={result === null}
-          />
-          {result && (
-            <>
-              <Text style={[gs.answerFeedback, result === 'correct' ? gs.answerCorrect : gs.answerWrong]}>
-                {result === 'correct'
-                  ? `✅ Correct! +${POINTS_PER_CORRECT_LEVEL} pts`
-                  : '❌ Wrong · No points'}
-              </Text>
-              {result === 'wrong' && (
-                <WrongAnswerHint correctText={item.word} explanation={item.hint} />
-              )}
-              <NextLevelButton onPress={goNext} color="#6C5CE7" isLast={isLastLevel} />
-            </>
-          )}
-          {result === null && (
-            <TouchableOpacity style={[gs.doneBtn, { backgroundColor: '#6C5CE7', marginTop: 16 }]} onPress={check}>
-              <Text style={gs.doneBtnText}>Check</Text>
-            </TouchableOpacity>
-          )}
-        </>
+        <ScrambleGameplay
+          idx={idx}
+          total={WORD_SCRAMBLES.length}
+          hint={item.hint}
+          scrambled={scrambled}
+          input={input}
+          onChangeInput={setInput}
+          result={result}
+          correctWord={item.word}
+          onCheck={check}
+          onNext={goNext}
+          isLastLevel={isLastLevel}
+        />
       )}
     </View>
   );
 }
 
 // ─── Fill Blanks Game ─────────────────────────────────────────────────────────
-function FillBlanksGame({ onClose, onScore }: { onClose: () => void; onScore: (n: number) => void }) {
+function FillBlanksGame({
+  onClose,
+  onScore,
+  onHeaderMeta,
+}: {
+  onClose: () => void;
+  onScore: (n: number) => void;
+  onHeaderMeta?: (meta: GameHeaderMeta | null) => void;
+}) {
   const { idx, setIdx, score, setScore, ready, completeGame } = useGameProgress('fill', FILL_BLANKS.length);
   const [selected, setSelected] = useState<number | null>(null);
   const [done, setDone] = useState(false);
@@ -498,7 +895,14 @@ function FillBlanksGame({ onClose, onScore }: { onClose: () => void; onScore: (n
     [idx, q.options, q.answer],
   );
 
-  if (!ready) return <GameLoading color="#00b894" />;
+  useSyncGameHeader(
+    onHeaderMeta,
+    ready && !done
+      ? { level: idx + 1, total: FILL_BLANKS.length, accentColor: '#00b894' }
+      : null,
+  );
+
+  if (!ready) return <GameLoading color={MCQ.purple} />;
 
   const isCorrect = selected !== null && selected === shuffled.correctIndex;
   const isLastLevel = idx + 1 >= FILL_BLANKS.length;
@@ -525,7 +929,7 @@ function FillBlanksGame({ onClose, onScore }: { onClose: () => void; onScore: (n
   };
 
   return (
-    <View style={gs.gameContainer}>
+    <View style={gs.mcqGameContainer}>
       {done ? (
         <View style={gs.doneBox}>
           <Text style={gs.doneEmoji}>{scoreEmoji(score, FILL_BLANKS.length)}</Text>
@@ -533,64 +937,63 @@ function FillBlanksGame({ onClose, onScore }: { onClose: () => void; onScore: (n
           <Text style={gs.doneScore}>
             {score * POINTS_PER_CORRECT_LEVEL} pts · {score} / {FILL_BLANKS.length} correct
           </Text>
-          <TouchableOpacity style={gs.doneBtn} onPress={finishAndClose}><Text style={gs.doneBtnText}>Back to Games</Text></TouchableOpacity>
+          <TouchableOpacity style={gs.mcqDoneBtn} onPress={finishAndClose}>
+            <Text style={gs.doneBtnText}>Back to Games</Text>
+          </TouchableOpacity>
         </View>
       ) : (
-        <>
-          {idx > 0 && <Text style={gs.resumeHint}>Resuming from level {idx + 1}</Text>}
-          <LevelProgress current={idx} total={FILL_BLANKS.length} color="#00b894" />
-          <Text style={gs.pointsHint}>+{POINTS_PER_CORRECT_LEVEL} pts per correct answer</Text>
-          <Text style={gs.questionText}>{q.sentence}</Text>
-          {shuffled.options.map((opt, i) => {
-            let bg = '#fff';
-            if (selected !== null) {
-              if (i === shuffled.correctIndex) bg = '#d4edda';
-              else if (i === selected) bg = '#f8d7da';
-            }
-            return (
-              <TouchableOpacity
-                key={`${idx}-${i}-${opt}`}
-                style={[gs.optionBtn, { backgroundColor: bg }, selected !== null && gs.optionDisabled]}
-                onPress={() => pick(i)}
-                disabled={selected !== null}
-              >
-                <Text style={gs.optionText}>{opt}</Text>
-              </TouchableOpacity>
-            );
-          })}
-          {selected !== null && (
-            <>
-              <Text style={[gs.answerFeedback, isCorrect ? gs.answerCorrect : gs.answerWrong]}>
-                {isCorrect
-                  ? `✅ Correct! +${POINTS_PER_CORRECT_LEVEL} pts`
-                  : '❌ Wrong · No points'}
-              </Text>
-              {!isCorrect && (
-                <WrongAnswerHint correctText={correctText} explanation={q.rule} />
-              )}
-              <NextLevelButton onPress={goNext} color="#00b894" isLast={isLastLevel} />
-            </>
-          )}
-        </>
+        <McqGameplay
+          accentColor="#00b894"
+          idx={idx}
+          total={FILL_BLANKS.length}
+          question={q.sentence}
+          shuffled={shuffled}
+          selected={selected}
+          onPick={pick}
+          isCorrect={isCorrect}
+          correctText={correctText}
+          explanation={q.rule}
+          onNext={goNext}
+          isLastLevel={isLastLevel}
+        />
       )}
     </View>
   );
 }
 
 // ─── Flashcard Game ───────────────────────────────────────────────────────────
-function FlashcardGame({ onClose }: { onClose: () => void }) {
+function FlashcardGame({
+  onClose,
+  onHeaderMeta,
+}: {
+  onClose: () => void;
+  onHeaderMeta?: (meta: GameHeaderMeta | null) => void;
+}) {
   const { idx, setIdx, ready, completeGame } = useGameProgress('flash', FLASHCARDS.length);
   const [flipped, setFlipped] = useState(false);
   const [done, setDone] = useState(false);
+
+  useSyncGameHeader(
+    onHeaderMeta,
+    ready && !done
+      ? {
+          level: idx + 1,
+          total: FLASHCARDS.length,
+          accentColor: '#0984e3',
+          levelPrefix: 'Card',
+        }
+      : null,
+  );
 
   const finishAndClose = async () => {
     await completeGame();
     onClose();
   };
 
-  if (!ready) return <GameLoading color="#0984e3" />;
+  if (!ready) return <GameLoading color={MCQ.purple} />;
 
   const card = FLASHCARDS[idx];
+  const isLastLevel = idx + 1 >= FLASHCARDS.length;
 
   const next = () => {
     setFlipped(false);
@@ -600,21 +1003,15 @@ function FlashcardGame({ onClose }: { onClose: () => void }) {
       setDone(true);
     }
   };
-  const prev = () => {
-    if (idx > 0) {
-      setFlipped(false);
-      setIdx(idx - 1);
-    }
-  };
 
   if (done) {
     return (
-      <View style={gs.gameContainer}>
+      <View style={gs.mcqGameContainer}>
         <View style={gs.doneBox}>
           <Text style={gs.doneEmoji}>🎉</Text>
           <Text style={gs.doneTitle}>Flashcards Complete!</Text>
           <Text style={gs.doneScore}>You reviewed all {FLASHCARDS.length} cards</Text>
-          <TouchableOpacity style={[gs.doneBtn, { backgroundColor: '#0984e3' }]} onPress={finishAndClose}>
+          <TouchableOpacity style={gs.mcqDoneBtn} onPress={finishAndClose}>
             <Text style={gs.doneBtnText}>Back to Games</Text>
           </TouchableOpacity>
         </View>
@@ -623,39 +1020,42 @@ function FlashcardGame({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <View style={gs.gameContainer}>
-      {idx > 0 && <Text style={gs.resumeHint}>Resuming from card {idx + 1}</Text>}
-      <LevelProgress current={idx} total={FLASHCARDS.length} color="#0984e3" />
-      <TouchableOpacity style={gs.flashcard} onPress={() => setFlipped(!flipped)} activeOpacity={0.9}>
-        <LinearGradient colors={flipped ? ['#0984e3', '#74b9ff'] : ['#6C5CE7', '#a29bfe']} style={gs.flashcardInner}>
-          <Text style={gs.flashcardLabel}>{flipped ? 'Meaning' : 'Word'}</Text>
-          <Text style={gs.flashcardWord}>{flipped ? card.meaning : card.word}</Text>
-          {flipped && <Text style={gs.flashcardExample}>"{card.example}"</Text>}
-          {!flipped && <Text style={gs.flashcardTap}>Tap to reveal meaning</Text>}
-        </LinearGradient>
-      </TouchableOpacity>
-      <View style={gs.flashNav}>
-        <TouchableOpacity style={[gs.flashNavBtn, idx === 0 && gs.flashNavBtnDisabled]} onPress={prev} disabled={idx === 0}>
-          <Feather name="chevron-left" size={24} color={idx === 0 ? '#ccc' : '#333'} />
-        </TouchableOpacity>
-        <Text style={gs.flashNavLabel}>{idx + 1 === FLASHCARDS.length ? 'Finish' : 'Next'}</Text>
-        <TouchableOpacity style={gs.flashNavBtn} onPress={next}>
-          <Feather name={idx + 1 === FLASHCARDS.length ? 'check' : 'chevron-right'} size={24} color="#333" />
-        </TouchableOpacity>
-      </View>
-      <TouchableOpacity style={[gs.doneBtn, { backgroundColor: '#6C5CE7', marginTop: 8 }]} onPress={onClose}>
-        <Text style={gs.doneBtnText}>Back to Games</Text>
-      </TouchableOpacity>
+    <View style={gs.mcqGameContainer}>
+      <FlashcardGameplay
+        idx={idx}
+        total={FLASHCARDS.length}
+        word={card.word}
+        meaning={card.meaning}
+        example={card.example}
+        flipped={flipped}
+        onFlip={() => setFlipped(!flipped)}
+        onNext={next}
+        isLastLevel={isLastLevel}
+      />
     </View>
   );
 }
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function GamesScreen() {
+  const { setHideTabBar } = useGameTabBar();
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const [activeGame, setActiveGame] = useState<GameId | null>(null);
+  const [gameHeaderMeta, setGameHeaderMeta] = useState<GameHeaderMeta | null>(null);
   const [totalScore, setTotalScore] = useState(0);
   const [savedProgress, setSavedProgress] = useState<Record<GameId, GameProgress> | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      setHideTabBar(!!activeGame);
+      return () => setHideTabBar(false);
+    }, [activeGame, setHideTabBar]),
+  );
+
+  useEffect(() => {
+    if (!activeGame) setGameHeaderMeta(null);
+  }, [activeGame]);
 
   useEffect(() => {
     if (!activeGame) {
@@ -690,73 +1090,92 @@ export default function GamesScreen() {
     }
   };
 
+  const closeGame = () => {
+    setActiveGame(null);
+    setGameHeaderMeta(null);
+  };
+
   const renderGame = () => {
-    if (activeGame === 'quiz') return <QuizGame onClose={() => setActiveGame(null)} onScore={handleScore} />;
-    if (activeGame === 'scramble') return <ScrambleGame onClose={() => setActiveGame(null)} onScore={handleScore} />;
-    if (activeGame === 'fill') return <FillBlanksGame onClose={() => setActiveGame(null)} onScore={handleScore} />;
-    if (activeGame === 'flash') return <FlashcardGame onClose={() => setActiveGame(null)} />;
+    const headerProps = { onHeaderMeta: setGameHeaderMeta };
+    if (activeGame === 'quiz') {
+      return <QuizGame onClose={closeGame} onScore={handleScore} {...headerProps} />;
+    }
+    if (activeGame === 'scramble') {
+      return <ScrambleGame onClose={closeGame} onScore={handleScore} {...headerProps} />;
+    }
+    if (activeGame === 'fill') {
+      return <FillBlanksGame onClose={closeGame} onScore={handleScore} {...headerProps} />;
+    }
+    if (activeGame === 'flash') {
+      return <FlashcardGame onClose={closeGame} {...headerProps} />;
+    }
     return null;
   };
 
   const activeTitle = GAMES.find((g) => g.id === activeGame)?.title ?? '';
+  const isAptitudeGame = !!activeGame;
+
+  const scrollBottom = tabBarHeight + 24;
 
   return (
-    <View style={ui.root}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+    <View style={[ui.root, isAptitudeGame && ui.rootMcq]}>
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={isAptitudeGame ? MCQ.bg : UI.bg}
+      />
+      <SafeAreaView edges={['top']} style={[ui.safeTop, isAptitudeGame && ui.safeTopMcq]} />
       {activeGame ? (
-        <View style={ui.screen}>
-          <GamesStickyHeader
-            insetsTop={insets.top}
+        <View style={[ui.screen, ui.screenMcq]}>
+          <GamesHeader
             title={activeTitle}
-            subtitle="English practice game"
-            onBack={() => setActiveGame(null)}
+            subtitle=""
+            onBack={closeGame}
+            gameMeta={gameHeaderMeta}
+            aptitudeStyle
           />
-          <ScrollView
-            style={ui.scrollBody}
-            contentContainerStyle={ui.gameScroll}
-            showsVerticalScrollIndicator={false}
-          >
-            {renderGame()}
-          </ScrollView>
+          <View style={ui.mcqGameBody}>{renderGame()}</View>
         </View>
       ) : (
-        <View style={ui.screen}>
-          <GamesStickyHeader
-            insetsTop={insets.top}
-            title="English Games"
-            subtitle="Play and improve your English skills"
-          />
-          <ScrollView
-            style={ui.scrollBody}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={ui.scroll}
-          >
-            <View style={ui.content}>
-              <ScoreBoard points={totalScore} />
+        <ScrollView
+          style={ui.scrollBody}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[ui.scroll, { paddingBottom: scrollBottom }]}
+        >
+          <View style={ui.content}>
+            <GamesHeader
+              title="Games"
+              subtitle="Play and improve your English skills"
+            />
+            <ScoreBoard points={totalScore} />
 
-              <View style={ui.gamesSection}>
-                <SectionHeading title="Choose a game" />
-                <View style={ui.gamesGrid}>
-                  {GAMES.map((game) => (
-                    <GameCard
-                      key={game.id}
-                      game={game}
-                      savedLevel={savedProgress?.[game.id]?.level ?? 0}
-                      onPress={() => setActiveGame(game.id)}
-                    />
-                  ))}
-                </View>
-              </View>
-
-              <View style={ui.tipCard}>
-                <MaterialCommunityIcons name="lightbulb-on-outline" size={20} color="#5F6368" />
-                <Text style={ui.tipText}>
-                  Play daily to earn points and climb the Leaderboard.
-                </Text>
+            <View style={ui.gamesSection}>
+              <SectionHeading title="Choose a game" />
+              <View style={ui.gamesGrid}>
+                {[0, 1].map((rowIndex) => (
+                  <View key={rowIndex} style={ui.gamesRow}>
+                    {GAMES.slice(rowIndex * 2, rowIndex * 2 + 2).map((game) => (
+                      <GameCard
+                        key={game.id}
+                        game={game}
+                        savedLevel={savedProgress?.[game.id]?.level ?? 0}
+                        onPress={() => setActiveGame(game.id)}
+                      />
+                    ))}
+                  </View>
+                ))}
               </View>
             </View>
-          </ScrollView>
-        </View>
+
+            <View style={[ui.tipCard, cardShadow]}>
+              <View style={ui.tipIconWrap}>
+                <MaterialCommunityIcons name="lightbulb-on-outline" size={20} color={UI.accent} />
+              </View>
+              <Text style={ui.tipText}>
+                Play daily to earn points and climb the Leaderboard.
+              </Text>
+            </View>
+          </View>
+        </ScrollView>
       )}
     </View>
   );
@@ -764,49 +1183,331 @@ export default function GamesScreen() {
 
 // ─── Shared Game Styles ───────────────────────────────────────────────────────
 const gs = StyleSheet.create({
-  gameContainer: { flex: 1, padding: 20, backgroundColor: '#F8F9FA' },
-  loadingBox: { justifyContent: 'center', alignItems: 'center' },
-  loadingText: { marginTop: 12, fontSize: 14, color: '#888', fontWeight: '500' },
-  resumeHint: { fontSize: 13, color: '#0984e3', fontWeight: '600', marginBottom: 8, textAlign: 'center' },
-  pointsHint: { fontSize: 12, color: '#00b894', fontWeight: '600', marginBottom: 10, textAlign: 'center' },
-  answerFeedback: { fontSize: 14, fontWeight: '700', textAlign: 'center', marginTop: 8 },
-  answerCorrect: { color: '#00b894' },
-  answerWrong: { color: '#e60000' },
-  explainBox: {
-    backgroundColor: '#FFF8E6',
+  gameContainer: { flex: 1, paddingHorizontal: 16, paddingTop: 4, backgroundColor: UI.bg },
+  mcqGameContainer: { flex: 1, backgroundColor: MCQ.bg },
+  mcqScreen: { flex: 1, backgroundColor: MCQ.bg },
+  mcqProgressTrack: {
+    height: 4,
+    backgroundColor: MCQ.purpleTrack,
+    width: '100%',
+  },
+  mcqProgressFill: {
+    height: '100%',
+    backgroundColor: MCQ.purple,
+    borderRadius: 2,
+  },
+  mcqScroll: { flex: 1 },
+  mcqScrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  mcqQuestionLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: MCQ.purple,
+    marginBottom: 12,
+  },
+  mcqQuestionText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: UI.text,
+    lineHeight: 32,
+    letterSpacing: -0.3,
+    marginBottom: 28,
+  },
+  mcqOptionsBlock: { gap: 12 },
+  mcqOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: MCQ.bg,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: MCQ.border,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    minHeight: 60,
+  },
+  mcqOptionCardSelected: {
+    backgroundColor: MCQ.purpleLight,
+    borderColor: MCQ.purple,
+  },
+  mcqOptionCardCorrect: {
+    backgroundColor: MCQ.correctBg,
+    borderColor: MCQ.correctBorder,
+  },
+  mcqOptionCardWrong: {
+    backgroundColor: MCQ.wrongBg,
+    borderColor: MCQ.wrongBorder,
+  },
+  mcqOptionText: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '500',
+    color: UI.text,
+    paddingRight: 12,
+  },
+  mcqOptionTextActive: { fontWeight: '600' },
+  mcqRadioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mcqRadioOuterSelected: {
+    borderColor: MCQ.purple,
+    backgroundColor: MCQ.purple,
+  },
+  mcqRadioOuterCorrect: {
+    borderColor: MCQ.correctBorder,
+    backgroundColor: MCQ.correctBorder,
+  },
+  mcqRadioOuterWrong: {
+    borderColor: MCQ.wrongBorder,
+    backgroundColor: MCQ.wrongBorder,
+  },
+  mcqRadioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+  },
+  mcqHintBox: {
+    marginTop: 20,
+    padding: 14,
     borderRadius: 12,
+    backgroundColor: MCQ.purpleLight,
+  },
+  mcqHintCorrect: { fontSize: 14, fontWeight: '600', color: UI.text, marginBottom: 6 },
+  mcqHintBold: { fontWeight: '700', color: MCQ.correctBorder },
+  mcqHintDetail: { fontSize: 14, color: UI.textSecondary, lineHeight: 21 },
+  mcqCorrectBanner: {
+    marginTop: 16,
+    fontSize: 15,
+    fontWeight: '700',
+    color: MCQ.correctBorder,
+    textAlign: 'center',
+  },
+  mcqFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 20,
+    backgroundColor: MCQ.bg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: MCQ.border,
+  },
+  mcqNextBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#101010',
+    borderRadius: 14,
+    paddingVertical: 17,
+    minHeight: 56,
+  },
+  mcqNextBtnDisabled: { opacity: 0.35 },
+  mcqNextBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  mcqScrambleHint: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: MCQ.purple,
+    marginBottom: 8,
+  },
+  mcqScrambleWord: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: UI.text,
+    letterSpacing: 8,
+    textAlign: 'center',
+    marginBottom: 28,
+  },
+  mcqTextInput: {
+    borderWidth: 1.5,
+    borderColor: MCQ.border,
+    borderRadius: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: UI.text,
+    backgroundColor: MCQ.bg,
+    minHeight: 60,
+  },
+  mcqTextInputCorrect: {
+    backgroundColor: MCQ.correctBg,
+    borderColor: MCQ.correctBorder,
+  },
+  mcqTextInputWrong: {
+    backgroundColor: MCQ.wrongBg,
+    borderColor: MCQ.wrongBorder,
+  },
+  mcqFlashCard: {
+    backgroundColor: MCQ.bg,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: MCQ.purple,
+    minHeight: 220,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  mcqFlashLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: MCQ.purple,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+    marginBottom: 16,
+  },
+  mcqFlashMain: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: UI.text,
+    textAlign: 'center',
+    lineHeight: 36,
+  },
+  mcqFlashExample: {
+    fontSize: 15,
+    color: UI.textSecondary,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: 16,
+    lineHeight: 22,
+    paddingHorizontal: 8,
+  },
+  mcqFlashTap: {
+    fontSize: 14,
+    color: UI.textTertiary,
+    marginTop: 20,
+    fontWeight: '500',
+  },
+  mcqDoneBtn: {
+    backgroundColor: '#101010',
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignSelf: 'center',
+  },
+  loadingBox: { justifyContent: 'center', alignItems: 'center', minHeight: 200 },
+  loadingText: { marginTop: 12, fontSize: 14, color: UI.textSecondary, fontWeight: '500' },
+  questionCard: {
+    backgroundColor: UI.surface,
+    borderRadius: 20,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    marginBottom: 16,
+    justifyContent: 'center',
+    minHeight: 108,
+  },
+  optionsBlock: { marginBottom: 8 },
+  feedbackCard: {
+    backgroundColor: UI.surface,
+    borderRadius: 20,
+    padding: 18,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  answerFeedback: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 4 },
+  answerCorrect: { color: '#00b894' },
+  answerWrong: { color: UI.accent },
+  explainBox: {
+    backgroundColor: UI.surfaceMuted,
+    borderRadius: 14,
     padding: 14,
     marginTop: 12,
-    marginBottom: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FFA502',
+    marginBottom: 4,
   },
-  explainCorrect: { fontSize: 14, fontWeight: '700', color: '#1a1a1a', marginBottom: 6 },
+  explainCorrect: { fontSize: 14, fontWeight: '700', color: UI.text, marginBottom: 6 },
   explainBold: { color: '#00b894' },
-  explainDetail: { fontSize: 13, color: '#555', lineHeight: 20 },
-  optionDisabled: { opacity: 0.85 },
+  explainDetail: { fontSize: 14, color: UI.textSecondary, lineHeight: 22 },
   nextBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 20,
-    alignSelf: 'center',
-    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 24,
+    marginTop: 14,
     width: '100%',
+    minHeight: 52,
   },
-  progressWrap: { marginBottom: 20 },
-  progressTrack: { height: 8, backgroundColor: '#e8e8e8', borderRadius: 4, overflow: 'hidden', marginBottom: 8 },
+  progressWrap: { marginBottom: 4 },
+  progressTrack: {
+    height: 8,
+    backgroundColor: UI.surfaceMuted,
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
   progressFill: { height: '100%', borderRadius: 4 },
-  questionNum: { fontSize: 13, color: '#888', fontWeight: '600', textAlign: 'center' },
-  questionText: { fontSize: 18, fontWeight: '700', color: '#1a1a1a', marginBottom: 24, lineHeight: 26 },
-  hintText: { fontSize: 14, color: '#888', marginBottom: 12 },
-  scrambledWord: { fontSize: 32, fontWeight: '900', color: '#6C5CE7', textAlign: 'center', letterSpacing: 8, marginBottom: 24 },
-  scrambleInput: { borderWidth: 2, borderColor: '#e0e0e0', borderRadius: 16, padding: 14, fontSize: 18, fontWeight: '700', textAlign: 'center', color: '#1a1a1a', backgroundColor: '#f8f8f8' },
-  optionBtn: { borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#e0e0e0', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
-  optionText: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
+  questionNum: { fontSize: 14, color: UI.textSecondary, fontWeight: '500', textAlign: 'center' },
+  questionText: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: UI.text,
+    lineHeight: 30,
+    textAlign: 'center',
+    letterSpacing: -0.2,
+  },
+  hintText: {
+    fontSize: 14,
+    color: UI.textSecondary,
+    marginBottom: 16,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  scrambledWord: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#6C5CE7',
+    textAlign: 'center',
+    letterSpacing: 6,
+  },
+  scrambleInput: {
+    borderWidth: 1,
+    borderColor: UI.divider,
+    borderRadius: 20,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: UI.text,
+    backgroundColor: UI.surface,
+    marginBottom: 12,
+  },
+  scrambleInputCorrect: { borderColor: '#A5D6A7', backgroundColor: '#E8F5E9' },
+  scrambleInputWrong: { borderColor: '#FFCDD2', backgroundColor: '#FFEBEE' },
+  optionBtn: {
+    borderRadius: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    marginBottom: 12,
+    backgroundColor: UI.surface,
+    borderWidth: 1,
+    borderColor: UI.divider,
+    minHeight: 56,
+    justifyContent: 'center',
+    ...cardShadow,
+  },
+  optionBtnCorrect: {
+    backgroundColor: '#E8F5E9',
+    borderColor: '#A5D6A7',
+  },
+  optionBtnWrong: {
+    backgroundColor: '#FFEBEE',
+    borderColor: '#FFCDD2',
+  },
+  optionBtnDimmed: { opacity: 0.45 },
+  optionText: { fontSize: 17, fontWeight: '600', color: UI.text, textAlign: 'center' },
   flashcard: { borderRadius: 24, overflow: 'hidden', marginBottom: 24, height: 220 },
   flashcardInner: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   flashcardLabel: { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginBottom: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 2 },
@@ -817,247 +1518,311 @@ const gs = StyleSheet.create({
   flashNavBtn: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' },
   flashNavBtnDisabled: { opacity: 0.5 },
   flashNavLabel: { fontSize: 14, fontWeight: '700', color: '#666' },
-  doneBox: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  doneBox: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    backgroundColor: UI.surface,
+    borderRadius: 24,
+    marginVertical: 16,
+    ...cardShadow,
+  },
   doneEmoji: { fontSize: 60, marginBottom: 16 },
-  doneTitle: { fontSize: 28, fontWeight: '900', color: '#1a1a1a', marginBottom: 8 },
-  doneScore: { fontSize: 20, fontWeight: '700', color: '#666', marginBottom: 32 },
-  doneBtn: { backgroundColor: '#e60000', paddingHorizontal: 32, paddingVertical: 14, borderRadius: 20, alignSelf: 'center' },
+  doneTitle: { fontSize: 28, fontWeight: '800', color: UI.text, marginBottom: 8 },
+  doneScore: { fontSize: 18, fontWeight: '600', color: UI.textSecondary, marginBottom: 32 },
+  doneBtn: { backgroundColor: UI.accent, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 22, alignSelf: 'center' },
   doneBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
 });
 
-// ─── Screen UI (Google-style, matches Performance / Leaderboard) ─────────────
+// ─── Screen UI (Samsung One UI, matches Rewards / Performance) ─────────────────
 const ui = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+    backgroundColor: UI.bg,
   },
+  rootMcq: { backgroundColor: MCQ.bg },
+  safeTop: {
+    backgroundColor: UI.bg,
+  },
+  safeTopMcq: { backgroundColor: MCQ.bg },
   screen: { flex: 1 },
-  stickyHeader: {
-    paddingBottom: 16,
-    zIndex: 10,
-  },
-  scrollBody: { flex: 1, backgroundColor: '#F8F9FA' },
-  headerRow: {
+  screenMcq: { backgroundColor: MCQ.bg },
+  mcqGameBody: { flex: 1, backgroundColor: MCQ.bg },
+  aptitudeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingRight: 16,
-  },
-  headerTextBlock: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    minWidth: 0,
-  },
-  headerTextBlockMain: {
     paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: MCQ.bg,
   },
-  backBtn: {
-    width: 48,
-    height: 48,
+  aptitudeBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: MCQ.purpleLight,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 4,
   },
-  headerTitle: {
-    fontSize: 22,
+  aptitudeHeaderTitle: {
+    flex: 1,
+    fontSize: 17,
     fontWeight: '700',
-    color: '#1F1F1F',
+    color: UI.text,
+    textAlign: 'center',
+    letterSpacing: -0.2,
+    marginHorizontal: 8,
   },
-  headerSub: {
+  aptitudeHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 56,
+    justifyContent: 'flex-end',
+  },
+  aptitudeHeaderRightPlaceholder: { width: 56 },
+  aptitudeHeaderTimer: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: UI.text,
+  },
+  scrollBody: { flex: 1, backgroundColor: UI.bg },
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    backgroundColor: UI.bg,
+    gap: 4,
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  navTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '700',
+    color: UI.text,
+    letterSpacing: -0.3,
+    minWidth: 0,
+    marginRight: 6,
+  },
+  navMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 0,
+  },
+  navLevel: {
     fontSize: 14,
-    fontWeight: '400',
-    color: '#5F6368',
-    marginTop: 2,
-    lineHeight: 20,
+    fontWeight: '700',
   },
-  scroll: { paddingBottom: 32 },
-  gameScroll: { flexGrow: 1, paddingBottom: 24 },
-  content: { paddingHorizontal: 14, paddingTop: 4 },
-  scoreBoardWrap: {
+  navPts: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  pageHeader: {
+    paddingHorizontal: 4,
+    paddingTop: 4,
+    paddingBottom: 20,
+  },
+  pageTitle: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: UI.text,
+    letterSpacing: -0.8,
+  },
+  pageSubtitle: {
+    fontSize: 15,
+    color: UI.textSecondary,
+    marginTop: 6,
+    lineHeight: 22,
+  },
+  scroll: { flexGrow: 1 },
+  gameScroll: { flexGrow: 1, paddingHorizontal: 0 },
+  content: { paddingHorizontal: 20 },
+  scoreHero: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 24,
+    ...cardShadow,
+  },
+  scoreHeroGradient: {
+    padding: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: UI.divider,
+  },
+  scoreHeroTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
-    gap: 10,
   },
-  scoreBoard: {
+  scoreHeroLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: UI.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  scoreHeroRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    flexShrink: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    paddingVertical: 8,
-    paddingLeft: 10,
-    paddingRight: 14,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
+    alignItems: 'baseline',
     gap: 6,
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 2,
-    elevation: 1,
+  },
+  scoreHeroPoints: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: UI.text,
+    letterSpacing: -1,
+  },
+  scoreHeroUnit: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: UI.textTertiary,
+  },
+  scoreHeroIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: UI.accentGlow,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   scoreBoardIcon: {
-    width: 28,
-    height: 28,
+    width: 32,
+    height: 32,
+  },
+  scoreHeroDivider: {
+    height: 1,
+    backgroundColor: UI.divider,
+    marginVertical: 14,
   },
   logosStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingRight: 4,
+    justifyContent: 'center',
   },
   logoCircle: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: UI.surface,
     borderWidth: 2,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    ...cardShadow,
   },
-  scoreBoardLabel: {
+  sectionTitle: {
     fontSize: 13,
-    fontWeight: '500',
-    color: '#5F6368',
-  },
-  scoreBoardPoints: {
-    fontSize: 20,
     fontWeight: '700',
-    color: '#1F1F1F',
-    letterSpacing: -0.3,
+    color: UI.textSecondary,
+    letterSpacing: 0.3,
+    marginBottom: 12,
   },
-  scoreBoardUnit: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#80868B',
-    marginTop: 2,
-  },
-  cardSectionHeader: {
-    paddingTop: 2,
-    paddingBottom: 0,
-    marginBottom: 8,
-  },
-  cardSectionHeaderInset: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    marginBottom: 0,
-  },
-  cardSectionHeaderText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#5F6368',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 10,
-  },
-  cardSectionHeaderLine: {
-    height: 1,
-    backgroundColor: '#E8EAED',
-    marginBottom: 6,
-  },
-  cardSectionHeaderLineInset: { marginBottom: 4 },
-  gamesSection: { marginBottom: 12 },
+  gamesSection: { marginBottom: 20 },
   gamesGrid: {
+    gap: GAME_GRID_GAP,
+  },
+  gamesRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
+    gap: GAME_GRID_GAP,
   },
   gameCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
+    backgroundColor: UI.surface,
+    borderRadius: 22,
     overflow: 'hidden',
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
+    borderWidth: 1,
+    borderColor: UI.divider,
   },
   gameCardHero: {
-    height: 108,
+    height: 88,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   gameCardImage: {
-    width: 72,
-    height: 72,
+    width: 60,
+    height: 60,
   },
   gameCardBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 10,
+    top: 10,
+    right: 10,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   gameCardBadgeText: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
     color: '#FFFFFF',
   },
   gameCardBody: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingTop: 10,
     paddingBottom: 12,
   },
   gameCardTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
+    gap: 8,
+    marginBottom: 6,
   },
   gameCardTitleLogo: {
-    width: 22,
-    height: 22,
+    width: 24,
+    height: 24,
   },
   gameCardTitle: {
     flex: 1,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#1F1F1F',
+    color: UI.text,
   },
   gameCardDesc: {
     fontSize: 11,
-    color: '#5F6368',
+    color: UI.textSecondary,
     lineHeight: 15,
     minHeight: 30,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   gameCardCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 4,
     paddingVertical: 8,
-    borderRadius: 10,
+    borderRadius: 12,
   },
   gameCardCtaText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: '#FFFFFF',
   },
   tipCard: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 14,
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: UI.surface,
+    borderRadius: 20,
+    padding: 16,
     borderWidth: 1,
-    borderColor: '#E8EAED',
+    borderColor: UI.divider,
+    marginBottom: 8,
+  },
+  tipIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: UI.accentGlow,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   tipText: {
     flex: 1,
-    fontSize: 13,
-    color: '#5F6368',
-    lineHeight: 20,
+    fontSize: 14,
+    color: UI.textSecondary,
+    lineHeight: 21,
   },
 });

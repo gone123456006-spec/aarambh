@@ -15,7 +15,7 @@ export const Colors = {
     tint: tintColorLight,
     icon: '#687076',
     tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    tabIconSelected: '#e60000',
   },
   dark: {
     text: '#ECEDEE',
@@ -26,6 +26,35 @@ export const Colors = {
     tabIconSelected: tintColorDark,
   },
 };
+
+/** Shared surfaces — Rewards, Games, Home, My Courses */
+export const AppUI = {
+  bg: '#F2F3F7',
+  surface: '#FFFFFF',
+  surfaceMuted: '#ECEEF2',
+  text: '#101010',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
+  accent: '#e60000',
+  accentGlow: 'rgba(230, 0, 0, 0.12)',
+  /** Samsung One UI — home hero (matches status bar, fades to white) */
+  homeHeroTop: '#F2F3F7',
+  homeHeroMid: '#F7F8FA',
+  homeHeroBottom: '#FFFFFF',
+  divider: 'rgba(0,0,0,0.06)',
+  shadow: '#000000',
+};
+
+export const cardShadow = Platform.select({
+  ios: {
+    shadowColor: AppUI.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+  },
+  android: { elevation: 3 },
+  default: {},
+});
 
 export const Fonts = Platform.select({
   ios: {

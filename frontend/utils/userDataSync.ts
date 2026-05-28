@@ -69,6 +69,12 @@ export async function syncUserDataFromServer(): Promise<void> {
   const gameStatsKey = await userScopedKey('gameStats');
   const totalScoreKey = await userScopedKey('totalGameScore');
 
+  // If the backend hasn't persisted daily reward points yet, your local score may be higher.
+  // Prevent points from dropping after logout/login by keeping the max of (server, local).
+  const localTotalRaw = await AsyncStorage.getItem(totalScoreKey);
+  const localTotalScore = localTotalRaw ? parseInt(localTotalRaw, 10) || 0 : 0;
+  const finalTotalScore = Math.max(totalScore, localTotalScore);
+
   const gameProgress: Partial<Record<GameId, { level: number; score: number }>> = {};
   const gameStats: Partial<
     Record<GameId, { correct: number; incorrect: number; points: number }>
@@ -95,6 +101,6 @@ export async function syncUserDataFromServer(): Promise<void> {
     [lastLessonKey, course.lastLessonId ?? ''],
     [gameProgressKey, JSON.stringify(gameProgress)],
     [gameStatsKey, JSON.stringify(gameStats)],
-    [totalScoreKey, String(totalScore)],
+    [totalScoreKey, String(finalTotalScore)],
   ]);
 }

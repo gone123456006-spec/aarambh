@@ -22,6 +22,7 @@ const MAPPING = {
   'sparkles': 'auto-awesome',
   'play.rectangle.fill': 'ondemand-video',
   'gamecontroller.fill': 'sports-esports',
+  'gift.fill': 'card-giftcard',
 } as IconMapping;
 
 /**

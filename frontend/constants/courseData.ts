@@ -223,7 +223,7 @@ export const COURSE_DATA: {
         duration: '45:00',
         type: 'video',
         description:
-          'Combine grammar, vocabulary, speaking, and writing skills in a final graduation presentation that showcases your English journey. You will plan a topic, gather supporting materials, rehearse delivery, and reflect on progress since your first lesson. Mentors explain assessment criteria and how to manage nerves on presentation day. The project PDF outlines milestones, rubric details, reflection prompts, and submission steps to complete your Aarambh course successfully.',
+          'Combine grammar, vocabulary, speaking, and writing skills in a final graduation presentation that showcases your English journey. You will plan a topic, gather supporting materials, rehearse delivery, and reflect on progress since your first lesson. Mentors explain assessment criteria and how to manage nerves on presentation day. The project PDF outlines milestones, rubric details, reflection prompts, and submission steps to complete your Ohm\'s course successfully.',
         pdfTitle: 'Lesson 10 — Graduation Project PDF',
       },
     ],

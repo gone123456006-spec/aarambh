@@ -1,6 +1,7 @@
 import React, { memo, useEffect } from 'react';
-import { StyleSheet, View, Text } from 'react-native';
+import { StyleSheet, View, Text, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { AppUI } from '@/constants/theme';
 import Animated, {
   Easing,
   Extrapolation,
@@ -106,7 +107,7 @@ const SpiralDotBubble = memo(function SpiralDotBubble({
             width: dot.size,
             height: dot.size,
             borderRadius: dot.size / 2,
-            opacity: 0.35 + (dot.size / 10) * 0.65,
+            opacity: 0.42 + (dot.size / 10) * 0.58,
           },
         ]}
       />
@@ -270,11 +271,43 @@ function OrbitRing({
   );
 }
 
+function AnimatedWaitDot({ index, phase }: { index: number; phase: SharedValue<number> }) {
+  const dotStyle = useAnimatedStyle(() => {
+    const offset = index * 0.22;
+    const t = (phase.value + offset) % 1;
+    const opacity = interpolate(t, [0, 0.45, 1], [0.22, 1, 0.22], Extrapolation.CLAMP);
+    return { opacity };
+  });
+
+  return <Animated.Text style={[styles.findingSub, styles.waitDot, dotStyle]}>.</Animated.Text>;
+}
+
+function PleaseWaitLabel() {
+  const phase = useSharedValue(0);
+
+  useEffect(() => {
+    phase.value = withRepeat(
+      withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      false
+    );
+  }, [phase]);
+
+  return (
+    <View style={styles.waitRow}>
+      <Text style={styles.findingSub}>Please wait</Text>
+      <AnimatedWaitDot index={0} phase={phase} />
+      <AnimatedWaitDot index={1} phase={phase} />
+      <AnimatedWaitDot index={2} phase={phase} />
+    </View>
+  );
+}
+
 function MatchmakingFooter() {
   return (
     <View style={styles.footer}>
       <Text style={styles.findingTitle}>Finding Your Learner</Text>
-      <Text style={styles.findingSub}>Please wait ..</Text>
+      <PleaseWaitLabel />
     </View>
   );
 }
@@ -340,8 +373,8 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
-    backgroundColor: '#F8F9FA',
+    paddingHorizontal: 20,
+    backgroundColor: AppUI.bg,
   },
   scene: {
     width: SCENE,
@@ -360,7 +393,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
   },
   spiralDot: {
-    backgroundColor: '#e60000',
+    backgroundColor: AppUI.accent,
   },
   orbitRing: {
     position: 'absolute',
@@ -380,16 +413,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   orbitBubble: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 4,
-    elevation: 4,
+    borderWidth: 2,
+    borderColor: AppUI.surface,
+    ...Platform.select({
+      ios: {
+        shadowColor: AppUI.shadow,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+      },
+      android: { elevation: 3 },
+      default: {},
+    }),
   },
   cubeAnchor: {
     position: 'absolute',
@@ -414,17 +454,22 @@ const styles = StyleSheet.create({
   facePanel: {
     width: CUBE,
     height: CUBE,
-    borderRadius: 22,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    elevation: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.4)',
+    ...Platform.select({
+      ios: {
+        shadowColor: AppUI.shadow,
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.14,
+        shadowRadius: 14,
+      },
+      android: { elevation: 10 },
+      default: {},
+    }),
   },
   facePanelInner: {
     ...StyleSheet.absoluteFillObject,
@@ -440,21 +485,29 @@ const styles = StyleSheet.create({
   },
   footer: {
     alignItems: 'center',
-    gap: 6,
-    marginTop: 20,
+    gap: 8,
+    paddingHorizontal: 24,
   },
   findingTitle: {
-    fontSize: 18,
+    fontSize: 22,
     fontWeight: '700',
-    color: '#1F1F1F',
+    color: AppUI.text,
     textAlign: 'center',
-    letterSpacing: 0.2,
+    letterSpacing: -0.4,
   },
   findingSub: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: '#5F6368',
-    textAlign: 'center',
-    lineHeight: 20,
+    fontSize: 15,
+    fontWeight: '500',
+    color: AppUI.textSecondary,
+    lineHeight: 22,
+  },
+  waitRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  waitDot: {
+    marginLeft: 1,
+    marginBottom: -1,
   },
 });

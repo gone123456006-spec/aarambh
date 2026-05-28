@@ -23,7 +23,6 @@ import { isProfileCompleteUser } from '@/utils/profile';
 import { saveAuthSession } from '@/utils/authStorage';
 import { syncUserDataFromServer } from '@/utils/userDataSync';
 import { checkApiHealth } from '@/utils/checkApiHealth';
-import { API_BASE_URL, getApiConnectionHint } from '@/constants/api';
 
 type LoginStep = 'EMAIL_INPUT' | 'OTP_INPUT';
 
@@ -149,12 +148,6 @@ export default function LoginScreen() {
         <View style={styles.titleContainer}>
           <Text style={styles.title}>{renderHeaderTitle()}</Text>
           <Text style={styles.subtitle}>{renderHeaderSubtitle()}</Text>
-          {serverOk === true ? (
-            <Text style={styles.serverOkText}>Server connected · {API_BASE_URL}</Text>
-          ) : null}
-          {getApiConnectionHint() ? (
-            <Text style={styles.hintText}>{getApiConnectionHint()}</Text>
-          ) : null}
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
@@ -274,18 +267,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666666',
     lineHeight: 24,
-  },
-  hintText: {
-    marginTop: 10,
-    fontSize: 12,
-    color: '#636e72',
-    lineHeight: 18,
-  },
-  serverOkText: {
-    marginTop: 10,
-    fontSize: 13,
-    color: '#00b894',
-    lineHeight: 18,
   },
   errorText: {
     marginTop: 12,

@@ -6,61 +6,61 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
-  SafeAreaView,
   Platform,
   StatusBar,
-  Dimensions,
+  useWindowDimensions,
+  Alert,
+  Linking,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_KEYS } from '@/utils/authStorage';
 import Sidebar from '@/components/Sidebar';
-
-const { width } = Dimensions.get('window');
+import { HomeMenuIcon } from '@/components/HomeHeaderIcons';
+import DailyWordHomeTeaser from '@/components/DailyWordHomeTeaser';
+import { getHomeBannerLayout } from '@/utils/homeBannerLayout';
+import { APP_INFO, phoneTelUri } from '@/constants/appInfo';
+import { AppUI, cardShadow } from '@/constants/theme';
 
 /** Icons8 3D Fluency — https://icons8.com/icons/fluency */
 const ICONS = {
   trophy: 'https://img.icons8.com/3d-fluency/48/trophy.png',
   performance: 'https://img.icons8.com/3d-fluency/48/combo-chart.png',
-  sun: 'https://img.icons8.com/3d-fluency/94/summer.png',
-  moon: 'https://img.icons8.com/3d-fluency/94/crescent-moon.png',
 };
 
-const BANNERS = [
+const BANNER_33_IMAGE = require('../../assets/images/banner iamge 33.png');
+const BANNER_HERO_2_2_IMAGE = require('../../assets/images/banner iamge hero 2 2.png');
+const BANNER_44_IMAGE = require('../../assets/images/iagme banner 44 .png');
+const BANNER_RANDOM_CHAT_IMAGE = require('../../assets/images/Banner Iamge 1 .jpeg');
+
+type HomeBanner = {
+  id: number;
+  image: number;
+  route?: '/courses';
+};
+
+const BANNERS: HomeBanner[] = [
   {
     id: 1,
-    title1: "Olympiad",
-    title2: "Math Mastery",
-    grade: "Grade 3",
-    footerText: "SOF- IMO | Math Kangaroo",
-    colors: ['#e60000', '#ff1a1a', '#ff4d4d']
+    image: BANNER_33_IMAGE,
   },
   {
     id: 2,
-    title1: "Science",
-    title2: "Explorers",
-    grade: "Grade 4",
-    footerText: "NSO | Science Olympiad",
-    colors: ['#0984e3', '#74b9ff', '#81ecec']
+    image: BANNER_HERO_2_2_IMAGE,
   },
   {
     id: 3,
-    title1: "English",
-    title2: "Grammar Pro",
-    grade: "Grade 5",
-    footerText: "IEO | English Olympiad",
-    colors: ['#00b894', '#55efc4', '#a8e6cf']
+    image: BANNER_44_IMAGE,
   },
   {
     id: 4,
-    title1: "Coding",
-    title2: "Logic Builders",
-    grade: "Grade 3+",
-    footerText: "NCO | Cyber Olympiad",
-    colors: ['#6c5ce7', '#a29bfe', '#dfe6e9']
-  }
+    image: BANNER_RANDOM_CHAT_IMAGE,
+    route: '/courses',
+  },
 ];
 
 const QUICK_ACTIONS = [
@@ -93,11 +93,26 @@ const LEARNING_ACTIONS = [
   },
 ];
 
+/** Promo banner — friendly learner portraits (Unsplash) */
+const COMMUNITY_AD = {
+  faces: [
+    'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=240&q=80',
+    'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=240&q=80',
+    'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=240&q=80',
+  ],
+  hero: 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=600&q=80',
+};
+
 export default function HomeScreen() {
+  const { width: screenWidth } = useWindowDimensions();
+  const bannerLayout = getHomeBannerLayout(screenWidth);
+  const tabBarHeight = useBottomTabBarHeight();
   const [isSidebarVisible, setSidebarVisible] = useState(false);
   const [activeBannerIndex, setActiveBannerIndex] = useState(0);
   const [userName, setUserName] = useState('User');
+  const [userLevel, setUserLevel] = useState('Beginner');
   const router = useRouter();
+  const scrollBottomPadding = tabBarHeight + 16;
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -106,112 +121,125 @@ export default function HomeScreen() {
       if (nextIndex >= BANNERS.length) {
         nextIndex = 0;
       }
-      scrollViewRef.current?.scrollTo({ x: nextIndex * width, animated: true });
+      scrollViewRef.current?.scrollTo({
+        x: nextIndex * bannerLayout.slideWidth,
+        animated: true,
+      });
       setActiveBannerIndex(nextIndex);
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [activeBannerIndex]);
+  }, [activeBannerIndex, bannerLayout.slideWidth]);
 
-  const loadUserName = useCallback(async () => {
+  const loadUserHeader = useCallback(async () => {
     try {
-      const storedName = await AsyncStorage.getItem(AUTH_KEYS.userName);
+      const [storedName, storedLevel] = await Promise.all([
+        AsyncStorage.getItem(AUTH_KEYS.userName),
+        AsyncStorage.getItem(AUTH_KEYS.level),
+      ]);
       if (storedName?.trim()) {
         setUserName(storedName.trim().split(' ')[0]);
       } else {
         setUserName('User');
       }
+      setUserLevel(storedLevel?.trim() || 'Beginner');
     } catch (e) {
-      console.error('Failed to load user name', e);
+      console.error('Failed to load user header', e);
     }
   }, []);
 
   useEffect(() => {
-    loadUserName();
-  }, [loadUserName]);
+    loadUserHeader();
+  }, [loadUserHeader]);
 
   useFocusEffect(
     useCallback(() => {
-      loadUserName();
-    }, [loadUserName])
+      loadUserHeader();
+    }, [loadUserHeader])
   );
 
-  const [greetingIconFailed, setGreetingIconFailed] = useState(false);
+  const headerPillLabel = /^\d+$/.test(userLevel)
+    ? `Class ${userLevel} competitive`
+    : `${userLevel} competitive`;
 
-  const getGreetingData = () => {
+  const getTimeGreeting = () => {
     const hour = new Date().getHours();
-    if (hour < 12) {
-      return {
-        text: 'Good Morning',
-        imageUrl: ICONS.sun,
-        bg: '#FEF7E0',
-        featherIcon: 'sun' as const,
-        featherColor: '#E8710A',
-      };
-    }
-    if (hour < 17) {
-      return {
-        text: 'Good Afternoon',
-        imageUrl: ICONS.sun,
-        bg: '#FFF9F0',
-        featherIcon: 'sun' as const,
-        featherColor: '#E8710A',
-      };
-    }
-    return {
-      text: 'Good Evening',
-      imageUrl: ICONS.moon,
-      bg: '#E8EAF6',
-      featherIcon: 'moon' as const,
-      featherColor: '#5C6BC0',
-    };
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
   };
 
-  const greeting = getGreetingData();
+  const timeGreeting = getTimeGreeting();
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        <View>
+    <View style={styles.root}>
+      <StatusBar barStyle="dark-content" backgroundColor={AppUI.bg} />
+      <SafeAreaView edges={['top']} style={styles.statusBarBand} />
+      <SafeAreaView style={styles.safeFill} edges={['left', 'right']}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: scrollBottomPadding }]}
+      >
+        {/* Section 1 — nav, banner, greeting, Chat with Random */}
+        <View style={styles.heroSection}>
           <LinearGradient
-            colors={['#FFFFFF', '#E9EDC9']}
+            colors={[AppUI.homeHeroTop, AppUI.homeHeroMid, AppUI.homeHeroBottom]}
+            locations={[0, 0.45, 1]}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
             style={StyleSheet.absoluteFill}
           />
-          {/* Header navigation as a card */}
+          {/* Header */}
           <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <Image source={require('../../assets/images/aarambh-icon.png')} style={styles.logoImage} resizeMode="contain" />
-            </View>
-            <View style={styles.headerRight}>
-              <TouchableOpacity onPress={() => setSidebarVisible(true)}>
-                <Feather name="menu" size={28} color="#000" />
-              </TouchableOpacity>
-            </View>
-          </View>
+            <TouchableOpacity
+              style={styles.headerMenuBtn}
+              onPress={() => setSidebarVisible(true)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              accessibilityLabel="Open menu"
+            >
+              <HomeMenuIcon />
+            </TouchableOpacity>
 
-          {/* Greeting Section */}
-          <View style={styles.greetingContainer}>
-            <View style={styles.greetingContent}>
-              <View>
-                <Text style={styles.greetingText}>{greeting.text},</Text>
-                <Text style={styles.userNameText}>{userName} <Text style={styles.handEmoji}>👋</Text></Text>
+            <TouchableOpacity
+              style={styles.headerCenterPill}
+              onPress={() => router.push('/profile')}
+              activeOpacity={0.88}
+              accessibilityLabel="Open profile"
+            >
+              <View style={styles.pillAvatar}>
+                <Feather name="user" size={13} color={AppUI.textTertiary} />
               </View>
-              <View style={[styles.greetingIconContainer, { backgroundColor: greeting.bg }]}>
-                {!greetingIconFailed ? (
-                  <Image
-                    source={{ uri: greeting.imageUrl }}
-                    style={styles.greetingIconImage}
-                    resizeMode="contain"
-                    onError={() => setGreetingIconFailed(true)}
-                  />
-                ) : (
-                  <Feather
-                    name={greeting.featherIcon}
-                    size={18}
-                    color={greeting.featherColor}
-                  />
-                )}
-              </View>
+              <Text style={styles.pillLabel} numberOfLines={1}>
+                {headerPillLabel}
+              </Text>
+              <Feather name="chevron-down" size={15} color="#1A202C" />
+            </TouchableOpacity>
+
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={() => router.navigate('/(tabs)/ved')}
+                activeOpacity={0.88}
+                style={styles.headerIconBtn}
+                accessibilityLabel="Open support"
+              >
+                <Feather name="search" size={22} color={AppUI.text} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.headerIconBtn}
+                onPress={async () => {
+                  try {
+                    await Linking.openURL(phoneTelUri());
+                  } catch {
+                    Alert.alert('Unable to call', `Please dial +91 ${APP_INFO.mobile}`);
+                  }
+                }}
+                hitSlop={8}
+                accessibilityLabel={`Call +91 ${APP_INFO.mobile}`}
+              >
+                <Feather name="phone" size={22} color={AppUI.text} />
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -225,33 +253,55 @@ export default function HomeScreen() {
               scrollEventThrottle={16}
               onScroll={(e) => {
                 const x = e.nativeEvent.contentOffset.x;
-                const index = Math.round(x / width);
+                const index = Math.round(x / bannerLayout.slideWidth);
                 setActiveBannerIndex(index);
               }}
             >
-              {BANNERS.map((banner) => (
-                <View key={banner.id} style={{ width: width, paddingHorizontal: 16, paddingVertical: 12 }}>
-                  <View style={styles.bannerContainer}>
-                    <LinearGradient
-                      colors={banner.colors as any}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={styles.bannerGradient}
-                    >
-                      <View style={styles.bannerContent}>
-                        <View style={styles.gradeTag}>
-                          <Text style={styles.gradeTagText}>{banner.grade}</Text>
-                        </View>
-                        <Text style={styles.bannerTitle}>{banner.title1}</Text>
-                        <Text style={styles.bannerTitle}>{banner.title2}</Text>
-                      </View>
-                    </LinearGradient>
-                    <View style={styles.bannerFooter}>
-                      <Text style={styles.bannerFooterText}>{banner.footerText}</Text>
-                    </View>
+              {BANNERS.map((banner) => {
+                const cardBody = (
+                  <View
+                    style={[
+                      styles.bannerContainer,
+                      cardShadow,
+                      {
+                        width: bannerLayout.cardWidth,
+                        marginLeft: bannerLayout.cardOffsetX,
+                      },
+                    ]}
+                  >
+                    <Image
+                      source={banner.image}
+                      style={[
+                        styles.bannerImage,
+                        { height: bannerLayout.gradientHeight },
+                      ]}
+                      resizeMode="cover"
+                    />
                   </View>
-                </View>
-              ))}
+                );
+
+                return (
+                  <View
+                    key={banner.id}
+                    style={{
+                      width: bannerLayout.slideWidth,
+                      paddingTop: 12,
+                      paddingBottom: 12,
+                    }}
+                  >
+                    {banner.route ? (
+                      <TouchableOpacity
+                        activeOpacity={0.92}
+                        onPress={() => router.push(banner.route)}
+                      >
+                        {cardBody}
+                      </TouchableOpacity>
+                    ) : (
+                      cardBody
+                    )}
+                  </View>
+                );
+              })}
             </ScrollView>
 
             {/* Pagination Dots */}
@@ -262,9 +312,17 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {/* Promo Banner */}
+          {/* Greeting — plain text, no card */}
+          <View style={styles.greetingContainer}>
+            <Text style={styles.greetingHeyLine}>Hey ! {timeGreeting}</Text>
+            <Text style={styles.greetingHelpLine}>
+              {userName}, how can I help you?
+            </Text>
+          </View>
+
+          {/* Chat with Random */}
           <TouchableOpacity
-            style={[styles.promoBanner, { marginBottom: 20 }]}
+            style={styles.promoBanner}
             activeOpacity={0.75}
             onPress={() => router.push('/random-chat')}
           >
@@ -278,11 +336,12 @@ export default function HomeScreen() {
               </View>
               <Text style={styles.promoSubtext}>Connect with learners and practice English</Text>
             </View>
-            <Feather name="chevron-right" size={22} color="#9AA0A6" />
+            <Feather name="chevron-right" size={22} color={AppUI.textTertiary} />
           </TouchableOpacity>
         </View>
 
-        {/* Quick Actions Section */}
+        {/* Section 2 — Leaderboard, Performance, Learning English, and below */}
+        <View style={styles.progressSection}>
         <View style={styles.quickActionsContainer}>
           {QUICK_ACTIONS.map((action) => (
             <TouchableOpacity
@@ -305,7 +364,6 @@ export default function HomeScreen() {
           ))}
         </View>
 
-        {/* Learning English Section */}
         <View style={styles.learningSection}>
           <Text style={styles.sectionTitle}>Learning English</Text>
           <View style={styles.learningList}>
@@ -336,6 +394,62 @@ export default function HomeScreen() {
               </TouchableOpacity>
             ))}
           </View>
+
+          {/* Community ad — after Group Discussion */}
+          <TouchableOpacity
+            style={styles.communityAdBanner}
+            activeOpacity={0.92}
+            onPress={() => router.push('/random-chat')}
+          >
+            <LinearGradient
+              colors={['#e60000', '#ff3366', '#ff6b9d']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.communityAdGradient}
+            >
+              <View style={styles.communityAdDecorCircle} />
+              <View style={styles.communityAdRow}>
+                <View style={styles.communityAdTextBlock}>
+                  <View style={styles.communityAdTag}>
+                    <Text style={styles.communityAdTagText}>Ohm&apos;s English</Text>
+                  </View>
+                  <Text style={styles.communityAdTitle}>
+                    Practice English{'\n'}with real learners
+                  </Text>
+                  <Text style={styles.communityAdSubtitle}>
+                    Chat live, build confidence and make friends
+                  </Text>
+                  <View style={styles.communityAdCta}>
+                    <Text style={styles.communityAdCtaText}>Join free chat</Text>
+                    <Feather name="arrow-right" size={16} color="#e60000" />
+                  </View>
+                  <View style={styles.communityAdAvatars}>
+                    {COMMUNITY_AD.faces.map((uri, i) => (
+                      <Image
+                        key={uri}
+                        source={{ uri }}
+                        style={[
+                          styles.communityAdAvatar,
+                          i > 0 && styles.communityAdAvatarOverlap,
+                        ]}
+                      />
+                    ))}
+                    <View style={styles.communityAdAvatarBadge}>
+                      <Text style={styles.communityAdAvatarBadgeText}>2k+ online</Text>
+                    </View>
+                  </View>
+                </View>
+                <Image
+                  source={{ uri: COMMUNITY_AD.hero }}
+                  style={styles.communityAdHeroImage}
+                  resizeMode="cover"
+                />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <DailyWordHomeTeaser />
+        </View>
         </View>
 
       </ScrollView>
@@ -344,84 +458,110 @@ export default function HomeScreen() {
         visible={isSidebarVisible}
         onClose={() => setSidebarVisible(false)}
       />
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  root: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: AppUI.bg,
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
+  statusBarBand: {
+    backgroundColor: AppUI.bg,
+  },
+  safeFill: {
+    flex: 1,
+    backgroundColor: AppUI.bg,
+  },
+  scroll: {
+    flex: 1,
+    backgroundColor: AppUI.bg,
+  },
+  heroSection: {
+    position: 'relative',
+    overflow: 'hidden',
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    paddingBottom: 20,
+    backgroundColor: AppUI.homeHeroBottom,
+  },
+  progressSection: {
+    backgroundColor: AppUI.bg,
+    paddingTop: 16,
+    paddingBottom: 8,
+    flexGrow: 1,
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 6,
+    backgroundColor: 'transparent',
+    zIndex: 1,
   },
-  headerLeft: {
+  headerMenuBtn: {
+    width: 32,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCenterPill: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: -10,
+    backgroundColor: AppUI.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: AppUI.divider,
+    ...cardShadow,
+    paddingVertical: 5,
+    paddingLeft: 7,
+    paddingRight: 8,
+    gap: 6,
+    minHeight: 36,
   },
-  logoImage: {
-    width: 44,
-    height: 44,
+  pillAvatar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: AppUI.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  headerRight: {
+  pillLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: AppUI.text,
+    letterSpacing: -0.2,
+  },
+  headerActions: {
     flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingLeft: 0,
+  },
+  headerIconBtn: {
+    width: 32,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollContent: {
     paddingBottom: 24,
   },
   bannerContainer: {
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 4,
+    backgroundColor: AppUI.surface,
   },
-  bannerGradient: {
-    height: 140,
-    padding: 20,
-    justifyContent: 'center',
-
-  },
-  bannerContent: {
-    justifyContent: 'center',
-    height: '100%',
-  },
-  gradeTag: {
-    backgroundColor: '#fff',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  gradeTagText: {
-    fontWeight: 'bold',
-    fontSize: 12,
-  },
-  bannerTitle: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontWeight: 'bold',
-    lineHeight: 30,
-  },
-  bannerFooter: {
-    backgroundColor: '#000000',
-    padding: 8,
-    alignItems: 'center',
-  },
-  bannerFooterText: {
-    fontWeight: '700',
-    fontSize: 12,
-    color: '#ffffff',
+  bannerImage: {
+    width: '100%',
+    backgroundColor: AppUI.surfaceMuted,
   },
   pagination: {
     flexDirection: 'row',
@@ -433,29 +573,24 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#e0e0e0',
+    backgroundColor: AppUI.surfaceMuted,
   },
   activeDot: {
     width: 16,
-    backgroundColor: '#fff',
+    backgroundColor: AppUI.text,
   },
 
   promoBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 16,
-    marginTop: 20,
-    backgroundColor: '#fff',
-    borderRadius: 16,
+    marginTop: 12,
+    backgroundColor: AppUI.surface,
+    borderRadius: 20,
     padding: 14,
-    borderWidth: 1,
-    borderColor: '#e8eaf6',
     gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    zIndex: 1,
+    ...cardShadow,
   },
   promoBody: {
     flex: 1,
@@ -475,12 +610,11 @@ const styles = StyleSheet.create({
   },
   promoInsta: {
     fontSize: 18,
-    fontStyle: 'italic',
     fontWeight: 'bold',
-    color: '#000',
+    color: AppUI.text,
   },
   freeTag: {
-    backgroundColor: '#e60000',
+    backgroundColor: AppUI.accent,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -492,31 +626,24 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   promoSubtext: {
-    color: '#666',
+    color: AppUI.textSecondary,
     fontSize: 12,
     lineHeight: 17,
   },
   quickActionsContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    marginTop: 10,
-    marginBottom: 20,
+    marginBottom: 16,
     gap: 10,
   },
   quickActionCard: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: AppUI.surface,
     borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    ...cardShadow,
   },
   actionIconBg: {
     width: 36,
@@ -534,14 +661,13 @@ const styles = StyleSheet.create({
   actionTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#2d3436',
+    color: AppUI.text,
     textAlign: 'center',
     lineHeight: 16,
   },
-  // Learning Section
   learningSection: {
     paddingHorizontal: 16,
-    marginBottom: 24,
+    paddingBottom: 24,
   },
   learningList: {
     gap: 12,
@@ -550,14 +676,10 @@ const styles = StyleSheet.create({
   learningCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: AppUI.surface,
     borderRadius: 20,
     padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 3,
+    ...cardShadow,
   },
   learningIconBg: {
     width: 44,
@@ -578,62 +700,158 @@ const styles = StyleSheet.create({
   learningCardTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#1A202C',
+    color: AppUI.text,
     marginBottom: 2,
   },
   learningDesc: {
     fontSize: 12,
-    color: '#718096',
+    color: AppUI.textSecondary,
     fontWeight: '500',
   },
   arrowContainer: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#F7FAFC',
+    backgroundColor: AppUI.surfaceMuted,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: AppUI.text,
     marginBottom: 12,
+  },
+  communityAdBanner: {
+    marginTop: 16,
+    borderRadius: 22,
+    overflow: 'hidden',
+    ...cardShadow,
+  },
+  communityAdGradient: {
+    borderRadius: 22,
+    overflow: 'hidden',
+    minHeight: 168,
+    padding: 16,
+    paddingRight: 0,
+  },
+  communityAdDecorCircle: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: 'rgba(255, 255, 255, 0.12)',
+    top: -50,
+    right: 60,
+  },
+  communityAdRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  communityAdTextBlock: {
+    flex: 1,
+    paddingRight: 8,
+    zIndex: 1,
+  },
+  communityAdTag: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    marginBottom: 8,
+  },
+  communityAdTagText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 0.4,
+  },
+  communityAdTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#fff',
+    lineHeight: 26,
+    marginBottom: 6,
+  },
+  communityAdSubtitle: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.92)',
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  communityAdCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: '#fff',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 24,
+    gap: 6,
+    marginBottom: 12,
+  },
+  communityAdCtaText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#e60000',
+  },
+  communityAdAvatars: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  communityAdAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#fff',
+    backgroundColor: '#eee',
+  },
+  communityAdAvatarOverlap: {
+    marginLeft: -10,
+  },
+  communityAdAvatarBadge: {
+    marginLeft: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  communityAdAvatarBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  communityAdHeroImage: {
+    width: 118,
+    height: 150,
+    borderBottomLeftRadius: 22,
+    borderTopLeftRadius: 40,
+    marginRight: -2,
   },
   greetingContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    marginBottom: 12,
-  },
-  greetingContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: 'transparent',
-  },
-  greetingText: {
-    fontSize: 12,
-    color: '#666',
-    fontWeight: '600',
-  },
-  userNameText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#000',
-    marginTop: 1,
-  },
-  handEmoji: {
-    fontSize: 14,
-  },
-  greetingIconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
     justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 16,
+    marginBottom: 4,
   },
-  greetingIconImage: {
-    width: 26,
-    height: 26,
+  greetingHeyLine: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: AppUI.text,
+    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  greetingHelpLine: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: AppUI.textSecondary,
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 22,
   },
 });

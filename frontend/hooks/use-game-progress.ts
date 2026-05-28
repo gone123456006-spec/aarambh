@@ -4,6 +4,7 @@ import {
   loadGameProgress,
   saveGameProgress,
   clearGameProgress,
+  flushGameProgressSync,
   clampLevel,
 } from '@/utils/gameProgress';
 
@@ -34,8 +35,14 @@ export function useGameProgress(gameId: GameId, totalLevels: number) {
 
   useEffect(() => {
     if (!canSave.current) return;
-    saveGameProgress(gameId, { level: idx, score });
+    void saveGameProgress(gameId, { level: idx, score }).catch(() => {});
   }, [gameId, idx, score]);
+
+  useEffect(() => {
+    return () => {
+      void flushGameProgressSync(gameId).catch(() => {});
+    };
+  }, [gameId]);
 
   const completeGame = useCallback(async () => {
     await clearGameProgress(gameId);

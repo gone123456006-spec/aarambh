@@ -1,19 +1,27 @@
 {
   "expo": {
-    "name": "aarambh",
-    "slug": "aarambh",
+    "name": "Ohm's",
+    "slug": "ohms",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/aarambh-icon.png",
-    "scheme": "aarambh",
+    "scheme": "ohms",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "requireFullScreen": true,
+      "bundleIdentifier": "com.ohms.english",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Ohm's uses your camera only when you start video English practice with other learners.",
+        "NSMicrophoneUsageDescription": "Ohm's uses your microphone for voice and video lessons you choose to use.",
+        "NSPhotoLibraryUsageDescription": "Ohm's may access photos you select to share during English practice. We do not browse your gallery without permission."
+      }
     },
     "android": {
+      "package": "com.ohms.english",
+      "versionCode": 1,
       "softwareKeyboardLayoutMode": "resize",
-      "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "backgroundColor": "#e60000",
         "foregroundImage": "./assets/images/aarambh-icon.png"
@@ -30,7 +38,7 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true,
+            "usesCleartextTraffic": false,
             "windowSoftInputMode": "adjustResize"
           }
         }
@@ -38,7 +46,9 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Aarambh to use your camera for video English practice with other learners."
+          "cameraPermission": "Ohm's uses your camera only when you start video English practice with other learners.",
+          "microphonePermission": "Ohm's uses your microphone for voice and video lessons you choose to use.",
+          "recordAudioAndroid": true
         }
       ],
       "expo-router",
@@ -52,6 +62,12 @@
           "dark": {
             "backgroundColor": "#1a1a1a"
           }
+        }
+      ],
+      [
+        "expo-screen-orientation",
+        {
+          "initialOrientation": "PORTRAIT"
         }
       ]
     ],

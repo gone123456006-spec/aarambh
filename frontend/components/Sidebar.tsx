@@ -1,26 +1,118 @@
-import React from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TouchableWithoutFeedback, Dimensions, SafeAreaView, Platform, StatusBar } from 'react-native';
-import { Feather, Ionicons, MaterialCommunityIcons, MaterialIcons } from '@expo/vector-icons';
-
-
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  Dimensions,
+  SafeAreaView,
+  Platform,
+  StatusBar,
+  Animated,
+  Easing,
+} from 'react-native';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_KEYS } from '@/utils/authStorage';
 import { performLogout } from '@/utils/session';
+import { appVersionLabel } from '@/constants/appInfo';
+import { AppUI } from '@/constants/theme';
 
 const { width } = Dimensions.get('window');
+const DRAWER_WIDTH = Math.min(width * 0.82, 320);
+const SLIDE_DURATION = 300;
+const SLIDE_EASING = Easing.out(Easing.cubic);
+
+/** Samsung drawer — solid black icons */
+const ICON_BLACK = AppUI.text;
+const ICON_STROKE = 3.25;
+const MENU_ICON_SIZE = 23;
+const CLOSE_ICON_SIZE = 28;
+
+type MenuItem = {
+  icon: React.ComponentProps<typeof Feather>['name'];
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+};
 
 interface SidebarProps {
   visible: boolean;
   onClose: () => void;
 }
 
+function MenuRow({ icon, label, onPress, danger }: MenuItem) {
+  const iconColor = danger ? AppUI.accent : ICON_BLACK;
+  return (
+    <TouchableOpacity style={styles.menuRow} onPress={onPress} activeOpacity={0.6}>
+      <Feather
+        name={icon}
+        size={MENU_ICON_SIZE}
+        color={iconColor}
+        strokeWidth={ICON_STROKE}
+      />
+      <Text style={[styles.menuText, danger && styles.menuTextDanger]}>{label}</Text>
+      {!danger && (
+        <Feather name="chevron-right" size={20} color={AppUI.textTertiary} strokeWidth={2} />
+      )}
+    </TouchableOpacity>
+  );
+}
+
 export default function Sidebar({ visible, onClose }: SidebarProps) {
   const router = useRouter();
-  const [userName, setUserName] = React.useState('User');
-  const [isLoggingOut, setIsLoggingOut] = React.useState(false);
+  const [userName, setUserName] = useState('User');
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const slideX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
 
-  React.useEffect(() => {
+  useEffect(() => {
+    if (visible) {
+      setMounted(true);
+      slideX.setValue(-DRAWER_WIDTH);
+      backdropOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(slideX, {
+          toValue: 0,
+          duration: SLIDE_DURATION,
+          easing: SLIDE_EASING,
+          useNativeDriver: true,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: SLIDE_DURATION,
+          easing: SLIDE_EASING,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      return;
+    }
+
+    if (!mounted) return;
+
+    Animated.parallel([
+      Animated.timing(slideX, {
+        toValue: -DRAWER_WIDTH,
+        duration: SLIDE_DURATION - 40,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: SLIDE_DURATION - 40,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setMounted(false);
+    });
+  }, [visible, mounted, slideX, backdropOpacity]);
+
+  useEffect(() => {
     const loadUser = async () => {
       const name = await AsyncStorage.getItem(AUTH_KEYS.userName);
       setUserName(name?.trim() || 'User');
@@ -31,6 +123,11 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
   const navigateToProfile = () => {
     onClose();
     router.push('/profile');
+  };
+
+  const navigateTo = (path: '/about' | '/contact-us' | '/terms' | '/privacy') => {
+    onClose();
+    router.push(path);
   };
 
   const handleLogout = async () => {
@@ -48,86 +145,84 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
     }
   };
 
+  const mainItems: MenuItem[] = [
+    { icon: 'briefcase', label: 'My Purchases', onPress: onClose },
+    { icon: 'info', label: 'About Us', onPress: () => navigateTo('/about') },
+    { icon: 'phone', label: 'Contact Us', onPress: () => navigateTo('/contact-us') },
+    { icon: 'file-text', label: 'Terms & Conditions', onPress: () => navigateTo('/terms') },
+    { icon: 'shield', label: 'Privacy Policy', onPress: () => navigateTo('/privacy') },
+  ];
+
+  if (!mounted) return null;
+
   return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
+    <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        {/* Sidebar content */}
-        <View style={styles.sidebarContainer}>
+        <Animated.View
+          style={[styles.sidebarContainer, { transform: [{ translateX: slideX }] }]}
+        >
           <SafeAreaView style={styles.safeArea}>
-            <View style={styles.content}>
-
-              {/* Profile Section */}
-              <View style={styles.profileSection}>
-                <View style={styles.avatarContainer}>
-                  <Ionicons name="person" size={40} color="#999" />
-                </View>
-                <View style={styles.nameHeader}>
-                  <Text style={styles.username}>{userName}</Text>
-                  <TouchableOpacity onPress={navigateToProfile}>
-                    <Feather name="edit-2" size={14} color="#e60000" />
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity style={styles.viewProfileBtn} onPress={navigateToProfile}>
-                  <Text style={styles.viewProfileText}>View Profile</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Menu Items */}
-              <View style={styles.menuContainer}>
-
-                <TouchableOpacity style={styles.menuItem}>
-                  <Feather name="briefcase" size={22} color="#4A5568" />
-                  <Text style={styles.menuText}>My Purchases</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem}>
-                  <Feather name="info" size={22} color="#4A5568" />
-                  <Text style={styles.menuText}>About Us</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem}>
-                  <Feather name="phone-call" size={22} color="#4A5568" />
-                  <Text style={styles.menuText}>Contact Us</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.menuItem}>
-                  <Feather name="clipboard" size={22} color="#4A5568" />
-                  <Text style={styles.menuText}>Terms & Conditions</Text>
-                </TouchableOpacity>
-
-              </View>
-
-              {/* Footer Section */}
-              <View style={styles.footerSection}>
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={handleLogout}
-                  disabled={isLoggingOut}
-                  activeOpacity={0.7}
-                >
-                  <Feather name="log-out" size={22} color="#E53E3E" />
-                  <Text style={styles.logoutText}>Logout</Text>
-                </TouchableOpacity>
-
-                <View style={styles.versionContainer}>
-                  <MaterialCommunityIcons name="infinity" size={24} color="#3182CE" />
-                  <Text style={styles.versionText}>App Version 0.0.1 </Text>
-                </View>
-              </View>
-
+            <View style={styles.drawerHeader}>
+              <Text style={styles.drawerTitle}>Menu</Text>
+              <TouchableOpacity
+                onPress={onClose}
+                style={styles.closeBtn}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityLabel="Close menu"
+              >
+                <Feather
+                  name="x"
+                  size={CLOSE_ICON_SIZE}
+                  color={ICON_BLACK}
+                  strokeWidth={ICON_STROKE}
+                />
+              </TouchableOpacity>
             </View>
-          </SafeAreaView>
-        </View>
 
-        {/* Dimmed area — tap to close (kept separate so sidebar taps are not blocked) */}
-        <TouchableWithoutFeedback onPress={onClose}>
-          <View style={styles.background} />
-        </TouchableWithoutFeedback>
+            <View style={styles.profileSection}>
+              <View style={styles.avatarContainer}>
+                <Ionicons name="person" size={40} color={AppUI.textTertiary} />
+              </View>
+              <View style={styles.nameHeader}>
+                <Text style={styles.username} numberOfLines={1}>
+                  {userName}
+                </Text>
+                <TouchableOpacity onPress={navigateToProfile} hitSlop={8}>
+                  <Feather name="edit-2" size={15} color={AppUI.accent} />
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity style={styles.viewProfileBtn} onPress={navigateToProfile} activeOpacity={0.7}>
+                <Text style={styles.viewProfileText}>View profile</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.menuList}>
+              {mainItems.map((item) => (
+                <View key={item.label}>
+                  <MenuRow {...item} />
+                  <View style={styles.divider} />
+                </View>
+              ))}
+
+              <View style={styles.sectionGap} />
+
+              <MenuRow
+                icon="log-out"
+                label={isLoggingOut ? 'Logging out…' : 'Logout'}
+                onPress={handleLogout}
+                danger
+              />
+            </View>
+
+            <Text style={styles.versionText}>{appVersionLabel()}</Text>
+          </SafeAreaView>
+        </Animated.View>
+
+        <Animated.View style={[styles.background, { opacity: backdropOpacity }]}>
+          <TouchableWithoutFeedback onPress={onClose}>
+            <View style={styles.backgroundTap} />
+          </TouchableWithoutFeedback>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -140,38 +235,62 @@ const styles = StyleSheet.create({
   },
   background: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  backgroundTap: {
+    flex: 1,
   },
   sidebarContainer: {
-    width: width * 0.75,
-    maxWidth: 320,
-    backgroundColor: '#FFFFFF',
+    width: DRAWER_WIDTH,
+    backgroundColor: AppUI.surface,
     height: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 4, height: 0 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    elevation: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 2, height: 0 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+      },
+      android: { elevation: 8 },
+      default: {},
+    }),
   },
   safeArea: {
     flex: 1,
     paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  content: {
-    flex: 1,
+  drawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  drawerTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: AppUI.text,
+    letterSpacing: -0.3,
+  },
+  closeBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   profileSection: {
     alignItems: 'center',
-    paddingVertical: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: '#EDF2F7',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: AppUI.divider,
   },
   avatarContainer: {
     width: 64,
     height: 64,
     borderRadius: 32,
-    backgroundColor: '#E2E8F0',
+    backgroundColor: AppUI.surfaceMuted,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
@@ -180,58 +299,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    maxWidth: '100%',
   },
   username: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#1A202C',
+    fontWeight: '700',
+    color: AppUI.text,
+    flexShrink: 1,
   },
   viewProfileBtn: {
     marginTop: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-    backgroundColor: '#fff5f5',
   },
   viewProfileText: {
-    fontSize: 13,
-    color: '#e60000',
+    fontSize: 14,
+    color: AppUI.accent,
     fontWeight: '600',
   },
-  menuContainer: {
-    paddingTop: 16,
+  menuList: {
     flex: 1,
+    paddingTop: 4,
   },
-  menuItem: {
+  menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F7FAFC',
+    paddingHorizontal: 20,
     gap: 16,
+    minHeight: 52,
   },
   menuText: {
-    fontSize: 15,
-    color: '#2D3748',
-    fontWeight: '500',
+    flex: 1,
+    fontSize: 16,
+    color: AppUI.text,
+    fontWeight: '400',
   },
-  footerSection: {
-    paddingBottom: 24,
+  menuTextDanger: {
+    color: AppUI.accent,
+    fontWeight: '400',
   },
-  logoutText: {
-    fontSize: 15,
-    color: '#E53E3E',
-    fontWeight: 'bold',
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: AppUI.divider,
+    marginLeft: 58,
   },
-  versionContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 24,
-    gap: 12,
+  sectionGap: {
+    height: 8,
+    backgroundColor: AppUI.bg,
   },
   versionText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#1A202C',
+    fontSize: 12,
+    color: AppUI.textTertiary,
+    textAlign: 'center',
+    paddingVertical: 16,
+    fontWeight: '500',
   },
 });

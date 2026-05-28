@@ -6,21 +6,18 @@ import {
   Platform,
   StatusBar,
   TouchableOpacity,
+  Pressable,
   TextInput,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Alert,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  KeyboardStickyView,
-  useKeyboardHandler,
-  useResizeMode,
-} from 'react-native-keyboard-controller';
+import { KeyboardStickyView, useKeyboardHandler } from 'react-native-keyboard-controller';
 import { runOnJS } from 'react-native-reanimated';
 import {
   connectChatSocket,
@@ -31,6 +28,7 @@ import {
   skipChatPartner,
   emitTypingStart,
   emitTypingStop,
+  emitMessageSeen,
   getChatSocket,
   type ChatPeer,
 } from '@/utils/chatSocket';
@@ -38,29 +36,36 @@ import { getAccessToken } from '@/utils/authStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_KEYS } from '@/utils/authStorage';
 import { MatchmakingScene } from '@/components/MatchmakingScene';
+import { ChatTypingBubble } from '@/components/ChatTypingBubble';
+import { AppUI, cardShadow } from '@/constants/theme';
+
+type MessageStatus = 'sent' | 'delivered' | 'read';
 
 interface Message {
   id: string;
   text: string;
   isSelf: boolean;
   time: string;
+  status?: MessageStatus;
 }
 
-const EXTRA_LIST_SPACING = 16;
-const DEFAULT_INPUT_DOCK_HEIGHT = 56;
+const BUBBLE_PEER_BG = '#d9f5d0';
+const BUBBLE_SELF_BG = '#5b9bd5';
+const TICK_COLOR = '#e60000';
+const TICK_COLOR_READ = '#ff3333';
 
-const LEVEL_LABELS: Record<string, string> = {
-  starting: 'Starting',
-  beginner: 'Beginner',
-  intermediate: 'Intermediate',
-  advanced: 'Advanced',
-};
-
-function formatPeerLevel(level?: string) {
-  if (!level) return '';
-  return LEVEL_LABELS[level] || level;
+function formatMessageTime(date = new Date()) {
+  return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
+const EXTRA_LIST_SPACING = 12;
+const SCROLL_AFTER_KEYBOARD_MS = Platform.OS === 'android' ? 280 : 160;
+/** Fallback when Android does not report keyboard height in JS */
+const ANDROID_KEYBOARD_FALLBACK = 280;
+const DEFAULT_INPUT_DOCK_HEIGHT = Platform.OS === 'android' ? 64 : 56;
+/** Android 3-button nav bar — insets.bottom is often 0 in Expo Go */
+const ANDROID_NAV_BAR_HEIGHT = 48;
+const ENCRYPTION_NOTICE_MS = 4500;
 function PeerAvatar({ peer }: { peer: ChatPeer }) {
   if (peer.avatar) {
     return <Image source={{ uri: peer.avatar }} style={styles.peerAvatar} />;
@@ -70,14 +75,6 @@ function PeerAvatar({ peer }: { peer: ChatPeer }) {
       <Ionicons name="person" size={22} color="#fff" />
     </View>
   );
-}
-
-function peerStatusLine(peer: ChatPeer, isTyping: boolean) {
-  if (isTyping) return 'typing...';
-  const region = peer.region || peer.location;
-  const level = formatPeerLevel(peer.level);
-  const parts = [region, level, peer.gender].filter(Boolean);
-  return parts.length > 0 ? parts.join(' · ') : 'English learner';
 }
 
 export default function RandomChatScreen() {
@@ -92,29 +89,56 @@ export default function RandomChatScreen() {
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const textInputRef = useRef<TextInput>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [inputDockHeight, setInputDockHeight] = useState(DEFAULT_INPUT_DOCK_HEIGHT);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [inputFocused, setInputFocused] = useState(false);
+  const [showEncryptionNotice, setShowEncryptionNotice] = useState(false);
 
-  useResizeMode();
+  const appendMessage = useCallback(
+    (
+      text: string,
+      isSelf: boolean,
+      id?: string,
+      time?: string,
+      status?: MessageStatus
+    ) => {
+      const newMessage: Message = {
+        id: id ?? `${Date.now()}-${Math.random()}`,
+        text,
+        isSelf,
+        time: time ?? formatMessageTime(),
+        status: isSelf ? status ?? 'sent' : undefined,
+      };
+      setMessages((prev) => [...prev, newMessage]);
+    },
+    []
+  );
 
-  const getCurrentTime = () => {
-    const now = new Date();
-    return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-  };
+  const patchMessageById = useCallback(
+    (id: string, patch: Partial<Pick<Message, 'id' | 'status' | 'time'>>) => {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, ...patch } : m))
+      );
+    },
+    []
+  );
 
-  const appendMessage = useCallback((text: string, isSelf: boolean, id?: string) => {
-    const newMessage: Message = {
-      id: id ?? `${Date.now()}-${Math.random()}`,
-      text,
-      isSelf,
-      time: getCurrentTime(),
-    };
-    setMessages((prev) => [...prev, newMessage]);
+  const markMessagesRead = useCallback((messageIds: string[]) => {
+    if (messageIds.length === 0) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.isSelf && messageIds.includes(m.id) ? { ...m, status: 'read' } : m
+      )
+    );
   }, []);
 
   const resetChat = useCallback(() => {
     setPeer(null);
+    sessionIdRef.current = null;
     setSessionId(null);
     setMessages([]);
     setIsTyping(false);
@@ -129,18 +153,27 @@ export default function RandomChatScreen() {
   }, [resetChat]);
 
   const scrollToEnd = useCallback((animated = true) => {
-    requestAnimationFrame(() => {
-      flatListRef.current?.scrollToEnd({ animated });
-    });
+    flatListRef.current?.scrollToEnd({ animated });
   }, []);
 
-  const onKeyboardHeightChange = useCallback(
-    (height: number) => {
-      setKeyboardHeight(height);
-      if (messages.length > 0) scrollToEnd(true);
-    },
-    [messages.length, scrollToEnd]
-  );
+  const scrollToEndSmooth = useCallback(() => {
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollToEnd(true);
+    scrollTimeoutRef.current = setTimeout(() => {
+      scrollToEnd(true);
+      scrollTimeoutRef.current = null;
+    }, SCROLL_AFTER_KEYBOARD_MS);
+  }, [scrollToEnd]);
+
+  const dismissKeyboard = useCallback(() => {
+    textInputRef.current?.blur();
+    setInputFocused(false);
+    Keyboard.dismiss();
+  }, []);
+
+  const onKeyboardHeightChange = useCallback((height: number) => {
+    setKeyboardHeight(height);
+  }, []);
 
   useKeyboardHandler(
     {
@@ -151,15 +184,38 @@ export default function RandomChatScreen() {
       onEnd: (e) => {
         'worklet';
         runOnJS(onKeyboardHeightChange)(e.height);
+        runOnJS(scrollToEndSmooth)();
       },
     },
-    [onKeyboardHeightChange]
+    [onKeyboardHeightChange, scrollToEndSmooth]
   );
 
   useEffect(() => {
     if (messages.length === 0) return;
-    scrollToEnd(true);
-  }, [messages.length, keyboardHeight, inputDockHeight, isTyping, scrollToEnd]);
+    scrollToEndSmooth();
+  }, [messages.length, scrollToEndSmooth]);
+
+  useEffect(() => {
+    if (!inputFocused) return;
+    scrollToEndSmooth();
+  }, [inputFocused, inputDockHeight, scrollToEndSmooth]);
+
+  useEffect(
+    () => () => {
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (status !== 'chat' || !peer) {
+      setShowEncryptionNotice(false);
+      return;
+    }
+    setShowEncryptionNotice(true);
+    const timer = setTimeout(() => setShowEncryptionNotice(false), ENCRYPTION_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [peer?.id, sessionId, status]);
 
   useEffect(() => {
     let mounted = true;
@@ -187,17 +243,53 @@ export default function RandomChatScreen() {
         });
 
         sock.on('match:found', (data: { sessionId: string; peer: ChatPeer }) => {
+          sessionIdRef.current = data.sessionId;
           setSessionId(data.sessionId);
           setPeer(data.peer);
           setStatus('chat');
           setMessages([]);
         });
 
-        sock.on('message:receive', (payload: { id: string; text: string; senderId: string }) => {
-          const currentUid = uid ?? myUserId;
-          if (payload.senderId === currentUid) return;
-          appendMessage(payload.text, false, payload.id);
-          setIsTyping(false);
+        sock.on(
+          'message:receive',
+          (payload: {
+            id: string;
+            text: string;
+            senderId: string;
+            timestamp?: string;
+          }) => {
+            const currentUid = uid ?? myUserId;
+            if (payload.senderId === currentUid) return;
+            const time = payload.timestamp
+              ? formatMessageTime(new Date(payload.timestamp))
+              : formatMessageTime();
+            appendMessage(payload.text, false, payload.id, time);
+            setIsTyping(false);
+            const sid = sessionIdRef.current;
+            if (sid) emitMessageSeen(sock, sid, [payload.id]);
+          }
+        );
+
+        sock.on(
+          'message:delivered',
+          (payload: { id: string; clientId?: string | null; timestamp?: string }) => {
+            const localId = payload.clientId;
+            if (localId) {
+              patchMessageById(localId, {
+                id: payload.id,
+                status: 'delivered',
+                time: payload.timestamp
+                  ? formatMessageTime(new Date(payload.timestamp))
+                  : undefined,
+              });
+            } else {
+              patchMessageById(payload.id, { status: 'delivered' });
+            }
+          }
+        );
+
+        sock.on('message:seen', (payload: { messageIds: string[] }) => {
+          markMessagesRead(payload.messageIds ?? []);
         });
 
         sock.on('peer:typing', ({ isTyping: typing }: { isTyping: boolean }) => {
@@ -226,18 +318,19 @@ export default function RandomChatScreen() {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       disconnectChatSocket();
     };
-  }, [appendMessage, beginSearch, resetChat]);
+  }, [appendMessage, beginSearch, markMessagesRead, patchMessageById, resetChat]);
 
   const handleSend = () => {
     const text = inputText.trim();
     const sock = getChatSocket();
     if (!text || !sock || !sessionId) return;
 
-    appendMessage(text, true);
-    sendChatMessage(sock, sessionId, text);
+    const clientId = `c-${Date.now()}`;
+    appendMessage(text, true, clientId, undefined, 'sent');
+    sendChatMessage(sock, sessionId, text, clientId);
     setInputText('');
     emitTypingStop(sock, sessionId);
-    setTimeout(() => scrollToEnd(true), 50);
+    scrollToEndSmooth();
   };
 
   const handleInputChange = (text: string) => {
@@ -274,106 +367,160 @@ export default function RandomChatScreen() {
     router.back();
   };
 
-  const renderMessage = ({ item }: { item: Message }) => (
-    <View style={[styles.messageWrapper, item.isSelf ? styles.messageWrapperSelf : styles.messageWrapperPeer]}>
-      <View style={[styles.messageBubble, item.isSelf ? styles.messageBubbleSelf : styles.messageBubblePeer]}>
-        <Text style={[styles.messageText, item.isSelf ? styles.messageTextSelf : styles.messageTextPeer]}>
-          {item.text}
-        </Text>
-      </View>
-    </View>
+  const renderMessageStatus = (status: MessageStatus | undefined) => {
+    const color = status === 'read' ? TICK_COLOR_READ : TICK_COLOR;
+    if (status === 'read' || status === 'delivered') {
+      return <Ionicons name="checkmark-done" size={15} color={color} />;
+    }
+    return <Ionicons name="checkmark" size={15} color={color} />;
+  };
+
+  const renderMessage = useCallback(
+    ({ item }: { item: Message }) => (
+      <Pressable
+        onPress={dismissKeyboard}
+        style={[
+          styles.messageWrapper,
+          item.isSelf ? styles.messageWrapperSelf : styles.messageWrapperPeer,
+        ]}
+      >
+        <View style={[styles.messageBubble, item.isSelf ? styles.messageBubbleSelf : styles.messageBubblePeer]}>
+          <View style={styles.messageBody}>
+            <Text
+              style={[
+                styles.messageText,
+                item.isSelf ? styles.messageTextSelf : styles.messageTextPeer,
+              ]}
+            >
+              {item.text}
+            </Text>
+            {item.isSelf ? (
+              <View style={styles.messageTicks}>{renderMessageStatus(item.status)}</View>
+            ) : null}
+          </View>
+        </View>
+      </Pressable>
+    ),
+    [dismissKeyboard]
   );
 
   const renderChatInputBar = () => (
-    <View style={styles.inputRow}>
-      <View style={styles.inputPill}>
-        <TextInput
-          style={styles.textInput}
-          placeholder="Message"
-          placeholderTextColor="#8696a0"
-          value={inputText}
-          onChangeText={handleInputChange}
-          onFocus={scrollToEnd}
-          multiline
-          maxLength={500}
-          blurOnSubmit={false}
-        />
-      </View>
-      {inputText.trim().length > 0 && (
+    <View style={styles.inputDockInner}>
+      <View style={styles.inputRow}>
+        <View style={styles.inputPill}>
+          <TextInput
+            ref={textInputRef}
+            style={styles.textInput}
+            placeholder="Message"
+            placeholderTextColor="#8696a0"
+            value={inputText}
+            onChangeText={handleInputChange}
+            onFocus={() => {
+              setInputFocused(true);
+              scrollToEndSmooth();
+            }}
+            onBlur={() => setInputFocused(false)}
+            multiline
+            maxLength={500}
+            blurOnSubmit={false}
+          />
+        </View>
+
         <TouchableOpacity style={styles.sendBtn} onPress={handleSend} activeOpacity={0.85}>
-          <Ionicons name="send" size={20} color="#fff" />
+          <Ionicons name="send" size={22} color="#fff" />
         </TouchableOpacity>
-      )}
+      </View>
     </View>
   );
 
-  const listBottomPadding =
-    inputDockHeight + keyboardHeight + EXTRA_LIST_SPACING + (isTyping ? 28 : 0);
+  const bottomInset =
+    Platform.OS === 'android'
+      ? Math.max(insets.bottom, ANDROID_NAV_BAR_HEIGHT)
+      : Math.max(insets.bottom, 8);
+  const effectiveKeyboardHeight =
+    keyboardHeight > 0
+      ? keyboardHeight
+      : inputFocused && Platform.OS === 'android'
+        ? ANDROID_KEYBOARD_FALLBACK
+        : 0;
 
-  const stickyOffset = { closed: Math.max(insets.bottom, 8), opened: 0 };
+  const composerInset =
+    inputDockHeight + effectiveKeyboardHeight + EXTRA_LIST_SPACING + (isTyping ? 32 : 0);
+
+  const listFooter = (
+    <>
+      {isTyping ? <ChatTypingBubble /> : null}
+      <View style={{ height: composerInset }} />
+    </>
+  );
 
   const renderNavHeader = (
     title: string,
     subtitle: string,
     options?: { peer?: ChatPeer; onSkip?: () => void }
-  ) => (
-    <LinearGradient
-      colors={['#FFD6D6', '#FFF0F0', '#F8F9FA']}
-      locations={[0, 0.55, 1]}
-      style={[styles.header, { paddingTop: insets.top }]}
-    >
-      <View style={styles.headerRow}>
-        <TouchableOpacity
-          onPress={handleBack}
-          style={styles.backBtn}
-          activeOpacity={0.6}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Feather name="arrow-left" size={24} color="#1F1F1F" />
-        </TouchableOpacity>
+  ) => {
+    const hasAvatar = !!options?.peer;
+    const subMarginLeft = hasAvatar ? 102 : 52;
 
-        {options?.peer ? (
-          <View style={styles.headerAvatarWrap}>
-            <PeerAvatar peer={options.peer} />
-            <View style={styles.onlineBadge} />
-          </View>
-        ) : null}
+    return (
+      <View style={[styles.lbHeader, { paddingTop: insets.top }]}>
+        <View style={styles.lbHeaderRow}>
+          <TouchableOpacity
+            onPress={handleBack}
+            style={styles.lbBackBtn}
+            activeOpacity={0.6}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Go back"
+          >
+            <Feather name="arrow-left" size={24} color="#101010" />
+          </TouchableOpacity>
 
-        <View style={styles.headerTextBlock}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
+          {hasAvatar ? (
+            <View style={styles.headerAvatarWrap}>
+              <PeerAvatar peer={options.peer!} />
+              <View style={styles.onlineBadge} />
+            </View>
+          ) : null}
+
+          <Text style={styles.lbHeaderTitle} numberOfLines={1}>
             {title}
           </Text>
-          {subtitle ? (
-            <Text
-              style={[styles.headerSub, isTyping && options?.peer && styles.headerSubTyping]}
-              numberOfLines={1}
-            >
-              {subtitle}
-            </Text>
-          ) : null}
-        </View>
 
-        {options?.onSkip ? (
-          <TouchableOpacity
-            onPress={options.onSkip}
-            style={styles.actionPill}
-            activeOpacity={0.7}
+          {options?.onSkip ? (
+            <TouchableOpacity
+              onPress={options.onSkip}
+              style={styles.lbBackBtn}
+              activeOpacity={0.85}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Find another partner"
+            >
+              <Ionicons name="play-skip-forward" size={20} color="#101010" />
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.lbHeaderSpacer} />
+          )}
+        </View>
+        {subtitle ? (
+          <Text
+            style={[
+              styles.lbHeaderSub,
+              { marginLeft: subMarginLeft },
+              isTyping && options?.peer && styles.headerSubTyping,
+            ]}
+            numberOfLines={1}
           >
-            <Ionicons name="play-skip-forward" size={16} color="#e60000" />
-            <Text style={styles.actionPillText}>Skip</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.headerRightSpacer} />
-        )}
+            {subtitle}
+          </Text>
+        ) : null}
       </View>
-    </LinearGradient>
-  );
+    );
+  };
 
   if (status === 'error') {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        <StatusBar barStyle="dark-content" backgroundColor={AppUI.bg} />
         {renderNavHeader('Chat in English', 'Connection issue')}
         <View style={styles.centeredBody}>
           <Feather name="wifi-off" size={48} color="#e60000" />
@@ -390,7 +537,7 @@ export default function RandomChatScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        <StatusBar barStyle="dark-content" backgroundColor={AppUI.bg} />
         {renderNavHeader(
           'Chat in English',
           status === 'connecting' ? 'Connecting to server…' : ''
@@ -405,115 +552,113 @@ export default function RandomChatScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+      <StatusBar barStyle="dark-content" backgroundColor={AppUI.surface} />
 
-      {renderNavHeader(peer.name, peerStatusLine(peer, isTyping), {
+      {renderNavHeader(peer.name, '', {
         peer,
         onSkip: handleSkip,
       })}
 
-      <View style={styles.infoBanner}>
-        <Feather name="users" size={14} color="#00b894" />
-        <Text style={styles.infoBannerText}>
-          You are chatting with a real signed-in learner. Be polite and respectful.
-        </Text>
-      </View>
+      {showEncryptionNotice ? (
+        <Pressable onPress={dismissKeyboard} style={styles.encryptionBanner}>
+          <Feather name="lock" size={13} color="#667781" />
+          <Text style={styles.encryptionText}>
+            Messages are end-to-end encrypted. Only you and {peer.name} can read them.
+          </Text>
+        </Pressable>
+      ) : null}
 
-      <KeyboardAvoidingView style={styles.flex1} behavior="padding" enabled={false}>
-        <View style={styles.messagesArea}>
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            keyExtractor={(item) => item.id}
-            renderItem={renderMessage}
-            style={styles.messageList}
-            contentContainerStyle={[
-              styles.chatContent,
-              { paddingBottom: listBottomPadding },
+      <View style={styles.chatKeyboardRoot}>
+        <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+          <View style={styles.messagesArea}>
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              keyExtractor={(item) => item.id}
+              renderItem={renderMessage}
+              style={styles.messageList}
+              contentContainerStyle={styles.chatContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              decelerationRate="normal"
+              scrollEventThrottle={16}
+              overScrollMode="never"
+              removeClippedSubviews={Platform.OS === 'android'}
+              ListEmptyComponent={
+                <Pressable onPress={dismissKeyboard} style={styles.emptyChatPress}>
+                  <Text style={styles.emptyChat}>Say hello to {peer.name}!</Text>
+                </Pressable>
+              }
+              ListFooterComponent={listFooter}
+            />
+          </View>
+        </TouchableWithoutFeedback>
+
+        <KeyboardStickyView
+          offset={{ closed: 0, opened: 0 }}
+          style={styles.inputStickyWrap}
+        >
+          <View
+            onLayout={(e) => {
+              const h = Math.ceil(e.nativeEvent.layout.height);
+              if (h > 0 && h !== inputDockHeight) setInputDockHeight(h);
+            }}
+            style={[
+              styles.inputFooter,
+              { paddingBottom: keyboardHeight > 0 ? 6 : bottomInset },
             ]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            onContentSizeChange={() => scrollToEnd(false)}
-            ListEmptyComponent={
-              <Text style={styles.emptyChat}>Say hello to {peer.name}!</Text>
-            }
-            ListFooterComponent={
-              isTyping ? (
-                <View style={styles.typingIndicatorContainer}>
-                  <Text style={styles.typingText}>{peer.name} is typing...</Text>
-                </View>
-              ) : null
-            }
-          />
-
-          <KeyboardStickyView offset={stickyOffset} style={styles.stickyWrapper}>
-            <View
-              onLayout={(e) => {
-                const h = Math.ceil(e.nativeEvent.layout.height);
-                if (h > 0 && h !== inputDockHeight) setInputDockHeight(h);
-              }}
-              style={styles.inputDock}
-            >
-              {renderChatInputBar()}
-            </View>
-          </KeyboardStickyView>
-        </View>
-      </KeyboardAvoidingView>
+          >
+            {renderChatInputBar()}
+          </View>
+        </KeyboardStickyView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
+  container: { flex: 1, backgroundColor: AppUI.bg },
   flex1: { flex: 1 },
-  header: { paddingBottom: 16 },
-  headerRow: {
+  chatKeyboardRoot: { flex: 1, flexDirection: 'column' },
+  lbHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    backgroundColor: AppUI.bg,
+  },
+  lbHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingRight: 12,
+    minHeight: 48,
+    gap: 12,
   },
-  backBtn: {
-    width: 48,
-    height: 48,
+  lbBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 4,
+    backgroundColor: '#FFFFFF',
+    ...cardShadow,
   },
-  headerAvatarWrap: { position: 'relative', marginRight: 10 },
-  headerTextBlock: {
+  lbHeaderTitle: {
     flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 8,
-    minWidth: 0,
-  },
-  headerTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#1F1F1F',
+    color: '#101010',
+    letterSpacing: -0.4,
   },
-  headerSub: {
+  lbHeaderSub: {
     fontSize: 14,
-    fontWeight: '400',
-    color: '#5F6368',
-    marginTop: 2,
+    color: '#6B7280',
+    marginTop: 4,
     lineHeight: 20,
   },
-  headerSubTyping: { color: '#00b894', fontWeight: '500' },
-  headerRightSpacer: { width: 12 },
-  actionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
+  lbHeaderSpacer: {
+    width: 40,
   },
-  actionPillText: { fontSize: 14, fontWeight: '600', color: '#e60000' },
+  headerAvatarWrap: { position: 'relative' },
+  headerSubTyping: { color: '#00b894', fontWeight: '600' },
   centeredBody: {
     flex: 1,
     justifyContent: 'center',
@@ -522,17 +667,17 @@ const styles = StyleSheet.create({
   },
   centeredTitle: {
     fontSize: 16,
-    color: '#5F6368',
+    color: AppUI.textSecondary,
     textAlign: 'center',
     marginTop: 16,
     lineHeight: 22,
   },
   retryBtn: {
     marginTop: 24,
-    backgroundColor: '#e60000',
+    backgroundColor: AppUI.accent,
     paddingHorizontal: 28,
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
   },
   retryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   peerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' },
@@ -552,92 +697,131 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
   },
-  infoBanner: {
-    flexDirection: 'row',
+  encryptionBanner: {
     alignItems: 'center',
-    backgroundColor: '#f0fff4',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    gap: 8,
+    justifyContent: 'center',
+    backgroundColor: '#efeae2',
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    gap: 6,
   },
-  infoBannerText: { flex: 1, fontSize: 12, color: '#2d6a4f' },
+  encryptionText: {
+    textAlign: 'center',
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#667781',
+    maxWidth: 320,
+  },
   messagesArea: {
     flex: 1,
     backgroundColor: '#efeae2',
   },
   messageList: { flex: 1 },
-  stickyWrapper: {
+  inputStickyWrap: {
     width: '100%',
+    flexShrink: 0,
+    backgroundColor: '#f0f2f5',
+    zIndex: 20,
+    elevation: 24,
+  },
+  inputFooter: {
+    minHeight: DEFAULT_INPUT_DOCK_HEIGHT,
+    backgroundColor: '#f0f2f5',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#d1d7db',
+    paddingTop: Platform.OS === 'android' ? 6 : 8,
+    paddingHorizontal: Platform.OS === 'android' ? 8 : 6,
+    justifyContent: 'center',
   },
   chatContent: {
     paddingHorizontal: 10,
     paddingTop: 12,
     flexGrow: 1,
   },
-  emptyChat: { textAlign: 'center', color: '#667781', marginTop: 40, fontSize: 15 },
+  emptyChatPress: {
+    flexGrow: 1,
+    minHeight: 200,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  emptyChat: { textAlign: 'center', color: '#667781', fontSize: 15 },
   messageWrapper: { marginBottom: 4, maxWidth: '82%' },
+  messagePressed: { opacity: 0.92 },
   messageWrapperSelf: { alignSelf: 'flex-end' },
   messageWrapperPeer: { alignSelf: 'flex-start' },
   messageBubble: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+    borderRadius: 14,
     maxWidth: '100%',
   },
   messageBubbleSelf: {
-    backgroundColor: '#d9fdd3',
-    borderTopRightRadius: 0,
+    backgroundColor: BUBBLE_SELF_BG,
+    borderTopRightRadius: 4,
   },
   messageBubblePeer: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 0,
+    backgroundColor: BUBBLE_PEER_BG,
+    borderTopLeftRadius: 4,
   },
-  messageText: { fontSize: 16, lineHeight: 21 },
-  messageTextSelf: { color: '#111b21' },
-  messageTextPeer: { color: '#111b21' },
-  typingIndicatorContainer: { paddingVertical: 6, paddingHorizontal: 4 },
-  typingText: { fontSize: 13, color: '#667781', fontStyle: 'italic' },
-  inputDock: {
-    backgroundColor: '#f0f2f5',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#d1d7db',
-    paddingTop: 6,
-    paddingHorizontal: 8,
-    paddingBottom: 6,
-    justifyContent: 'center',
+  messageBody: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  messageText: {
+    fontSize: 16,
+    lineHeight: 21,
+    flexShrink: 1,
+    flexGrow: 1,
+  },
+  messageTextSelf: { color: '#fff' },
+  messageTextPeer: { color: '#1a1a1a' },
+  messageTicks: {
+    marginLeft: 2,
+    marginBottom: 1,
+  },
+  inputDockInner: {
+    width: '100%',
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
+    gap: Platform.OS === 'android' ? 8 : 6,
   },
   inputPill: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#fff',
     borderRadius: 24,
     paddingHorizontal: 16,
-    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
-    minHeight: 44,
+    paddingVertical: Platform.OS === 'android' ? 4 : 6,
+    minHeight: Platform.OS === 'android' ? 44 : 40,
     maxHeight: 120,
-    justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: '#e9edef',
   },
   textInput: {
+    flex: 1,
     fontSize: 16,
     lineHeight: 20,
     color: '#111b21',
     maxHeight: 100,
-    padding: 0,
-    margin: 0,
+    paddingTop: Platform.OS === 'android' ? 8 : 4,
+    paddingBottom: Platform.OS === 'android' ? 8 : 4,
+    paddingHorizontal: 0,
+    minHeight: Platform.OS === 'android' ? 36 : 32,
   },
   sendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: Platform.OS === 'android' ? 48 : 44,
+    height: Platform.OS === 'android' ? 48 : 44,
+    borderRadius: Platform.OS === 'android' ? 24 : 22,
     backgroundColor: '#e60000',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 2,
+    flexShrink: 0,
   },
 });

@@ -1,269 +1,542 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, SafeAreaView, StatusBar, Dimensions } from 'react-native';
-import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter, Stack } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  Platform,
+  ActivityIndicator,
+  Pressable,
+  StatusBar,
+} from 'react-native';
+import { Feather, Ionicons } from '@expo/vector-icons';
+import { Stack, useRouter } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardStickyView, useKeyboardHandler } from 'react-native-keyboard-controller';
+import { runOnJS } from 'react-native-reanimated';
+import { ASSISTANT_NAME, VED_FAQ, VED_WELCOME, getVedReply } from '@/constants/vedFaq';
 
-const { width } = Dimensions.get('window');
+type ChatMessage = {
+  id: string;
+  text: string;
+  from: 'user' | 'bot';
+};
+
+const UI = {
+  bg: '#F2F3F7',
+  surface: '#FFFFFF',
+  surfaceMuted: '#F7F8FA',
+  text: '#101010',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
+  accent: '#e60000',
+  accentGlow: 'rgba(230, 0, 0, 0.12)',
+  userBubble: '#5b9bd5',
+  divider: 'rgba(0,0,0,0.06)',
+  shadow: '#000000',
+};
+
+const cardShadow = Platform.select({
+  ios: {
+    shadowColor: UI.shadow,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+  },
+  android: { elevation: 2 },
+  default: {},
+});
+
+const BOT_REPLY_DELAY_MS = 500;
+const ANDROID_KEYBOARD_FALLBACK = 280;
+const ANDROID_NAV_BAR_HEIGHT = 48;
+const DEFAULT_COMPOSER_HEIGHT = Platform.OS === 'android' ? 120 : 110;
+const SCROLL_AFTER_KEYBOARD_MS = Platform.OS === 'android' ? 280 : 160;
 
 export default function VedScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const listRef = useRef<FlatList<ChatMessage>>(null);
+  const textInputRef = useRef<TextInput>(null);
+  const replyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    { id: 'welcome', text: VED_WELCOME, from: 'bot' },
+  ]);
+  const [inputText, setInputText] = useState('');
+  const [isTyping, setIsTyping] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [composerHeight, setComposerHeight] = useState(DEFAULT_COMPOSER_HEIGHT);
+
+  const scrollToEnd = useCallback((animated = true) => {
+    listRef.current?.scrollToEnd({ animated });
+  }, []);
+
+  const scrollToEndSmooth = useCallback(() => {
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollToEnd(true);
+    scrollTimeoutRef.current = setTimeout(() => {
+      scrollToEnd(true);
+      scrollTimeoutRef.current = null;
+    }, SCROLL_AFTER_KEYBOARD_MS);
+  }, [scrollToEnd]);
+
+  const onKeyboardHeightChange = useCallback((height: number) => {
+    setKeyboardHeight(height);
+  }, []);
+
+  useKeyboardHandler(
+    {
+      onStart: (e) => {
+        'worklet';
+        runOnJS(onKeyboardHeightChange)(e.height);
+      },
+      onEnd: (e) => {
+        'worklet';
+        runOnJS(onKeyboardHeightChange)(e.height);
+        runOnJS(scrollToEndSmooth)();
+      },
+    },
+    [onKeyboardHeightChange, scrollToEndSmooth]
+  );
+
+  useEffect(() => {
+    scrollToEndSmooth();
+  }, [messages, isTyping, scrollToEndSmooth]);
+
+  useEffect(() => {
+    if (!inputFocused) return;
+    scrollToEndSmooth();
+  }, [inputFocused, composerHeight, scrollToEndSmooth]);
+
+  useEffect(() => {
+    return () => {
+      if (replyTimerRef.current) clearTimeout(replyTimerRef.current);
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
+  }, []);
+
+  const sendUserMessage = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || isTyping) return;
+
+      const userMsg: ChatMessage = {
+        id: `user-${Date.now()}`,
+        text: trimmed,
+        from: 'user',
+      };
+      setMessages((prev) => [...prev, userMsg]);
+      setInputText('');
+      setIsTyping(true);
+
+      const reply = getVedReply(trimmed);
+      replyTimerRef.current = setTimeout(() => {
+        setMessages((prev) => [
+          ...prev,
+          { id: `bot-${Date.now()}`, text: reply, from: 'bot' },
+        ]);
+        setIsTyping(false);
+      }, BOT_REPLY_DELAY_MS);
+    },
+    [isTyping]
+  );
+
+  const bottomInset =
+    Platform.OS === 'android'
+      ? Math.max(insets.bottom, ANDROID_NAV_BAR_HEIGHT)
+      : Math.max(insets.bottom, 8);
+
+  const effectiveKeyboardHeight =
+    keyboardHeight > 0
+      ? keyboardHeight
+      : inputFocused && Platform.OS === 'android'
+        ? ANDROID_KEYBOARD_FALLBACK
+        : 0;
+
+  const listBottomSpacer = composerHeight + 16 + (isTyping ? 44 : 0);
+
+  const renderMessage = ({ item }: { item: ChatMessage }) => {
+    const isUser = item.from === 'user';
+    return (
+      <View style={[styles.messageRow, isUser && styles.messageRowUser]}>
+        {!isUser && (
+          <View style={styles.botAvatar}>
+            <Ionicons name="sparkles" size={15} color="#fff" />
+          </View>
+        )}
+        <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleBot]}>
+          <Text style={[styles.bubbleText, isUser && styles.bubbleTextUser]}>{item.text}</Text>
+        </View>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
-      
-      {/* Video Player Area */}
-      <View style={[styles.playerContainer, { paddingTop: insets.top }]}>
-        <View style={styles.videoWrapper}>
-           <Image 
-             source={{ uri: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&q=80&w=1000' }} 
-             style={styles.placeholderVideo}
-           />
-           <View style={styles.videoOverlay}>
-              <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-                <Feather name="chevron-down" size={28} color="#fff" />
-              </TouchableOpacity>
-              
-              <View style={styles.centerControls}>
-                <TouchableOpacity style={styles.controlIcon}>
-                  <Ionicons name="play-back-outline" size={32} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.playBtn}>
-                  <Ionicons name="pause" size={48} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.controlIcon}>
-                  <Ionicons name="play-forward-outline" size={32} color="#fff" />
-                </TouchableOpacity>
-              </View>
+      <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
 
-              <View style={styles.bottomControls}>
-                <View style={styles.progressBar}>
-                  <View style={styles.progressFill} />
-                  <View style={styles.progressKnob} />
-                </View>
-                <View style={styles.timeRow}>
-                  <Text style={styles.timeText}>04:20 / 08:45</Text>
-                  <TouchableOpacity>
-                    <Feather name="maximize" size={20} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-           </View>
+      <SafeAreaView edges={['top']} style={styles.safeTop}>
+        <View style={styles.navBar}>
+          <Pressable
+            onPress={() => router.navigate('/(tabs)/')}
+            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+            hitSlop={12}
+          >
+            <Feather name="arrow-left" size={24} color={UI.text} />
+          </Pressable>
+          <View style={styles.headerAvatar}>
+            <Ionicons name="sparkles" size={20} color="#fff" />
+          </View>
+          <View style={styles.headerText}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {ASSISTANT_NAME}
+            </Text>
+            <Text style={styles.headerSubtitle} numberOfLines={1}>
+              Support & FAQ
+            </Text>
+          </View>
         </View>
-      </View>
+      </SafeAreaView>
 
-      {/* Content Below Video */}
-      <View style={styles.content}>
-        <ScrollView showsVerticalScrollIndicator={false}>
-          <View style={styles.infoSection}>
-            <Text style={styles.videoTitle}>Introduction to English - Beginner Level</Text>
-            <Text style={styles.videoStats}>1.2k views • 2 days ago</Text>
-            
-            <View style={styles.actionRow}>
-              <TouchableOpacity style={styles.actionItem}>
-                <Feather name="thumbs-up" size={22} color="#4A5568" />
-                <Text style={styles.actionLabel}>240</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionItem}>
-                <Feather name="share-2" size={22} color="#4A5568" />
-                <Text style={styles.actionLabel}>Share</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionItem}>
-                <Feather name="download" size={22} color="#4A5568" />
-                <Text style={styles.actionLabel}>Download</Text>
+      <View style={styles.chatRoot}>
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          style={styles.messageList}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="interactive"
+          onContentSizeChange={() => scrollToEnd(false)}
+          ListHeaderComponent={
+            <View style={styles.helpBanner}>
+              <Feather name="help-circle" size={18} color={UI.accent} />
+              <Text style={styles.helpBannerText}>
+                Ask a question or tap a topic below for quick answers.
+              </Text>
+            </View>
+          }
+          ListFooterComponent={
+            <>
+              {isTyping ? (
+                <View style={styles.messageRow}>
+                  <View style={styles.botAvatar}>
+                    <Ionicons name="sparkles" size={15} color="#fff" />
+                  </View>
+                  <View style={[styles.bubble, styles.bubbleBot, styles.typingBubble]}>
+                    <ActivityIndicator size="small" color={UI.accent} />
+                    <Text style={styles.typingText}>Typing…</Text>
+                  </View>
+                </View>
+              ) : null}
+              <View style={{ height: listBottomSpacer }} />
+            </>
+          }
+        />
+
+        <KeyboardStickyView offset={{ closed: 0, opened: 0 }} style={styles.composerSticky}>
+          <View
+            onLayout={(e) => {
+              const h = Math.ceil(e.nativeEvent.layout.height);
+              if (h > 0 && h !== composerHeight) setComposerHeight(h);
+            }}
+            style={[
+              styles.composerDock,
+              { paddingBottom: effectiveKeyboardHeight > 0 ? 8 : bottomInset + 8 },
+            ]}
+          >
+            <Text style={styles.quickLabel}>Quick topics</Text>
+            <FlatList
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={VED_FAQ}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.quickTopicsContent}
+              keyboardShouldPersistTaps="always"
+              style={styles.quickTopics}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.chip}
+                  onPress={() => sendUserMessage(item.label)}
+                  disabled={isTyping}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.chipText} numberOfLines={1}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+
+            <View style={styles.inputRow}>
+              <View style={styles.inputPill}>
+                <TextInput
+                  ref={textInputRef}
+                  style={styles.input}
+                  placeholder="Type your question…"
+                  placeholderTextColor={UI.textTertiary}
+                  value={inputText}
+                  onChangeText={setInputText}
+                  multiline
+                  maxLength={500}
+                  editable={!isTyping}
+                  onSubmitEditing={() => sendUserMessage(inputText)}
+                  returnKeyType="send"
+                  blurOnSubmit={false}
+                  onFocus={() => {
+                    setInputFocused(true);
+                    scrollToEndSmooth();
+                  }}
+                  onBlur={() => setInputFocused(false)}
+                />
+              </View>
+              <TouchableOpacity
+                style={[styles.sendBtn, (!inputText.trim() || isTyping) && styles.sendBtnDisabled]}
+                onPress={() => sendUserMessage(inputText)}
+                disabled={!inputText.trim() || isTyping}
+                activeOpacity={0.88}
+              >
+                <Feather name="send" size={20} color="#fff" />
               </TouchableOpacity>
             </View>
           </View>
-
-          <View style={styles.descriptionBox}>
-            <Text style={styles.descriptionTitle}>Lesson Description</Text>
-            <Text style={styles.descriptionText}>
-              In this lesson, we will cover the basic foundations of the English language. 
-              Starting from the alphabet to simple sentence structures.
-            </Text>
-          </View>
-
-          <View style={styles.relatedSection}>
-            <Text style={styles.sectionTitle}>Up Next</Text>
-            <TouchableOpacity style={styles.nextCard}>
-              <Image source={{ uri: 'https://picsum.photos/seed/b2/200/120' }} style={styles.nextThumb} />
-              <View style={styles.nextInfo}>
-                <Text style={styles.nextTitle}>Basic Words & Sentences</Text>
-                <Text style={styles.nextMeta}>Lesson 2 • 10:15</Text>
-              </View>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
+        </KeyboardStickyView>
       </View>
     </View>
   );
 }
 
-import { ScrollView } from 'react-native-gesture-handler';
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: UI.bg,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  playerContainer: {
-    backgroundColor: '#000',
-    width: '100%',
-    aspectRatio: 16 / 9,
+  safeTop: {
+    backgroundColor: UI.bg,
   },
-  videoWrapper: {
-    flex: 1,
-    position: 'relative',
-  },
-  placeholderVideo: {
-    width: '100%',
-    height: '100%',
-    opacity: 0.6,
-  },
-  videoOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'space-between',
-    padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 12,
   },
   backBtn: {
-    alignSelf: 'flex-start',
-  },
-  centerControls: {
-    flexDirection: 'row',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 40,
+    backgroundColor: UI.surface,
+    ...cardShadow,
   },
-  controlIcon: {
-    opacity: 0.8,
+  backBtnPressed: {
+    opacity: 0.85,
   },
-  playBtn: {
-    backgroundColor: 'rgba(230, 0, 0, 0.8)',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
+  headerAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: UI.accent,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  bottomControls: {
+  headerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: UI.text,
+    letterSpacing: -0.3,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: UI.textSecondary,
+    marginTop: 2,
+  },
+  chatRoot: {
+    flex: 1,
+    flexDirection: 'column',
+  },
+  messageList: {
+    flex: 1,
+  },
+  composerSticky: {
     width: '100%',
   },
-  progressBar: {
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 2,
-    position: 'relative',
-    marginBottom: 8,
+  composerDock: {
+    backgroundColor: UI.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 14,
+    marginHorizontal: 0,
+    ...Platform.select({
+      ios: {
+        shadowColor: UI.shadow,
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+      },
+      android: { elevation: 12 },
+      default: {},
+    }),
   },
-  progressFill: {
-    width: '50%',
-    height: '100%',
-    backgroundColor: '#e60000',
-    borderRadius: 2,
+  listContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
+    flexGrow: 1,
   },
-  progressKnob: {
-    position: 'absolute',
-    left: '50%',
-    top: -4,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#e60000',
-    marginLeft: -6,
-  },
-  timeRow: {
+  helpBanner: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
+    backgroundColor: UI.accentGlow,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
   },
-  timeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  content: {
+  helpBannerText: {
     flex: 1,
-  },
-  infoSection: {
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F0',
-  },
-  videoTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#1A202C',
-    lineHeight: 24,
-  },
-  videoStats: {
     fontSize: 13,
-    color: '#718096',
-    marginTop: 6,
+    lineHeight: 19,
+    color: UI.textSecondary,
+    fontWeight: '500',
   },
-  actionRow: {
+  messageRow: {
     flexDirection: 'row',
-    marginTop: 20,
-    gap: 30,
+    alignItems: 'flex-end',
+    marginBottom: 12,
+    maxWidth: '90%',
   },
-  actionItem: {
+  messageRowUser: {
+    alignSelf: 'flex-end',
+    flexDirection: 'row-reverse',
+  },
+  botAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 12,
+    backgroundColor: UI.accent,
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    marginRight: 8,
+    marginBottom: 2,
   },
-  actionLabel: {
-    fontSize: 12,
-    color: '#4A5568',
-    fontWeight: '600',
+  bubble: {
+    maxWidth: '88%',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 18,
   },
-  descriptionBox: {
-    padding: 20,
-    backgroundColor: '#F8FAFC',
+  bubbleBot: {
+    backgroundColor: UI.surface,
+    borderTopLeftRadius: 6,
+    ...cardShadow,
   },
-  descriptionTitle: {
+  bubbleUser: {
+    backgroundColor: UI.userBubble,
+    borderTopRightRadius: 6,
+  },
+  bubbleText: {
     fontSize: 15,
+    lineHeight: 22,
+    color: UI.text,
+  },
+  bubbleTextUser: {
+    color: '#fff',
+  },
+  typingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  typingText: {
+    fontSize: 13,
+    color: UI.textSecondary,
+    fontWeight: '500',
+  },
+  quickLabel: {
+    fontSize: 12,
     fontWeight: '700',
-    color: '#1A202C',
+    color: UI.textTertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginLeft: 16,
     marginBottom: 8,
   },
-  descriptionText: {
-    fontSize: 14,
-    color: '#4A5568',
-    lineHeight: 20,
+  quickTopics: {
+    maxHeight: 44,
+    marginBottom: 10,
   },
-  relatedSection: {
-    padding: 20,
+  quickTopicsContent: {
+    paddingHorizontal: 16,
+    gap: 8,
   },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#1A202C',
-    marginBottom: 16,
+  chip: {
+    backgroundColor: UI.surfaceMuted,
+    borderWidth: 1,
+    borderColor: UI.divider,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 20,
+    marginRight: 8,
+    maxWidth: 200,
   },
-  nextCard: {
+  chipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: UI.text,
+  },
+  inputRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingBottom: 4,
+    gap: 10,
   },
-  nextThumb: {
-    width: 120,
-    height: 70,
-    borderRadius: 10,
-  },
-  nextInfo: {
+  inputPill: {
     flex: 1,
+    backgroundColor: UI.surfaceMuted,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: UI.divider,
+    minHeight: 46,
     justifyContent: 'center',
   },
-  nextTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1A202C',
+  input: {
+    minHeight: 44,
+    maxHeight: 100,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: UI.text,
   },
-  nextMeta: {
-    fontSize: 12,
-    color: '#718096',
-    marginTop: 4,
+  sendBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: UI.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 0,
+    ...cardShadow,
+  },
+  sendBtnDisabled: {
+    opacity: 0.45,
   },
 });

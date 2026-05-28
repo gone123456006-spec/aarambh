@@ -54,6 +54,7 @@ export async function recordGameAnswer(gameId: GameId, correct: boolean): Promis
     all[gameId] = stats;
     const key = await userScopedKey(STORAGE_KEY);
     await AsyncStorage.setItem(key, JSON.stringify(all));
+
     const token = await getAccessToken();
     if (token) {
       await apiFetch('/api/games/score', {
@@ -61,8 +62,8 @@ export async function recordGameAnswer(gameId: GameId, correct: boolean): Promis
         body: JSON.stringify({ gameId, isCorrect: correct }),
       });
     }
-  } catch (e) {
-    console.error('Failed to record game stats', e);
+  } catch {
+    // Stats remain on device if the server is unreachable.
   }
 }
 

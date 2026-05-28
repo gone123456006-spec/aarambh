@@ -83,8 +83,18 @@ export function cancelMatchmaking(sock: Socket) {
   sock.emit('match:cancel');
 }
 
-export function sendChatMessage(sock: Socket, sessionId: string, text: string) {
-  sock.emit('message:send', { sessionId, text });
+export function sendChatMessage(
+  sock: Socket,
+  sessionId: string,
+  text: string,
+  clientId?: string
+) {
+  sock.emit('message:send', { sessionId, text, clientId });
+}
+
+export function emitMessageSeen(sock: Socket, sessionId: string, messageIds: string[]) {
+  if (messageIds.length === 0) return;
+  sock.emit('message:seen', { sessionId, messageIds });
 }
 
 export function skipChatPartner(sock: Socket, sessionId: string) {

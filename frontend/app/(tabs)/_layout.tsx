@@ -1,19 +1,27 @@
 import { Tabs, useRouter } from 'expo-router';
 import React, { useCallback } from 'react';
-import { Platform, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { getAccessToken } from '@/utils/authStorage';
 
 import { HapticTab } from '@/components/haptic-tab';
+import { RewardsTabIcon } from '@/components/RewardsTabIcon';
 import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
+import { AppUI, Colors } from '@/constants/theme';
+import {
+  getDefaultTabBarStyle,
+  getHiddenTabBarStyle,
+  tabScreenOptions,
+} from '@/constants/navigationTransitions';
+import { GameTabBarProvider, useGameTabBar } from '@/contexts/game-tab-bar-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
-export default function TabLayout() {
+function TabNavigator() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
+  const { hideTabBar } = useGameTabBar();
 
   useFocusEffect(
     useCallback(() => {
@@ -28,71 +36,89 @@ export default function TabLayout() {
       };
     }, [router])
   );
-  const tabBarMargin = Platform.OS === 'ios' ? 26 : 20;
-  const tabBarBottom = Math.max(insets.bottom - 30, 0);
-  const tabBarTotalHeight = 50 + tabBarBottom + tabBarMargin;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
-    <Tabs
-      screenOptions={{
-        sceneContainerStyle: {
-          paddingBottom: tabBarTotalHeight,
-          backgroundColor: '#FFFFFF',
-        },
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        headerShown: false,
-        tabBarButton: HapticTab,
-        tabBarBackground: () => (
-          <View style={{ flex: 1, backgroundColor: '#FFFFFF' }} />
-        ),
-        tabBarStyle: {
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: tabBarMargin,
-          borderTopWidth: 1,
-          borderTopColor: '#E8EAED',
-          backgroundColor: '#FFFFFF',
-          height: 50 + tabBarBottom,
-          paddingBottom: tabBarBottom,
-          paddingTop: 6,
-          elevation: 0,
-        },
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '500',
-        },
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="courses"
-        options={{
-          title: 'Game',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="gamecontroller.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="ved"
-        options={{
-          title: 'Ved',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="sparkles" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="my-courses"
-        options={{
-          title: 'My Courses',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="play.rectangle.fill" color={color} />,
-        }}
-      />
-    </Tabs>
+    <View style={styles.root}>
+      <Tabs
+        screenOptions={{
+          ...tabScreenOptions,
+          sceneContainerStyle: {
+            backgroundColor: AppUI.bg,
+          },
+          tabBarActiveTintColor: '#e60000',
+          tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
+          headerShown: false,
+          tabBarButton: HapticTab,
+          tabBarBackground: () => (
+            <View style={[StyleSheet.absoluteFillObject, styles.tabBarBackground]} />
+          ),
+          tabBarStyle: hideTabBar
+            ? getHiddenTabBarStyle()
+            : getDefaultTabBarStyle(insets.bottom),
+          tabBarLabelStyle: {
+            fontSize: 12,
+            fontWeight: '500',
+          },
+        }}>
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: 'Home',
+            tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="my-courses"
+          options={{
+            title: 'My Courses',
+            tabBarIcon: ({ color }) => (
+              <IconSymbol size={28} name="play.rectangle.fill" color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="courses"
+          options={{
+            title: 'Games',
+            tabBarIcon: ({ color }) => (
+              <IconSymbol size={28} name="gamecontroller.fill" color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="rewards"
+          options={{
+            title: 'Rewards',
+            tabBarIcon: ({ color }) => <RewardsTabIcon color={color} />,
+          }}
+        />
+        <Tabs.Screen
+          name="ved"
+          options={{
+            title: 'Support',
+            tabBarIcon: ({ color }) => <IconSymbol size={28} name="sparkles" color={color} />,
+            tabBarStyle: { display: 'none' },
+          }}
+        />
+      </Tabs>
     </View>
   );
 }
+
+export default function TabLayout() {
+  return (
+    <GameTabBarProvider>
+      <TabNavigator />
+    </GameTabBarProvider>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: AppUI.bg,
+  },
+  tabBarBackground: {
+    backgroundColor: '#FFFFFF',
+  },
+});

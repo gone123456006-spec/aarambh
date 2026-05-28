@@ -9,10 +9,11 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  Platform,
 } from 'react-native';
-import Animated, { FadeInDown, FadeInUp, Layout } from 'react-native-reanimated';
+import Animated, { FadeInUp } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -76,6 +77,10 @@ const MEDAL = { 1: '#FFD700', 2: '#C0C0C0', 3: '#CD7F32' };
 /** Icons8 3D Fluency — https://icons8.com/icons/fluency */
 const LB_TROPHY_LOGO = 'https://img.icons8.com/3d-fluency/48/trophy.png';
 const LB_CROWN_LOGO = 'https://img.icons8.com/3d-fluency/48/crown.png';
+
+/** Space between sticky footer and bottom nav / home indicator */
+const FOOTER_BOTTOM_GAP = 20;
+const FOOTER_BAR_HEIGHT = 72;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -176,11 +181,7 @@ export default function LeaderboardScreen() {
   // ── UI ────────────────────────────────────────────────────────────────────
 
   const renderHeader = () => (
-    <LinearGradient
-      colors={['#FFD6D6', '#FFF0F0', '#F8F9FA']}
-      locations={[0, 0.55, 1]}
-      style={[styles.header, { paddingTop: insets.top }]}
-    >
+    <View style={[styles.header, { paddingTop: insets.top }]}>
       <View style={styles.headerRow}>
         <TouchableOpacity
           onPress={() => router.back()}
@@ -188,29 +189,31 @@ export default function LeaderboardScreen() {
           activeOpacity={0.6}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Feather name="arrow-left" size={24} color="#1F1F1F" />
+          <Feather name="arrow-left" size={24} color="#101010" />
         </TouchableOpacity>
-        <View style={styles.headerTextBlock}>
-          <Text style={styles.headerTitle}>Leaderboard</Text>
-          <Text style={styles.headerSub}>All-time rankings</Text>
-        </View>
-        {!loading && leaderboard.length > 0 && (
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          Leaderboard
+        </Text>
+        {!loading && leaderboard.length > 0 ? (
           <View style={styles.rankPill}>
             <Text style={styles.rankPillText}>#{myRank}</Text>
           </View>
+        ) : (
+          <View style={styles.headerSpacer} />
         )}
       </View>
-    </LinearGradient>
+      <Text style={styles.headerSub}>All-time rankings</Text>
+    </View>
   );
 
   if (loading) {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        <StatusBar barStyle="dark-content" backgroundColor="#F2F3F7" />
         {renderHeader()}
         <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color="#1A73E8" />
+          <ActivityIndicator size="large" color="#e60000" />
           <Text style={styles.loadingText}>Loading scores…</Text>
         </View>
       </View>
@@ -221,7 +224,7 @@ export default function LeaderboardScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        <StatusBar barStyle="dark-content" backgroundColor="#F2F3F7" />
         {renderHeader()}
         <View style={styles.emptyBox}>
           <Image source={{ uri: LB_TROPHY_LOGO }} style={styles.emptyLogo} resizeMode="contain" />
@@ -236,12 +239,18 @@ export default function LeaderboardScreen() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
-        <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+        <StatusBar barStyle="dark-content" backgroundColor="#F2F3F7" />
         {renderHeader()}
 
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[
+            styles.scroll,
+            {
+              paddingBottom:
+                FOOTER_BAR_HEIGHT + insets.bottom + FOOTER_BOTTOM_GAP + (me ? 16 : 24),
+            },
+          ]}
         >
           {/* ── Top-3 podium ── */}
           {topThree.length >= 1 && (
@@ -321,7 +330,7 @@ export default function LeaderboardScreen() {
 
         {/* ── Sticky "You" footer ── */}
         {me && (
-          <View style={styles.footer}>
+          <View style={[styles.footer, { bottom: insets.bottom + FOOTER_BOTTOM_GAP }]}>
             <View style={[styles.miniAvatar, styles.miniAvatarMe, { width: 40, height: 40, borderRadius: 20 }]}>
               <Text style={[styles.miniAvatarLetter, { fontSize: 18 }]}>
                 {me.name.charAt(0).toUpperCase()}
@@ -351,10 +360,21 @@ export default function LeaderboardScreen() {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+const cardShadow = Platform.select({
+  ios: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+  },
+  android: { elevation: 3 },
+  default: {},
+});
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8F9FA',
+    backgroundColor: '#F2F3F7',
   },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#5F6368', marginTop: 12, fontSize: 14 },
@@ -368,19 +388,18 @@ const styles = StyleSheet.create({
   emptySub: { fontSize: 14, color: '#5F6368', marginTop: 8, textAlign: 'center', lineHeight: 20 },
 
   header: {
-    paddingBottom: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    backgroundColor: '#F2F3F7',
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingRight: 12,
+    minHeight: 48,
+    gap: 12,
   },
-  headerTextBlock: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 8,
-    minWidth: 0,
+  headerSpacer: {
+    width: 44,
   },
   emptyLogo: {
     width: 72,
@@ -388,51 +407,47 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   backBtn: {
-    width: 48,
-    height: 48,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginLeft: 4,
+    backgroundColor: '#FFFFFF',
+    ...cardShadow,
   },
   headerTitle: {
+    flex: 1,
     fontSize: 22,
     fontWeight: '700',
-    color: '#1F1F1F',
+    color: '#101010',
+    letterSpacing: -0.4,
   },
   headerSub: {
     fontSize: 14,
-    fontWeight: '400',
-    color: '#5F6368',
-    marginTop: 2,
+    color: '#6B7280',
+    marginTop: 4,
+    marginLeft: 52,
     lineHeight: 20,
   },
   rankPill: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: 'rgba(230, 0, 0, 0.1)',
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
   },
-  rankPillText: { fontSize: 14, fontWeight: '600', color: '#e60000' },
+  rankPillText: { fontSize: 14, fontWeight: '700', color: '#e60000' },
 
-  scroll: { paddingBottom: 110, paddingTop: 4 },
+  scroll: { paddingTop: 4 },
 
   // Podium
   podiumWrapper: {
-    marginHorizontal: 14,
+    marginHorizontal: 16,
     marginTop: 4,
     marginBottom: 12,
     overflow: 'hidden',
-    borderRadius: 12,
+    borderRadius: 20,
     backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-    elevation: 1,
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
+    ...cardShadow,
   },
   podiumGradient: {
     position: 'absolute',
@@ -512,18 +527,12 @@ const styles = StyleSheet.create({
   topLocation: { fontSize: 10, color: '#888', flexShrink: 1 },
 
   listCard: {
-    marginHorizontal: 14,
+    marginHorizontal: 16,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 20,
     paddingBottom: 8,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-    elevation: 1,
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
     overflow: 'hidden',
+    ...cardShadow,
   },
   listSectionHeader: {
     paddingHorizontal: 16,
@@ -587,21 +596,24 @@ const styles = StyleSheet.create({
 
   footer: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    left: 16,
+    right: 16,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingVertical: 14,
-    borderTopWidth: 1,
-    borderColor: '#E8EAED',
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 8,
+    borderRadius: 20,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+      },
+      android: { elevation: 10 },
+      default: {},
+    }),
   },
   footerName: { fontSize: 15, fontWeight: '600', color: '#1F1F1F' },
   footerLoc: { fontSize: 12, color: '#5F6368' },

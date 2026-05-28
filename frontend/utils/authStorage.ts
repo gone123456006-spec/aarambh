@@ -47,6 +47,19 @@ export async function getAccessToken() {
   return AsyncStorage.getItem(AUTH_KEYS.accessToken);
 }
 
+export async function getRefreshToken() {
+  return AsyncStorage.getItem(AUTH_KEYS.refreshToken);
+}
+
+/** Persist rotated tokens after /api/auth/refresh-token */
+export async function updateAuthTokens(accessToken: string, refreshToken?: string) {
+  const pairs: [string, string][] = [[AUTH_KEYS.accessToken, accessToken]];
+  if (refreshToken) {
+    pairs.push([AUTH_KEYS.refreshToken, refreshToken]);
+  }
+  await AsyncStorage.multiSet(pairs);
+}
+
 export async function clearAuthSession() {
   await clearAllLocalUserData();
 }

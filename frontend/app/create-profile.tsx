@@ -311,7 +311,7 @@ export default function CreateProfileScreen() {
 
             {/* English Level */}
             <Animated.View entering={FadeInDown.delay(800)} style={styles.inputGroup}>
-              <Text style={styles.label}>What's your English level?</Text>
+              <Text style={styles.label}>What&apos;s your English level?</Text>
               {LEVELS.map((l) => (
                 <Pressable
                   key={l.id}
@@ -353,7 +353,7 @@ export default function CreateProfileScreen() {
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
               >
-                <Text style={styles.submitButtonText}>Let's Start Learning</Text>
+                <Text style={styles.submitButtonText}>Let&apos;s Start Learning</Text>
                 <Feather name="arrow-right" size={20} color="#fff" />
               </LinearGradient>
             </Pressable>

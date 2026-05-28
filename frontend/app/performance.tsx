@@ -4,14 +4,15 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
+  Pressable,
   ActivityIndicator,
   StatusBar,
   Alert,
   Image,
+  Platform,
 } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -37,10 +38,33 @@ import {
 
 type PerformanceCategory = 'games' | 'courses';
 
-/** Icons8 3D Fluency — https://icons8.com/icons/fluency */
-const PERF_GAMES_TAB_LOGO = 'https://img.icons8.com/3d-fluency/48/controller.png';
-const PERF_COURSES_TAB_LOGO = 'https://img.icons8.com/3d-fluency/48/video.png';
-const PERF_OVERALL_LOGO = 'https://img.icons8.com/3d-fluency/48/goal.png';
+const UI = {
+  bg: '#F2F3F7',
+  surface: '#FFFFFF',
+  surfaceMuted: '#F7F8FA',
+  text: '#101010',
+  textSecondary: '#6B7280',
+  textTertiary: '#9CA3AF',
+  accent: '#e60000',
+  accentGlow: 'rgba(230, 0, 0, 0.12)',
+  blue: '#1B6EF3',
+  blueSoft: '#E8F1FE',
+  green: '#12B76A',
+  greenSoft: '#ECFDF3',
+  divider: 'rgba(0,0,0,0.06)',
+  shadow: '#000000',
+};
+
+const cardShadow = Platform.select({
+  ios: {
+    shadowColor: UI.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+  },
+  android: { elevation: 3 },
+  default: {},
+});
 
 const LEVEL_3D_ICONS: Record<LevelId, string> = {
   beginner: 'https://img.icons8.com/3d-fluency/48/seedling.png',
@@ -52,7 +76,6 @@ const GAME_LIST: {
   id: GameId;
   title: string;
   imageUrl: string;
-  color: string;
   bg: string;
   totalLevels: number;
   scored: boolean;
@@ -61,7 +84,6 @@ const GAME_LIST: {
     id: 'quiz',
     title: 'Word Quiz',
     imageUrl: 'https://img.icons8.com/3d-fluency/48/help.png',
-    color: '#e60000',
     bg: '#FFF5F5',
     totalLevels: QUIZ_LEVEL_COUNT,
     scored: true,
@@ -70,7 +92,6 @@ const GAME_LIST: {
     id: 'scramble',
     title: 'Word Scramble',
     imageUrl: 'https://img.icons8.com/3d-fluency/48/puzzle.png',
-    color: '#6C5CE7',
     bg: '#F3F0FF',
     totalLevels: SCRAMBLE_LEVEL_COUNT,
     scored: true,
@@ -79,8 +100,7 @@ const GAME_LIST: {
     id: 'fill',
     title: 'Fill in the Blanks',
     imageUrl: 'https://img.icons8.com/3d-fluency/48/pencil.png',
-    color: '#00b894',
-    bg: '#EBFBEE',
+    bg: '#ECFDF3',
     totalLevels: FILL_BLANK_LEVEL_COUNT,
     scored: true,
   },
@@ -88,52 +108,140 @@ const GAME_LIST: {
     id: 'flash',
     title: 'Flashcards',
     imageUrl: 'https://img.icons8.com/3d-fluency/48/cards.png',
-    color: '#0984e3',
-    bg: '#E1F5FE',
+    bg: '#E8F1FE',
     totalLevels: FLASHCARD_LEVEL_COUNT,
     scored: false,
   },
 ];
 
-function SectionHeading({ title, inset }: { title: string; inset?: boolean }) {
+function SectionLabel({ title, action }: { title: string; action?: string }) {
   return (
-    <View style={[styles.cardSectionHeader, inset && styles.cardSectionHeaderInset]}>
-      <Text style={styles.cardSectionHeaderText}>{title}</Text>
-      <View style={[styles.cardSectionHeaderLine, inset && styles.cardSectionHeaderLineInset]} />
+    <View style={styles.sectionHead}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {action ? <Text style={styles.sectionAction}>{action}</Text> : null}
     </View>
   );
 }
 
-function PerformanceCategoryTabs({
+function StatTile({
+  icon,
+  iconBg,
+  label,
+  value,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  iconBg: string;
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.statTile}>
+      <View style={[styles.statTileIcon, { backgroundColor: iconBg }]}>
+        <Feather name={icon} size={20} color={UI.text} />
+      </View>
+      <Text style={styles.statTileLabel}>{label}</Text>
+      <Text style={styles.statTileValue}>{value}</Text>
+    </View>
+  );
+}
+
+function CategorySegmented({
   selected,
   onSelect,
 }: {
   selected: PerformanceCategory;
   onSelect: (id: PerformanceCategory) => void;
 }) {
-  const tabs: { id: PerformanceCategory; label: string; imageUrl: string }[] = [
-    { id: 'games', label: 'Games', imageUrl: PERF_GAMES_TAB_LOGO },
-    { id: 'courses', label: 'Courses', imageUrl: PERF_COURSES_TAB_LOGO },
+  const tabs: { id: PerformanceCategory; label: string; icon: keyof typeof Feather.glyphMap }[] = [
+    { id: 'games', label: 'Games', icon: 'grid' },
+    { id: 'courses', label: 'Courses', icon: 'play-circle' },
   ];
 
   return (
-    <View style={styles.categoryTabs}>
+    <View style={styles.segmented}>
       {tabs.map((tab) => {
         const active = selected === tab.id;
         return (
-          <TouchableOpacity
+          <Pressable
             key={tab.id}
-            style={[styles.categoryTab, active && styles.categoryTabActive]}
+            style={[styles.segment, active && styles.segmentActive]}
             onPress={() => onSelect(tab.id)}
-            activeOpacity={0.75}
           >
-            <Image source={{ uri: tab.imageUrl }} style={styles.categoryTabIcon} resizeMode="contain" />
-            <Text style={[styles.categoryTabLabel, active && styles.categoryTabLabelActive]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
+            <Feather name={tab.icon} size={18} color={active ? UI.accent : UI.textTertiary} />
+            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{tab.label}</Text>
+          </Pressable>
         );
       })}
+    </View>
+  );
+}
+
+function OverallHeroCard({
+  correct,
+  incorrect,
+  points,
+  accuracy,
+  totalAnswered,
+}: {
+  correct: number;
+  incorrect: number;
+  points: number;
+  accuracy: number;
+  totalAnswered: number;
+}) {
+  return (
+    <View style={styles.heroCard}>
+      <LinearGradient
+        colors={['#FFFFFF', '#FFF8F8', '#FFEFEF']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.heroGradient}
+      >
+        <View style={styles.heroTop}>
+          <View>
+            <Text style={styles.heroEyebrow}>Game performance</Text>
+            <View style={styles.heroAccuracyRow}>
+              <Text style={styles.heroAccuracy}>{accuracy}%</Text>
+              <Text style={styles.heroAccuracyUnit}>accuracy</Text>
+            </View>
+          </View>
+          <View style={styles.heroBadge}>
+            <Feather name="target" size={26} color={UI.accent} />
+          </View>
+        </View>
+
+        <View style={styles.heroBarTrack}>
+          <LinearGradient
+            colors={[UI.accent, '#ff5a5a']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={[styles.heroBarFill, { width: `${Math.max(accuracy, totalAnswered > 0 ? 4 : 0)}%` }]}
+          />
+        </View>
+        <Text style={styles.heroMeta}>
+          {totalAnswered === 0 ? 'No answers yet — play a game to start' : `${totalAnswered} questions answered`}
+        </Text>
+
+        <View style={styles.heroDivider} />
+
+        <View style={styles.heroStatsRow}>
+          <View style={styles.heroStat}>
+            <Text style={styles.heroStatValue}>{correct}</Text>
+            <Text style={styles.heroStatLabel}>Correct</Text>
+          </View>
+          <View style={styles.heroStatDivider} />
+          <View style={styles.heroStat}>
+            <Text style={styles.heroStatValue}>{incorrect}</Text>
+            <Text style={styles.heroStatLabel}>Incorrect</Text>
+          </View>
+          <View style={styles.heroStatDivider} />
+          <View style={styles.heroStat}>
+            <Text style={styles.heroStatValue}>{points}</Text>
+            <Text style={styles.heroStatLabel}>Points</Text>
+          </View>
+        </View>
+        <Text style={styles.heroFootnote}>{POINTS_PER_CORRECT_LEVEL} pts per correct answer</Text>
+      </LinearGradient>
     </View>
   );
 }
@@ -155,48 +263,32 @@ function GameListItem({
 
   return (
     <>
-      <View style={styles.gameListItem}>
-        <View style={[styles.gameListIconWrap, { backgroundColor: game.bg }]}>
-          <Image source={{ uri: game.imageUrl }} style={styles.gameListIconImage} resizeMode="contain" />
+      <View style={styles.listRow}>
+        <View style={[styles.listIcon, { backgroundColor: game.bg }]}>
+          <Image source={{ uri: game.imageUrl }} style={styles.listIconImg} resizeMode="contain" />
         </View>
-        <View style={styles.gameListBody}>
-          <View style={styles.gameListTopRow}>
-            <Text style={styles.gameListTitle} numberOfLines={1}>
+        <View style={styles.listBody}>
+          <View style={styles.listTop}>
+            <Text style={styles.listTitle} numberOfLines={1}>
               {game.title}
             </Text>
-            {game.scored ? (
-              <Text style={styles.gameListMetric}>
-                {answered > 0 ? `${accuracy}%` : '—'}
-              </Text>
-            ) : (
-              <Text style={styles.gameListMetricMuted}>Study</Text>
-            )}
+            <Text style={styles.listMetric}>
+              {game.scored ? (answered > 0 ? `${accuracy}%` : '—') : 'Study'}
+            </Text>
           </View>
-          <Text style={styles.gameListSub}>
+          <Text style={styles.listSub}>
             Level {Math.min(level, game.totalLevels)} of {game.totalLevels}
           </Text>
           {game.scored ? (
-            <View style={styles.gameListStatsRow}>
-              <Text style={styles.gameListStat}>
-                <Text style={styles.gameListStatValue}>{stats.correct}</Text> correct
-              </Text>
-              <Text style={styles.gameListStatDot}>·</Text>
-              <Text style={styles.gameListStat}>
-                <Text style={styles.gameListStatValue}>{stats.incorrect}</Text> incorrect
-              </Text>
-              <Text style={styles.gameListStatDot}>·</Text>
-              <Text style={styles.gameListStat}>
-                <Text style={styles.gameListStatValue}>{stats.points}</Text> pts
-              </Text>
-            </View>
-          ) : (
-            <Text style={styles.gameListStatsRow}>
-              {levelIndex} cards reached · no scoring
+            <Text style={styles.listMeta}>
+              {stats.correct} correct · {stats.incorrect} wrong · {stats.points} pts
             </Text>
+          ) : (
+            <Text style={styles.listMeta}>{levelIndex} cards reached</Text>
           )}
         </View>
       </View>
-      {!isLast && <View style={styles.gameListDivider} />}
+      {!isLast ? <View style={styles.listSeparator} /> : null}
     </>
   );
 }
@@ -219,114 +311,47 @@ function CourseLevelListItem({
 
   return (
     <>
-      <View style={[styles.gameListItem, !unlocked && styles.courseLevelLocked]}>
-        <View style={[styles.gameListIconWrap, { backgroundColor: `${level.color[0]}18` }]}>
+      <View style={[styles.listRow, !unlocked && styles.listRowLocked]}>
+        <View style={[styles.listIcon, { backgroundColor: `${level.color[0]}18` }]}>
           <Image
             source={{ uri: levelIconUrl }}
-            style={[styles.gameListIconImage, !unlocked && styles.gameListIconImageLocked]}
+            style={[styles.listIconImg, !unlocked && styles.listIconLocked]}
             resizeMode="contain"
           />
         </View>
-        <View style={styles.gameListBody}>
-          <View style={styles.gameListTopRow}>
-            <Text style={styles.gameListTitle} numberOfLines={1}>
+        <View style={styles.listBody}>
+          <View style={styles.listTop}>
+            <Text style={styles.listTitle} numberOfLines={1}>
               {level.title}
             </Text>
-            <Text style={styles.gameListMetric}>{unlocked ? `${percent}%` : 'Locked'}</Text>
+            <Text style={[styles.listMetric, !unlocked && styles.listMetricMuted]}>
+              {unlocked ? `${percent}%` : 'Locked'}
+            </Text>
           </View>
-          <Text style={styles.gameListSub} numberOfLines={1}>
+          <Text style={styles.listSub} numberOfLines={1}>
             {level.subtitle}
           </Text>
-          <View style={styles.courseLevelProgressTrack}>
+          <View style={styles.levelBarTrack}>
             <View
               style={[
-                styles.courseLevelProgressFill,
-                { width: `${Math.max(percent, unlocked && percent > 0 ? 4 : 0)}%`, backgroundColor: level.color[0] },
+                styles.levelBarFill,
+                {
+                  width: `${Math.max(percent, unlocked && percent > 0 ? 4 : 0)}%`,
+                  backgroundColor: level.color[0],
+                },
               ]}
             />
           </View>
-          <Text style={styles.gameListStatsRow}>
+          <Text style={styles.listMeta}>
             {unlocked
-              ? `${completedCount} of ${level.lessons.length} lessons completed`
-              : 'Finish the previous level to unlock'}
+              ? `${completedCount} of ${level.lessons.length} lessons`
+              : 'Complete previous level to unlock'}
           </Text>
         </View>
-        {!unlocked && <Feather name="lock" size={16} color="#9AA0A6" style={styles.courseLevelLockIcon} />}
+        {!unlocked ? <Feather name="lock" size={18} color={UI.textTertiary} /> : null}
       </View>
-      {!isLast && <View style={styles.gameListDivider} />}
+      {!isLast ? <View style={styles.listSeparator} /> : null}
     </>
-  );
-}
-
-function OverallCard({
-  correct,
-  incorrect,
-  points,
-  accuracy,
-  totalAnswered,
-}: {
-  correct: number;
-  incorrect: number;
-  points: number;
-  accuracy: number;
-  totalAnswered: number;
-}) {
-  return (
-    <View style={styles.overallCard}>
-      <View style={[styles.cornerCircle, styles.cornerCircleTL]} />
-      <View style={[styles.cornerCircle, styles.cornerCircleTR]} />
-      <View style={[styles.cornerCircle, styles.cornerCircleBL]} />
-      <View style={[styles.cornerCircle, styles.cornerCircleBR]} />
-
-      <View style={styles.cornerGameBadge}>
-        <Image source={{ uri: PERF_OVERALL_LOGO }} style={styles.cornerGameBadgeImage} resizeMode="contain" />
-      </View>
-      <View style={styles.cornerGameDots}>
-        <View style={[styles.gameDot, { backgroundColor: '#e60000' }]} />
-        <View style={[styles.gameDot, { backgroundColor: '#6C5CE7' }]} />
-        <View style={[styles.gameDot, { backgroundColor: '#00b894' }]} />
-        <View style={[styles.gameDot, { backgroundColor: '#0984e3' }]} />
-      </View>
-
-      <View style={styles.overallCardContent}>
-        <SectionHeading title="Overall" />
-
-        <View style={styles.overallHero}>
-          <Text style={styles.overallHeroValue}>{accuracy}%</Text>
-          <Text style={styles.overallHeroCaption}>Accuracy</Text>
-        </View>
-
-        <View style={styles.overallProgressTrack}>
-          <View style={[styles.overallProgressFill, { width: `${Math.max(accuracy, totalAnswered > 0 ? 4 : 0)}%` }]} />
-        </View>
-        <Text style={styles.overallMeta}>
-          {totalAnswered === 0 ? 'No answers yet' : `${totalAnswered} questions answered`}
-        </Text>
-
-        <View style={styles.overallDivider} />
-
-        <View style={styles.overallStatsRow}>
-          <View style={styles.overallStatItem}>
-            <Text style={styles.overallStatValue}>{correct}</Text>
-            <Text style={styles.overallStatLabel}>Correct</Text>
-          </View>
-          <View style={styles.overallStatDivider} />
-          <View style={styles.overallStatItem}>
-            <Text style={styles.overallStatValue}>{incorrect}</Text>
-            <Text style={styles.overallStatLabel}>Incorrect</Text>
-          </View>
-          <View style={styles.overallStatDivider} />
-          <View style={styles.overallStatItem}>
-            <Text style={styles.overallStatValue}>{points}</Text>
-            <Text style={styles.overallStatLabel}>Points</Text>
-          </View>
-        </View>
-
-        <Text style={styles.overallFootnote}>
-          {POINTS_PER_CORRECT_LEVEL} points earned per correct answer
-        </Text>
-      </View>
-    </View>
   );
 }
 
@@ -365,7 +390,7 @@ export default function PerformanceScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load]),
+    }, [load])
   );
 
   const totals = stats ? getTotals(stats) : { correct: 0, incorrect: 0, points: 0 };
@@ -374,48 +399,48 @@ export default function PerformanceScreen() {
   const overallCourseProgress = getOverallProgress(completedLessons);
   const lastLessonTitle = getLastLessonTitle(lastLessonId);
 
-  const headerSub =
+  const pageSubtitle =
     category === 'games'
-      ? 'Your game stats by activity'
+      ? 'Track accuracy and points across all games'
       : 'Video lessons and course completion';
 
   return (
-    <View style={styles.container}>
+    <View style={styles.root}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor="#FFE8E8" />
+      <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
 
-      <LinearGradient
-        colors={['#FFD6D6', '#FFF0F0', '#F8F9FA']}
-        locations={[0, 0.55, 1]}
-        style={[styles.header, { paddingTop: insets.top }]}
-      >
-        <View style={styles.headerRow}>
-          <TouchableOpacity
+      <SafeAreaView edges={['top']} style={styles.safeTop}>
+        <View style={styles.navBar}>
+          <Pressable
             onPress={() => router.back()}
-            style={styles.backBtn}
-            activeOpacity={0.6}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+            hitSlop={12}
           >
-            <Feather name="arrow-left" size={24} color="#1F1F1F" />
-          </TouchableOpacity>
-          <View style={styles.headerTextBlock}>
-            <Text style={styles.headerTitle}>Performance</Text>
-            <Text style={styles.headerSub}>{headerSub}</Text>
-          </View>
+            <Feather name="arrow-left" size={24} color={UI.text} />
+          </Pressable>
+          <Text style={styles.navTitle} numberOfLines={1}>
+            Performance
+          </Text>
         </View>
-      </LinearGradient>
+      </SafeAreaView>
 
       {loading ? (
         <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color="#1A73E8" />
+          <ActivityIndicator size="large" color={UI.accent} />
         </View>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-          <PerformanceCategoryTabs selected={category} onSelect={setCategory} />
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 28 }]}
+        >
+          <Text style={styles.pageSubtitle}>{pageSubtitle}</Text>
+
+          <CategorySegmented selected={category} onSelect={setCategory} />
 
           {category === 'games' ? (
             <>
-              <OverallCard
+              <OverallHeroCard
                 correct={totals.correct}
                 incorrect={totals.incorrect}
                 points={totals.points}
@@ -423,19 +448,22 @@ export default function PerformanceScreen() {
                 totalAnswered={totalAnswered}
               />
 
-              <View style={styles.gamesSection}>
-                <View style={styles.gamesListCard}>
-                  <SectionHeading title="By game" inset />
-                  {GAME_LIST.map((game, index) => (
-                    <GameListItem
-                      key={game.id}
-                      game={game}
-                      stats={stats?.[game.id] ?? { correct: 0, incorrect: 0, points: 0 }}
-                      levelIndex={levels?.[game.id] ?? 0}
-                      isLast={index === GAME_LIST.length - 1}
-                    />
-                  ))}
-                </View>
+              <View style={styles.statRow}>
+                <StatTile icon="check-circle" iconBg={UI.greenSoft} label="Correct" value={String(totals.correct)} />
+                <StatTile icon="x-circle" iconBg={UI.accentGlow} label="Incorrect" value={String(totals.incorrect)} />
+              </View>
+
+              <SectionLabel title="By game" action={`${GAME_LIST.length} activities`} />
+              <View style={styles.listGroup}>
+                {GAME_LIST.map((game, index) => (
+                  <GameListItem
+                    key={game.id}
+                    game={game}
+                    stats={stats?.[game.id] ?? { correct: 0, incorrect: 0, points: 0 }}
+                    levelIndex={levels?.[game.id] ?? 0}
+                    isLast={index === GAME_LIST.length - 1}
+                  />
+                ))}
               </View>
             </>
           ) : (
@@ -449,38 +477,41 @@ export default function PerformanceScreen() {
 
               {overallCourseProgress === 100 && (
                 <View style={styles.congratsCard}>
-                  <Image
-                    source={{ uri: 'https://img.icons8.com/3d-fluency/48/party.png' }}
-                    style={styles.congratsLogo}
-                    resizeMode="contain"
-                  />
+                  <View style={styles.congratsIcon}>
+                    <Feather name="award" size={28} color={UI.accent} />
+                  </View>
                   <Text style={styles.congratsTitle}>Course complete</Text>
                   <Text style={styles.congratsText}>
                     You finished every lesson on the English roadmap. Great work!
                   </Text>
-                  <TouchableOpacity
-                    style={styles.certBtn}
+                  <Pressable
+                    style={({ pressed }) => [styles.certBtn, pressed && styles.certBtnPressed]}
                     onPress={() => Alert.alert('Certificate', 'Certificate feature coming soon!')}
                   >
-                    <Text style={styles.certBtnText}>Get certificate</Text>
-                  </TouchableOpacity>
+                    <LinearGradient
+                      colors={[UI.accent, '#ff4d4d']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                      style={styles.certBtnGradient}
+                    >
+                      <Text style={styles.certBtnText}>Get certificate</Text>
+                    </LinearGradient>
+                  </Pressable>
                 </View>
               )}
 
-              <View style={styles.gamesSection}>
-                <View style={styles.gamesListCard}>
-                  <SectionHeading title="By level" inset />
-                  {COURSE_DATA.map((level, index) => (
-                    <CourseLevelListItem
-                      key={level.id}
-                      level={level}
-                      completedCount={getLevelCompletedCount(level.id as LevelId, completedLessons)}
-                      progress={getLevelProgressRatio(level.id as LevelId, completedLessons)}
-                      unlocked={isLevelUnlocked(level.id as LevelId, completedLessons)}
-                      isLast={index === COURSE_DATA.length - 1}
-                    />
-                  ))}
-                </View>
+              <SectionLabel title="By level" action={`${COURSE_DATA.length} levels`} />
+              <View style={styles.listGroup}>
+                {COURSE_DATA.map((level, index) => (
+                  <CourseLevelListItem
+                    key={level.id}
+                    level={level}
+                    completedCount={getLevelCompletedCount(level.id as LevelId, completedLessons)}
+                    progress={getLevelProgressRatio(level.id as LevelId, completedLessons)}
+                    unlocked={isLevelUnlocked(level.id as LevelId, completedLessons)}
+                    isLast={index === COURSE_DATA.length - 1}
+                  />
+                ))}
               </View>
             </>
           )}
@@ -491,414 +522,381 @@ export default function PerformanceScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8F9FA' },
-  header: {
-    paddingBottom: 16,
+  root: {
+    flex: 1,
+    backgroundColor: UI.bg,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  headerRow: {
+  safeTop: {
+    backgroundColor: UI.bg,
+  },
+  navBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingRight: 16,
-  },
-  headerTextBlock: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 8,
-    minWidth: 0,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 12,
+    minHeight: 48,
   },
   backBtn: {
-    width: 48,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 4,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1F1F1F',
-    letterSpacing: 0,
-  },
-  headerSub: {
-    fontSize: 14,
-    fontWeight: '400',
-    color: '#5F6368',
-    marginTop: 2,
-    lineHeight: 20,
-  },
-  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  scroll: { padding: 14, paddingBottom: 32 },
-  categoryTabs: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  categoryTab: {
-    flex: 1,
-    flexDirection: 'row',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
-    borderColor: '#E8EAED',
+    backgroundColor: UI.surface,
+    ...Platform.select({
+      ios: {
+        shadowColor: UI.shadow,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
   },
-  categoryTabActive: {
-    borderColor: '#1A73E8',
-    backgroundColor: '#E8F0FE',
-  },
-  categoryTabLabel: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#5F6368',
-  },
-  categoryTabLabelActive: {
-    color: '#1A73E8',
-    fontWeight: '700',
-  },
-  categoryTabIcon: {
-    width: 22,
-    height: 22,
-  },
-  overallCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 1,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  overallCardContent: {
-    zIndex: 1,
-  },
-  cornerCircle: {
-    position: 'absolute',
-    borderRadius: 999,
-  },
-  cornerCircleTL: {
-    width: 70,
-    height: 70,
-    top: -28,
-    left: -28,
-    backgroundColor: 'rgba(230, 0, 0, 0.09)',
-  },
-  cornerCircleTR: {
-    width: 54,
-    height: 54,
-    top: -20,
-    right: -18,
-    backgroundColor: 'rgba(108, 92, 231, 0.1)',
-  },
-  cornerCircleBL: {
-    width: 48,
-    height: 48,
-    bottom: -16,
-    left: -14,
-    backgroundColor: 'rgba(0, 184, 148, 0.1)',
-  },
-  cornerCircleBR: {
-    width: 80,
-    height: 80,
-    bottom: -34,
-    right: -30,
-    backgroundColor: 'rgba(26, 115, 232, 0.08)',
-  },
-  cornerGameBadge: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#E8F0FE',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 2,
-    borderWidth: 1,
-    borderColor: '#D2E3FC',
-  },
-  cornerGameBadgeImage: {
-    width: 26,
-    height: 26,
-  },
-  cornerGameDots: {
-    position: 'absolute',
-    bottom: 10,
-    left: 10,
-    flexDirection: 'row',
-    gap: 4,
-    zIndex: 2,
-  },
-  gameDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  backBtnPressed: {
     opacity: 0.85,
   },
-  cardSectionHeader: {
-    paddingTop: 2,
-    paddingBottom: 0,
-    marginBottom: 8,
-  },
-  cardSectionHeaderInset: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    marginBottom: 0,
-  },
-  cardSectionHeaderText: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#5F6368',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 10,
-  },
-  cardSectionHeaderLine: {
-    height: 1,
-    backgroundColor: '#E8EAED',
-    marginBottom: 6,
-  },
-  cardSectionHeaderLineInset: {
-    marginBottom: 4,
-  },
-  overallHero: {
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  overallHeroValue: {
-    fontSize: 36,
-    fontWeight: '400',
-    color: '#1F1F1F',
-    letterSpacing: -0.5,
-  },
-  overallHeroCaption: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#5F6368',
-    marginTop: 2,
-  },
-  overallProgressTrack: {
-    height: 4,
-    backgroundColor: '#E8EAED',
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  overallProgressFill: {
-    height: '100%',
-    backgroundColor: '#1A73E8',
-    borderRadius: 2,
-  },
-  overallMeta: {
-    fontSize: 12,
-    color: '#5F6368',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  overallDivider: {
-    height: 1,
-    backgroundColor: '#E8EAED',
-    marginBottom: 10,
-  },
-  overallStatsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  overallStatItem: {
+  navTitle: {
     flex: 1,
-    alignItems: 'center',
-    paddingVertical: 4,
+    fontSize: 22,
+    fontWeight: '700',
+    color: UI.text,
+    letterSpacing: -0.4,
   },
-  overallStatValue: {
-    fontSize: 18,
-    fontWeight: '500',
-    color: '#1F1F1F',
-    letterSpacing: -0.3,
-  },
-  overallStatLabel: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#5F6368',
-    marginTop: 2,
-  },
-  overallStatDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: '#E8EAED',
-  },
-  overallFootnote: {
-    fontSize: 11,
-    color: '#80868B',
-    textAlign: 'center',
-    marginTop: 10,
-    lineHeight: 16,
-  },
-  gamesSection: {
-    marginBottom: 8,
-  },
-  gamesListCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-    overflow: 'hidden',
-    shadowColor: '#3C4043',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  gameListItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    gap: 14,
-  },
-  gameListIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#F1F3F4',
+  loadingBox: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 2,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 0,
+  },
+  pageSubtitle: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: UI.textSecondary,
+    marginBottom: 20,
+  },
+  segmented: {
+    flexDirection: 'row',
+    backgroundColor: UI.surfaceMuted,
+    borderRadius: 14,
+    padding: 4,
+    marginBottom: 20,
+  },
+  segment: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 11,
+  },
+  segmentActive: {
+    backgroundColor: UI.surface,
+    ...Platform.select({
+      ios: {
+        shadowColor: UI.shadow,
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.08,
+        shadowRadius: 4,
+      },
+      android: { elevation: 2 },
+      default: {},
+    }),
+  },
+  segmentText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: UI.textTertiary,
+  },
+  segmentTextActive: {
+    color: UI.text,
+  },
+  heroCard: {
+    borderRadius: 28,
     overflow: 'hidden',
+    marginBottom: 16,
+    ...cardShadow,
   },
-  gameListIconImage: {
-    width: 36,
-    height: 36,
+  heroGradient: {
+    padding: 22,
   },
-  gameListIconImageLocked: {
-    opacity: 0.45,
+  heroTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
   },
-  gameListBody: {
+  heroEyebrow: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: UI.textSecondary,
+  },
+  heroAccuracyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+    marginTop: 4,
+  },
+  heroAccuracy: {
+    fontSize: 44,
+    fontWeight: '700',
+    color: UI.text,
+    letterSpacing: -1.5,
+  },
+  heroAccuracyUnit: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: UI.textSecondary,
+    marginBottom: 8,
+  },
+  heroBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 20,
+    backgroundColor: UI.accentGlow,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ECEEF2',
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  heroBarFill: {
+    height: '100%',
+    borderRadius: 4,
+    minWidth: 8,
+  },
+  heroMeta: {
+    fontSize: 13,
+    color: UI.textSecondary,
+    marginBottom: 16,
+  },
+  heroDivider: {
+    height: 1,
+    backgroundColor: UI.divider,
+    marginBottom: 16,
+  },
+  heroStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  heroStat: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  heroStatValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: UI.text,
+  },
+  heroStatLabel: {
+    fontSize: 12,
+    color: UI.textTertiary,
+    marginTop: 4,
+  },
+  heroStatDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: UI.divider,
+  },
+  heroFootnote: {
+    fontSize: 12,
+    color: UI.textTertiary,
+    textAlign: 'center',
+    marginTop: 14,
+  },
+  statRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
+  },
+  statTile: {
+    flex: 1,
+    backgroundColor: UI.surface,
+    borderRadius: 22,
+    padding: 16,
+    ...cardShadow,
+  },
+  statTileIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  statTileLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: UI.textTertiary,
+  },
+  statTileValue: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: UI.text,
+    marginTop: 2,
+  },
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingHorizontal: 2,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: UI.text,
+    letterSpacing: -0.3,
+  },
+  sectionAction: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: UI.accent,
+  },
+  listGroup: {
+    backgroundColor: UI.surface,
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 16,
+    ...cardShadow,
+  },
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    gap: 14,
+  },
+  listRowLocked: {
+    opacity: 0.72,
+  },
+  listIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listIconImg: {
+    width: 32,
+    height: 32,
+  },
+  listIconLocked: {
+    opacity: 0.5,
+  },
+  listBody: {
     flex: 1,
     minWidth: 0,
   },
-  gameListTopRow: {
+  listTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
   },
-  gameListTitle: {
+  listTitle: {
     flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: UI.text,
+  },
+  listMetric: {
     fontSize: 15,
-    fontWeight: '500',
-    color: '#1F1F1F',
-    letterSpacing: 0.1,
+    fontWeight: '700',
+    color: UI.accent,
   },
-  gameListMetric: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#1A73E8',
+  listMetricMuted: {
+    color: UI.textTertiary,
+    fontWeight: '600',
   },
-  gameListMetricMuted: {
+  listSub: {
     fontSize: 13,
-    fontWeight: '500',
-    color: '#80868B',
+    color: UI.textSecondary,
+    marginTop: 3,
   },
-  gameListSub: {
+  listMeta: {
     fontSize: 12,
-    color: '#5F6368',
-    marginTop: 2,
-    fontWeight: '400',
-  },
-  gameListStatsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    marginTop: 6,
-    fontSize: 12,
-    color: '#5F6368',
-    lineHeight: 18,
-  },
-  gameListStat: {
-    fontSize: 12,
-    color: '#5F6368',
-  },
-  gameListStatValue: {
-    fontWeight: '500',
-    color: '#1F1F1F',
-  },
-  gameListStatDot: {
-    fontSize: 12,
-    color: '#80868B',
-    marginHorizontal: 4,
-  },
-  gameListDivider: {
-    height: 1,
-    backgroundColor: '#E8EAED',
-    marginLeft: 70,
-  },
-  courseLevelLocked: {
-    opacity: 0.72,
-  },
-  courseLevelLockIcon: {
-    marginTop: 12,
-    marginRight: 4,
-  },
-  courseLevelProgressTrack: {
-    height: 4,
-    backgroundColor: '#E8EAED',
-    borderRadius: 2,
-    overflow: 'hidden',
+    color: UI.textTertiary,
     marginTop: 8,
-    marginBottom: 2,
+    lineHeight: 17,
   },
-  courseLevelProgressFill: {
+  listSeparator: {
+    height: 1,
+    backgroundColor: UI.divider,
+    marginLeft: 80,
+  },
+  levelBarTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ECEEF2',
+    overflow: 'hidden',
+    marginTop: 10,
+  },
+  levelBarFill: {
     height: '100%',
-    borderRadius: 2,
+    borderRadius: 3,
+    minWidth: 4,
   },
   congratsCard: {
+    backgroundColor: UI.surface,
+    borderRadius: 24,
     padding: 24,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E8EAED',
-    marginBottom: 16,
+    marginBottom: 20,
+    ...cardShadow,
   },
-  congratsLogo: {
-    width: 56,
-    height: 56,
+  congratsIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 22,
+    backgroundColor: UI.accentGlow,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
   },
   congratsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1F1F1F',
-    marginTop: 12,
+    fontSize: 20,
+    fontWeight: '700',
+    color: UI.text,
   },
   congratsText: {
     fontSize: 14,
-    color: '#5F6368',
+    color: UI.textSecondary,
     textAlign: 'center',
     marginTop: 8,
-    lineHeight: 20,
+    lineHeight: 21,
+    paddingHorizontal: 8,
   },
   certBtn: {
-    marginTop: 16,
-    backgroundColor: '#1A73E8',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 20,
+    marginTop: 18,
+    borderRadius: 16,
+    overflow: 'hidden',
+    alignSelf: 'stretch',
+  },
+  certBtnPressed: {
+    opacity: 0.9,
+  },
+  certBtnGradient: {
+    paddingVertical: 14,
+    alignItems: 'center',
   },
   certBtnText: {
     color: '#fff',
-    fontWeight: '600',
-    fontSize: 14,
+    fontWeight: '700',
+    fontSize: 16,
   },
 });

@@ -48,7 +48,7 @@ export default function IntroScreen() {
 
       {/* Header Logo */}
       <View style={styles.logoContainer}>
-        <Image source={require('../assets/images/aarambh-icon.png')} style={styles.logoImage} resizeMode="contain" />
+        <Image source={require('../assets/images/text logo.png')} style={styles.logoImage} resizeMode="contain" />
       </View>
 
       {/* Dashed Separator Line */}
@@ -118,7 +118,13 @@ export default function IntroScreen() {
       <View style={styles.termsContainer}>
         <Text style={styles.termsText}>
           By proceeding you agree to our{'\n'}
-          <Text style={styles.termsLink}>Terms & Condition</Text> and <Text style={styles.termsLink}>privacy policy</Text>
+          <Text style={styles.termsLink} onPress={() => router.push('/terms')}>
+            Terms & Conditions
+          </Text>
+          {' and '}
+          <Text style={styles.termsLink} onPress={() => router.push('/privacy')}>
+            Privacy Policy
+          </Text>
         </Text>
       </View>
 
@@ -137,8 +143,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   logoImage: {
-    width: 48,
-    height: 48,
+    width: 72,
+    height: 18,
   },
   separatorLine: {
     borderBottomColor: '#e0e0e0',

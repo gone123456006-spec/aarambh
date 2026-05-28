@@ -6,7 +6,6 @@ const USER_DATA_BASE_KEYS = [
   'lastLessonId',
   'gameProgress',
   'gameStats',
-  'totalGameScore',
   'userName',
   'userRegion',
   'gender',
