@@ -102,6 +102,9 @@ app.get('/health', (req, res) => {
   });
 });
 
+// OTP (also at /api/auth/send-otp for the mobile app)
+app.post('/send-otp', ...authRoutes.sendOtpHandlers);
+
 // Mounting API Sub-Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);

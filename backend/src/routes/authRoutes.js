@@ -6,19 +6,17 @@ const { authLimiter } = require('../middleware/rateLimiter');
 
 const router = express.Router();
 
-router.post(
-  '/send-otp',
-  authLimiter,
-  [
-    body('email')
-      .isEmail()
-      .withMessage('Must be a valid email address')
-      .matches(/^[^\s@]+@gmail\.com$/i)
-      .withMessage('Only Gmail accounts are supported'),
-  ],
-  validate,
-  authController.sendOtp
-);
+const sendOtpValidators = [
+  body('email')
+    .isEmail()
+    .withMessage('Must be a valid email address')
+    .matches(/^[^\s@]+@gmail\.com$/i)
+    .withMessage('Only Gmail accounts are supported'),
+];
+
+const sendOtpHandlers = [authLimiter, sendOtpValidators, validate, authController.sendOtp];
+
+router.post('/send-otp', ...sendOtpHandlers);
 
 router.post(
   '/verify-otp',
@@ -43,3 +41,4 @@ router.post('/refresh-token', authController.refreshAccessToken);
 router.post('/logout', authController.logout);
 
 module.exports = router;
+module.exports.sendOtpHandlers = sendOtpHandlers;

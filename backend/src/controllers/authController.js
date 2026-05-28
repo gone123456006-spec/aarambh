@@ -31,7 +31,7 @@ const sendOtp = asyncHandler(async (req, res) => {
   // Generate and send OTP
   const otpCode = otpService.generateOtpCode();
   
-  // Send email via Gmail SMTP
+  // Send email via SMTP (Brevo)
   await otpService.sendOtpEmail(trimmedEmail, otpCode);
   
   // Save OTP code hashed in database (valid for 5 mins)
@@ -144,6 +144,7 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
         200,
         {
           accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
         },
         'Access token refreshed successfully'
       )

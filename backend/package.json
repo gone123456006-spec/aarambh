@@ -8,16 +8,20 @@
     "prestart": "node scripts/validate-env.js",
     "start": "node server.js",
     "free-port": "node scripts/free-port.js 5000",
+    "predev": "node scripts/free-port.js 5000",
     "dev": "nodemon server.js",
-    "dev:clean": "node scripts/free-port.js 5000 && nodemon server.js",
-    "dev:firewall": "powershell -ExecutionPolicy Bypass -File scripts/open-firewall.ps1"
+    "dev:clean": "npm run free-port && npm run dev",
+    "dev:firewall": "powershell -ExecutionPolicy Bypass -File scripts/open-firewall.ps1",
+    "test:smtp": "node scripts/test-smtp.js",
+    "test:brevo": "node scripts/test-brevo-api.js",
+    "dev:brevo-otp": "node brevo-otp-server.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.6",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
+    "cors": "^2.8.6",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.2",
     "express-rate-limit": "^7.2.0",
     "express-validator": "^7.1.0",
     "helmet": "^7.1.0",
@@ -26,7 +30,8 @@
     "mongoose": "^8.4.1",
     "morgan": "^1.10.0",
     "multer": "^2.1.1",
-    "nodemailer": "^6.9.13",
+    "nodemailer": "^6.10.1",
+    "sib-api-v3-sdk": "^8.5.0",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {

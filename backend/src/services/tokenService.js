@@ -13,17 +13,20 @@ const hashToken = (token) => {
 /**
  * Generate JWT Access Token
  */
-const generateAccessToken = (userId) => {
-  return jwt.sign(
-    { id: userId },
-    process.env.JWT_ACCESS_SECRET,
-    {
-      expiresIn:
-        process.env.JWT_ACCESS_EXPIRY ||
-        process.env.ACCESS_TOKEN_EXPIRE ||
-        '15m',
-    }
-  );
+const generateAccessToken = (userId, expiresIn) => {
+  return jwt.sign({ id: userId }, process.env.JWT_ACCESS_SECRET, {
+    expiresIn:
+      expiresIn ||
+      process.env.JWT_ACCESS_EXPIRY ||
+      process.env.ACCESS_TOKEN_EXPIRE ||
+      '15m',
+  });
+};
+
+/** Longer-lived token for admin dashboard (default 24h) */
+const generateAdminAccessToken = (userId) => {
+  const expiry = process.env.ADMIN_TOKEN_EXPIRY || '24h';
+  return generateAccessToken(userId, expiry);
 };
 
 /**
@@ -116,6 +119,7 @@ const revokeAllRefreshTokens = async (userId) => {
 
 module.exports = {
   generateAccessToken,
+  generateAdminAccessToken,
   generateRefreshToken,
   rotateTokens,
   saveRefreshToken,

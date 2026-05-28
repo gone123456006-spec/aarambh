@@ -4,7 +4,8 @@
 
 const REQUIRED_ALWAYS = ['MONGODB_URI', 'JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'];
 
-const REQUIRED_PRODUCTION = ['SMTP_USER', 'SMTP_PASS'];
+/** Production needs Brevo API key OR SMTP credentials for OTP emails */
+const REQUIRED_PRODUCTION = [];
 
 function isProduction() {
   return process.env.NODE_ENV === 'production';
@@ -23,6 +24,15 @@ function validateEnv() {
 
   if (isProduction()) {
     missing.push(...getMissing(REQUIRED_PRODUCTION));
+    const hasBrevoApi = Boolean(process.env.BREVO_API_KEY?.trim());
+    const hasSmtp =
+      Boolean(process.env.SMTP_USER?.trim()) && Boolean(process.env.SMTP_PASS?.trim());
+    if (!hasBrevoApi && !hasSmtp) {
+      missing.push('BREVO_API_KEY (or SMTP_USER + SMTP_PASS)');
+    }
+    if (hasBrevoApi && !process.env.SMTP_FROM?.trim() && !process.env.BREVO_SENDER_EMAIL?.trim()) {
+      missing.push('SMTP_FROM or BREVO_SENDER_EMAIL');
+    }
   }
 
   if (missing.length > 0) {

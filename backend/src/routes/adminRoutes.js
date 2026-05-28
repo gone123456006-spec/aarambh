@@ -62,6 +62,12 @@ router.post(
 
 router.delete('/courses/:id', adminController.deleteCourse);
 
+// Delete a single lesson's media (video or pdf) from a course
+router.delete(
+  '/courses/:courseId/lessons/:lessonId/media',
+  adminController.deleteLessonMedia
+);
+
 router.post('/upload/video', uploadVideo.single('video'), adminController.uploadVideo);
 
 router.post('/upload/pdf', uploadPdf.single('pdf'), adminController.uploadPdf);

@@ -61,7 +61,7 @@ const adminLogin = asyncHandler(async (req, res) => {
     await admin.save();
   }
 
-  const accessToken = tokenService.generateAccessToken(admin._id);
+  const accessToken = tokenService.generateAdminAccessToken(admin._id);
 
   res.status(200).json(
     new ApiResponse(
@@ -343,6 +343,45 @@ const deleteCourse = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Delete a single lesson's media (video or pdf) from a course.
+ * Route: DELETE /api/admin/courses/:courseId/lessons/:lessonId/media?kind=video|pdf
+ */
+const deleteLessonMedia = asyncHandler(async (req, res) => {
+  const { courseId, lessonId } = req.params;
+  const kind = String(req.query.kind ?? '').toLowerCase();
+
+  if (!kind || !['video', 'pdf'].includes(kind)) {
+    throw new ApiError(400, 'kind query param is required: kind=video or kind=pdf');
+  }
+
+  const course = await Course.findById(courseId);
+  if (!course) {
+    throw new ApiError(404, 'Course not found');
+  }
+
+  const lesson = course.lessons?.id(lessonId);
+  if (!lesson) {
+    throw new ApiError(404, 'Lesson not found');
+  }
+
+  if (kind === 'video') {
+    if (lesson.videoUrl) uploadService.deleteLocalAsset(lesson.videoUrl);
+    lesson.videoUrl = undefined;
+    lesson.videoAvailableAt = undefined;
+  } else {
+    if (lesson.pdfUrl) uploadService.deleteLocalAsset(lesson.pdfUrl);
+    lesson.pdfUrl = undefined;
+    lesson.pdfAvailableAt = undefined;
+  }
+
+  await course.save();
+
+  res.status(200).json(
+    new ApiResponse(200, { courseId, lessonId, kind, lesson }, 'Lesson media deleted successfully')
+  );
+});
+
+/**
  * Upload lesson video (local disk). Available in app after 30 seconds.
  */
 const uploadVideo = asyncHandler(async (req, res) => {
@@ -418,6 +457,7 @@ module.exports = {
   updateCourse,
   addLesson,
   deleteCourse,
+  deleteLessonMedia,
   uploadVideo,
   uploadPdf,
   getAnalytics,

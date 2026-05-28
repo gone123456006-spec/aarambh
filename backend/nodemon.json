@@ -1,0 +1,7 @@
+{
+  "watch": ["src", "server.js", "public"],
+  "ext": "js,json,html,css",
+  "delay": 800,
+  "signal": "SIGTERM",
+  "legacyWatch": true
+}

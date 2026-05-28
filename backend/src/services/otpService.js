@@ -1,7 +1,13 @@
 const bcrypt = require('bcryptjs');
 const Otp = require('../models/Otp');
 const transporter = require('../config/nodemailer');
-const { smtpConfigured } = require('../config/nodemailer');
+const { smtpConfigured, smtpFrom } = require('../config/nodemailer');
+const {
+  transactionalEmailsApi,
+  brevoConfigured,
+  senderEmail,
+  senderName,
+} = require('../config/brevo');
 const ApiError = require('../utils/ApiError');
 const { OTP_EXPIRY_MINUTES, MAX_OTP_ATTEMPTS } = require('../utils/constants');
 
@@ -15,57 +21,59 @@ const generateOtpCode = () => {
 /**
  * Send OTP to the specified Gmail address
  */
+const buildOtpHtml = (otpCode) => `
+  <div style="font-family:sans-serif">
+    <h2>Your OTP Code</h2>
+    <h1>${otpCode}</h1>
+    <p>Valid for ${OTP_EXPIRY_MINUTES} minutes</p>
+  </div>
+`;
+
 const sendOtpEmail = async (email, otpCode) => {
+  const subject = 'OTP Verification';
+  const htmlContent = buildOtpHtml(otpCode);
+  const textBody = `Your OTP Code: ${otpCode}\nValid for ${OTP_EXPIRY_MINUTES} minutes.`;
+
+  if (brevoConfigured && senderEmail) {
+    try {
+      await transactionalEmailsApi.sendTransacEmail({
+        sender: { email: senderEmail, name: senderName },
+        to: [{ email }],
+        subject,
+        htmlContent,
+        textContent: textBody,
+      });
+      return;
+    } catch (error) {
+      console.error('Brevo API Email Error:', error?.response?.body || error);
+      throw new ApiError(
+        500,
+        'Failed to send OTP email. Check BREVO_API_KEY and verified sender (SMTP_FROM) in backend/.env.'
+      );
+    }
+  }
+
   if (!smtpConfigured) {
     throw new ApiError(
       500,
-      'Email service is not configured. Set SMTP_USER and SMTP_PASS in backend/.env (Gmail App Password).'
+      'Email service is not configured. Set BREVO_API_KEY or SMTP_USER and SMTP_PASS in backend/.env.'
     );
   }
 
-  const mailOptions = {
-    from: `"Aarambh English" <${process.env.SMTP_USER}>`,
-    to: email,
-    subject: 'Verification code',
-    text: `Your verification code ${otpCode} for verification of Aarambh app.\n\nDo not share this verification code with anyone. Valid for ${OTP_EXPIRY_MINUTES} minutes.\n\nIf you did not request this, ignore this email.`,
-    html: `
-      <div style="margin:0;padding:32px 16px;background-color:#f5f5f5;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-        <div style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;border:1px solid #e8e8e8;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
-          <div style="height:4px;background:linear-gradient(90deg,#e60000,#ff4d4d);"></div>
-          <div style="padding:28px 24px 20px;">
-            <p style="margin:0 0 20px;font-size:17px;line-height:1.6;color:#1a1a1a;">
-              Your verification code
-              <strong style="font-size:22px;color:#e60000;letter-spacing:3px;font-weight:700;">${otpCode}</strong>
-              for verification of Aarambh app.
-            </p>
-            <p style="margin:0;font-size:13px;line-height:1.5;color:#888;">
-              Valid for ${OTP_EXPIRY_MINUTES} minutes.
-            </p>
-          </div>
-          <div style="padding:16px 24px 24px;background:#fafafa;border-top:1px solid #eee;">
-            <p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#555;font-weight:600;">
-              Disclaimer
-            </p>
-            <p style="margin:0;font-size:13px;line-height:1.55;color:#666;">
-              Do not share this verification code with anyone — not even Aarambh staff. We will never ask for your code by phone, chat, or email.
-            </p>
-            <p style="margin:14px 0 0;font-size:12px;line-height:1.5;color:#999;">
-              If you did not request this code, you can safely ignore this email.
-            </p>
-          </div>
-        </div>
-      </div>
-    `,
-  };
-
   try {
-    await transporter.sendMail(mailOptions);
+    await transporter.sendMail({
+      from: `"${senderName}" <${smtpFrom}>`,
+      to: email,
+      subject,
+      text: textBody,
+      html: htmlContent,
+    });
   } catch (error) {
     console.error('SMTP Email Error:', error);
     const hint =
       error.code === 'EAUTH'
-        ? 'Gmail login failed. Use an App Password (not your normal password) in SMTP_PASS.'
-        : 'Check SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS in backend/.env.';
+        ? 'SMTP login failed. Prefer BREVO_API_KEY (no IP whitelist) or fix Brevo SMTP credentials.'
+        : 'Check SMTP_* or BREVO_API_KEY in backend/.env.';
     throw new ApiError(500, `Failed to send OTP email. ${hint}`);
   }
 };

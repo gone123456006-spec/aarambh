@@ -4,9 +4,15 @@ const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
 
-  // Log to console for development
+  // Log to console for development (skip noisy expected 401s)
   if (process.env.NODE_ENV === 'development') {
-    console.error(err);
+    const isExpectedAuth =
+      err.statusCode === 401 ||
+      err.name === 'TokenExpiredError' ||
+      err.message === 'Access token expired';
+    if (!isExpectedAuth) {
+      console.error(err);
+    }
   }
 
   // Mongoose bad ObjectId (CastError)

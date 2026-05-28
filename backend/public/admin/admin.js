@@ -20,6 +20,17 @@ function formatDate(d) {
   return new Date(d).toLocaleString();
 }
 
+function forceLogout(message) {
+  stopAutoRefresh();
+  sessionStorage.removeItem('adminToken');
+  token = '';
+  $('dashboard').classList.add('hidden');
+  $('loginCard').classList.remove('hidden');
+  if (message) {
+    showStatus($('loginStatus'), message, 'err');
+  }
+}
+
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (token && !headers.Authorization) {
@@ -31,6 +42,11 @@ async function api(path, options = {}) {
 
   const res = await fetch(`${API}${path}`, { ...options, headers });
   const json = await res.json().catch(() => ({}));
+
+  if (res.status === 401 && token) {
+    forceLogout('Session expired. Please sign in again.');
+    throw new Error('Session expired');
+  }
 
   if (!res.ok) {
     const msg = json.message || json.data?.message || res.statusText;
@@ -50,7 +66,9 @@ function switchTab(name) {
 
   if (name === 'users') loadUsers();
   if (name === 'overview') loadStats();
-  if (name === 'content') loadCourses();
+  if (name === 'content') {
+    loadCourses().then(() => loadExistingLessons());
+  }
 }
 
 function startAutoRefresh() {
@@ -230,16 +248,16 @@ async function adminLogin(event) {
 }
 
 function logout() {
-  stopAutoRefresh();
-  sessionStorage.removeItem('adminToken');
-  token = '';
+  forceLogout();
   location.reload();
 }
 
 function refreshAll(silent = false) {
   loadStats();
   if (!$('panel-users').classList.contains('hidden')) loadUsers();
-  if (!$('panel-content').classList.contains('hidden')) loadCourses();
+  if (!$('panel-content').classList.contains('hidden')) {
+    loadCourses().then(() => loadExistingLessons());
+  }
   if (!silent) {
     const hint = $('autoRefreshHint');
     if (hint) hint.textContent = `Refreshed ${new Date().toLocaleTimeString()} · auto every 1 min`;
@@ -287,6 +305,112 @@ async function loadCourses() {
     });
   } catch {
     /* optional on content tab */
+  }
+}
+
+async function loadExistingLessons() {
+  const courseId = $('courseId')?.value;
+  const container = $('existingLessons');
+
+  if (!container) return;
+
+  if (!courseId) {
+    container.innerHTML = '<p style="color:#636e72; margin:0">Select a course to see lessons.</p>';
+    return;
+  }
+
+  container.innerHTML = '<p style="color:#636e72; margin:0">Loading…</p>';
+
+  try {
+    const courses = await api('/api/courses');
+    const course = (courses || []).find((c) => String(c._id) === String(courseId));
+    const lessons = course?.lessons || [];
+
+    if (!lessons.length) {
+      container.innerHTML = '<p style="color:#636e72; margin:0">No lessons found for this course.</p>';
+      return;
+    }
+
+    container.innerHTML = lessons
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+      .map((lesson) => {
+        const videoStatus = lesson.videoUrl
+          ? '<span class="badge ok">Video ✓</span>'
+          : lesson.videoAvailableIn
+            ? `<span class="badge warn">Video in ~${lesson.videoAvailableIn}s</span>`
+            : '<span class="badge">No video</span>';
+
+        const pdfStatus = lesson.pdfUrl
+          ? '<span class="badge ok">PDF ✓</span>'
+          : lesson.pdfAvailableIn
+            ? `<span class="badge warn">PDF in ~${lesson.pdfAvailableIn}s</span>`
+            : '<span class="badge">No PDF</span>';
+
+        const canDeleteVideo = !!lesson.videoUrl || !!lesson.videoAvailableIn;
+        const canDeletePdf = !!lesson.pdfUrl || !!lesson.pdfAvailableIn;
+
+        return `
+          <div class="lesson-row">
+            <div class="lesson-title">
+              <strong>${lesson.title || 'Untitled'}</strong>
+              <span style="color:#636e72; font-size:0.82rem; margin-left:0.4rem">${lesson.duration || ''}</span>
+            </div>
+
+            <div class="lesson-status">
+              ${videoStatus} ${pdfStatus}
+            </div>
+
+            <div class="lesson-actions">
+              <button type="button"
+                class="danger"
+                data-del-course-id="${courseId}"
+                data-del-lesson-id="${lesson._id}"
+                data-del-kind="video"
+                ${canDeleteVideo ? '' : 'disabled'}
+              >
+                Delete video
+              </button>
+
+              <button type="button"
+                class="danger"
+                data-del-course-id="${courseId}"
+                data-del-lesson-id="${lesson._id}"
+                data-del-kind="pdf"
+                ${canDeletePdf ? '' : 'disabled'}
+              >
+                Delete PDF
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    container.querySelectorAll('[data-del-lesson-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const lessonId = btn.dataset.delLessonId;
+        const kind = btn.dataset.delKind;
+        const cid = btn.dataset.delCourseId;
+        if (!lessonId || !kind || !cid) return;
+
+        const ok = confirm(`Delete ${kind} for this lesson?`);
+        if (!ok) return;
+
+        try {
+          await api(
+            `/api/admin/courses/${cid}/lessons/${lessonId}/media?kind=${encodeURIComponent(kind)}`,
+            { method: 'DELETE' }
+          );
+          showStatus($('lessonStatus'), 'Deleted successfully', 'ok');
+          loadExistingLessons();
+          loadCourses();
+        } catch (e) {
+          showStatus($('lessonStatus'), e.message, 'err');
+        }
+      });
+    });
+  } catch (e) {
+    container.innerHTML = `<p class="status err">${e.message}</p>`;
   }
 }
 
@@ -395,6 +519,7 @@ $('uploadVideoBtn').addEventListener('click', () => uploadFile('video'));
 $('uploadPdfBtn').addEventListener('click', () => uploadFile('pdf'));
 $('addLessonBtn').addEventListener('click', addLesson);
 $('createCourseBtn').addEventListener('click', createCourse);
+$('courseId').addEventListener('change', () => loadExistingLessons());
 
 $('userSearch').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadUsers(1);

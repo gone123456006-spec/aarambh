@@ -100,7 +100,7 @@ const configureChatSocket = (io) => {
     });
 
     // 3. Send message
-    socket.on('message:send', async ({ sessionId, text }) => {
+    socket.on('message:send', async ({ sessionId, text, clientId }) => {
       if (!sessionId || !text) return;
 
       try {
@@ -111,16 +111,35 @@ const configureChatSocket = (io) => {
         });
         await message.save();
 
-        // Broadcast message to session room
-        io.to(`room:${sessionId}`).emit('message:receive', {
+        const payload = {
           id: message._id,
           text: message.text,
           senderId: userId,
           timestamp: message.timestamp,
+        };
+
+        // Delivered ack to sender (single/double tick flow)
+        socket.emit('message:delivered', {
+          id: message._id.toString(),
+          clientId: clientId || null,
+          timestamp: message.timestamp,
         });
+
+        // Broadcast to peer in session room
+        socket.to(`room:${sessionId}`).emit('message:receive', payload);
       } catch (err) {
         console.error('Failed to send message:', err);
       }
+    });
+
+    // Read receipts — peer opened/saw messages
+    socket.on('message:seen', ({ sessionId, messageIds }) => {
+      if (!sessionId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+
+      socket.to(`room:${sessionId}`).emit('message:seen', {
+        messageIds,
+        readerId: userId,
+      });
     });
 
     // 4. Typing indicators

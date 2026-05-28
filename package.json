@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "nodemailer": "^8.0.9",
+    "sib-api-v3-sdk": "^8.5.0"
+  }
+}

@@ -10,8 +10,10 @@ const UPLOAD_DIRS = {
   avatars: path.join(UPLOAD_ROOT, 'avatars'),
 };
 
-/** Time before uploaded video/PDF URLs are exposed to the app */
-const MEDIA_AVAILABLE_DELAY_MS = 30 * 1000;
+/** Time before uploaded video/PDF URLs are exposed to the app
+ *  (keep this short for admin workflow + quick reflection in the app)
+ */
+const MEDIA_AVAILABLE_DELAY_MS = 5 * 1000;
 
 function ensureUploadDirs() {
   Object.values(UPLOAD_DIRS).forEach((dir) => {
