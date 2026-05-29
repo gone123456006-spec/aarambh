@@ -1,0 +1,7 @@
+# Keep EAS upload small — native folders are regenerated on the build server
+android/
+ios/
+
+# Dev / docs (not needed for builds)
+**/*.md
+play-console-assets/

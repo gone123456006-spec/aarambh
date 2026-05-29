@@ -1,22 +1,36 @@
 {
   "cli": {
-    "version": ">= 16.0.0"
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "node": "20.18.3"
     },
     "preview": {
       "distribution": "internal",
+      "node": "20.18.3",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "image": "latest"
+      },
+      "env": {
+        "EXPO_NO_CAPABILITY_SYNC": "1"
       }
     },
     "production": {
       "autoIncrement": true,
+      "node": "20.18.3",
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "app-bundle",
+        "image": "latest",
+        "resourceClass": "medium"
+      },
+      "env": {
+        "EXPO_NO_CAPABILITY_SYNC": "1",
+        "GRADLE_OPTS": "-Xmx4096m -XX:MaxMetaspaceSize=1024m"
       }
     }
   },
