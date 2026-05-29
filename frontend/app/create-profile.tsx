@@ -209,7 +209,7 @@ export default function CreateProfileScreen() {
           <Animated.View entering={FadeInDown.delay(200).duration(800)} style={styles.headerSection}>
             <Animated.View style={animatedImageStyle}>
               <Image
-                source={require('../assets/images/cartoon_character.png')}
+                source={require('../assets/images/profile.png')}
                 style={styles.illustration}
                 contentFit="contain"
               />

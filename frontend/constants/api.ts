@@ -54,8 +54,14 @@ function resolveApiBaseUrl(): string {
     return remoteFromEnv.replace(/\/$/, '');
   }
 
-  // Production builds: default to Render when env is baked in at build time
+  // Release APK / production: Render (env from EAS or .env, else constant)
   if (!__DEV__) {
+    const prodUrl =
+      process.env.EXPO_PUBLIC_REMOTE_API_URL?.trim() ||
+      process.env.EXPO_PUBLIC_API_URL?.trim();
+    if (prodUrl) {
+      return prodUrl.replace(/\/$/, '');
+    }
     return RENDER_API_URL.replace(/\/$/, '');
   }
 

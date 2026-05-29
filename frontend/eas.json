@@ -17,7 +17,8 @@
         "image": "latest"
       },
       "env": {
-        "EXPO_NO_CAPABILITY_SYNC": "1"
+        "EXPO_NO_CAPABILITY_SYNC": "1",
+        "EXPO_PUBLIC_REMOTE_API_URL": "https://aarambh-api.onrender.com"
       }
     },
     "production": {
@@ -30,6 +31,7 @@
       },
       "env": {
         "EXPO_NO_CAPABILITY_SYNC": "1",
+        "EXPO_PUBLIC_REMOTE_API_URL": "https://aarambh-api.onrender.com",
         "GRADLE_OPTS": "-Xmx4096m -XX:MaxMetaspaceSize=1024m"
       }
     }
