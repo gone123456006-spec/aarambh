@@ -1,4 +1,5 @@
 import { API_BASE_URL, getApiConnectionHint } from '@/constants/api';
+import { formatReachabilityError } from '@/utils/apiErrors';
 import { getAccessToken, getRefreshToken, updateAuthTokens, isLoggedInLocally } from '@/utils/authStorage';
 
 type ApiJson = {
@@ -135,10 +136,7 @@ export async function apiFetch<T = ApiJson>(
     });
   } catch {
     const hint = getApiConnectionHint();
-    throw new Error(
-      hint ??
-        `Cannot reach server at ${API_BASE_URL}. Fix: (1) backend running — npm run dev in backend/, (2) same Wi‑Fi on phone and PC, (3) Windows — run npm run dev:firewall in backend/ as Administrator, (4) npm run sync-api in frontend/ then restart Expo with --clear.`
-    );
+    throw new Error(hint ?? formatReachabilityError());
   }
 
   const json = (await response.json().catch(() => ({}))) as ApiJson & T;

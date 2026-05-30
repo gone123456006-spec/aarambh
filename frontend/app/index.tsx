@@ -4,6 +4,7 @@ import { View, StyleSheet } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { isLoggedInLocally } from '@/utils/authStorage';
 import { bootstrapSession } from '@/utils/api';
+import { warmApiServer } from '@/utils/checkApiHealth';
 import { AppSplashScreen } from '@/components/AppSplashScreen';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -15,6 +16,7 @@ export default function Index() {
     let cancelled = false;
 
     (async () => {
+      warmApiServer();
       await bootstrapSession();
       const loggedIn = await isLoggedInLocally();
       if (cancelled) return;
