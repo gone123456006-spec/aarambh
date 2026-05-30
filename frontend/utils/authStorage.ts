@@ -51,6 +51,15 @@ export async function getRefreshToken() {
   return AsyncStorage.getItem(AUTH_KEYS.refreshToken);
 }
 
+/** True while access or refresh token is stored — only cleared by explicit logout. */
+export async function isLoggedInLocally(): Promise<boolean> {
+  const [accessToken, refreshToken] = await Promise.all([
+    getAccessToken(),
+    getRefreshToken(),
+  ]);
+  return !!(accessToken || refreshToken);
+}
+
 /** Persist rotated tokens after /api/auth/refresh-token */
 export async function updateAuthTokens(accessToken: string, refreshToken?: string) {
   const pairs: [string, string][] = [[AUTH_KEYS.accessToken, accessToken]];

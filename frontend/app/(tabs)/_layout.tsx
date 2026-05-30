@@ -3,7 +3,8 @@ import React, { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { getAccessToken } from '@/utils/authStorage';
+import { isLoggedInLocally } from '@/utils/authStorage';
+import { ensureValidSession } from '@/utils/api';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { RewardsTabIcon } from '@/components/RewardsTabIcon';
@@ -26,11 +27,17 @@ function TabNavigator() {
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      getAccessToken().then((token) => {
-        if (active && !token) {
+      (async () => {
+        const loggedIn = await isLoggedInLocally();
+        if (active && !loggedIn) {
           router.replace('/intro');
+          return;
         }
-      });
+        // Keep tokens fresh in background — never log out on refresh failure
+        if (active) {
+          await ensureValidSession();
+        }
+      })();
       return () => {
         active = false;
       };
@@ -116,7 +123,7 @@ export default function TabLayout() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: AppUI.bg,
+    backgroundColor: '#FFFFFF',
   },
   tabBarBackground: {
     backgroundColor: '#FFFFFF',

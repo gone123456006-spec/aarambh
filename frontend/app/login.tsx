@@ -20,7 +20,7 @@ import {
   verifyOtpCode,
 } from '@/utils/authApi';
 import { isProfileCompleteUser } from '@/utils/profile';
-import { saveAuthSession } from '@/utils/authStorage';
+import { saveAuthSession, isLoggedInLocally } from '@/utils/authStorage';
 import { syncUserDataFromServer } from '@/utils/userDataSync';
 import { checkApiHealth } from '@/utils/checkApiHealth';
 
@@ -53,6 +53,21 @@ export default function LoginScreen() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const loggedIn = await isLoggedInLocally();
+      if (!cancelled && loggedIn) {
+        router.replace('/(tabs)');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const gmailValid = isValidGmail(email);
   const trimmedEmail = email.trim().toLowerCase();

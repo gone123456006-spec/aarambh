@@ -28,6 +28,7 @@ import { useFocusEffect } from 'expo-router';
 import { useGameProgress } from '@/hooks/use-game-progress';
 import { GameId, loadAllGameProgress, GameProgress } from '@/utils/gameProgress';
 import { recordGameAnswer } from '@/utils/gameStats';
+import { Icons3D } from '@/constants/homeIcons';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_H_PADDING = 20;
@@ -36,7 +37,7 @@ const GAME_CARD_WIDTH = Math.floor(
   (SCREEN_WIDTH - CONTENT_H_PADDING * 2 - GAME_GRID_GAP) / 2
 );
 
-/** Icons8 3D Fluency — https://icons8.com */
+/** Bundled 3D icons — offline-safe in production APK */
 const GAMES = [
   {
     id: 'quiz' as GameId,
@@ -44,7 +45,7 @@ const GAMES = [
     desc: `${QUIZ_LEVEL_COUNT} levels · Vocabulary & grammar`,
     color: '#e60000',
     heroBg: '#FFEBEE',
-    imageUrl: 'https://img.icons8.com/3d-fluency/94/help.png',
+    image: Icons3D.help,
     total: QUIZ_LEVEL_COUNT,
   },
   {
@@ -53,7 +54,7 @@ const GAMES = [
     desc: `${SCRAMBLE_LEVEL_COUNT} levels · Unscramble letters`,
     color: '#6C5CE7',
     heroBg: '#F0EEFF',
-    imageUrl: 'https://img.icons8.com/3d-fluency/94/puzzle.png',
+    image: Icons3D.puzzle,
     total: SCRAMBLE_LEVEL_COUNT,
   },
   {
@@ -62,7 +63,7 @@ const GAMES = [
     desc: `${FILL_BLANK_LEVEL_COUNT} levels · Complete sentences`,
     color: '#00b894',
     heroBg: '#E8F8F5',
-    imageUrl: 'https://img.icons8.com/3d-fluency/94/pencil.png',
+    image: Icons3D.pencil,
     total: FILL_BLANK_LEVEL_COUNT,
   },
   {
@@ -71,12 +72,12 @@ const GAMES = [
     desc: `${FLASHCARD_LEVEL_COUNT} levels · Learn vocabulary`,
     color: '#0984e3',
     heroBg: '#E3F2FD',
-    imageUrl: 'https://img.icons8.com/3d-fluency/94/cards.png',
+    image: Icons3D.cards,
     total: FLASHCARD_LEVEL_COUNT,
   },
 ];
 
-const SCORE_TROPHY_LOGO = 'https://img.icons8.com/3d-fluency/48/trophy.png';
+const SCORE_TROPHY_LOGO = Icons3D.trophy;
 
 const UI = {
   bg: '#F2F3F7',
@@ -220,7 +221,7 @@ function GameLogosStrip({ size = 30 }: { size?: number }) {
           ]}
         >
           <Image
-            source={{ uri: game.imageUrl }}
+            source={game.image}
             style={{ width: size - 8, height: size - 8 }}
             contentFit="contain"
           />
@@ -252,7 +253,7 @@ function ScoreBoard({ points }: { points: number }) {
             </View>
           </View>
           <View style={ui.scoreHeroIcon}>
-            <Image source={{ uri: SCORE_TROPHY_LOGO }} style={ui.scoreBoardIcon} contentFit="contain" />
+            <Image source={SCORE_TROPHY_LOGO} style={ui.scoreBoardIcon} contentFit="contain" />
           </View>
         </View>
         <View style={ui.scoreHeroDivider} />
@@ -280,7 +281,7 @@ function GameCard({
     >
       <View style={[ui.gameCardHero, { backgroundColor: game.heroBg }]}>
         <Image
-          source={{ uri: game.imageUrl }}
+          source={game.image}
           style={ui.gameCardImage}
           contentFit="contain"
           transition={200}

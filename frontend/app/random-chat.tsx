@@ -32,26 +32,18 @@ import {
   getChatSocket,
   type ChatPeer,
 } from '@/utils/chatSocket';
-import { getAccessToken } from '@/utils/authStorage';
+import type { Socket } from 'socket.io-client';
+import { AUTH_KEYS, isLoggedInLocally } from '@/utils/authStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AUTH_KEYS } from '@/utils/authStorage';
+import { ensureValidSession } from '@/utils/api';
 import { MatchmakingScene } from '@/components/MatchmakingScene';
 import { ChatTypingBubble } from '@/components/ChatTypingBubble';
 import { AppUI, cardShadow } from '@/constants/theme';
+import { validateChatMessage, isChatMessageBlocked } from '@/utils/chatMessageValidation';
 
-type MessageStatus = 'sent' | 'delivered' | 'read';
-
-interface Message {
-  id: string;
-  text: string;
-  isSelf: boolean;
-  time: string;
-  status?: MessageStatus;
-}
-
-const BUBBLE_PEER_BG = '#d9f5d0';
+const UI = AppUI;
 const BUBBLE_SELF_BG = '#5b9bd5';
-const TICK_COLOR = '#e60000';
+const TICK_COLOR = UI.accent;
 const TICK_COLOR_READ = '#ff3333';
 
 function formatMessageTime(date = new Date()) {
@@ -66,13 +58,39 @@ const DEFAULT_INPUT_DOCK_HEIGHT = Platform.OS === 'android' ? 64 : 56;
 /** Android 3-button nav bar — insets.bottom is often 0 in Expo Go */
 const ANDROID_NAV_BAR_HEIGHT = 48;
 const ENCRYPTION_NOTICE_MS = 4500;
-function PeerAvatar({ peer }: { peer: ChatPeer }) {
+
+type MessageStatus = 'sent' | 'delivered' | 'read';
+
+interface Message {
+  id: string;
+  text: string;
+  isSelf: boolean;
+  time: string;
+  status?: MessageStatus;
+}
+
+function PeerAvatar({ peer, size = 40 }: { peer: ChatPeer; size?: number }) {
+  const radius = size / 2;
   if (peer.avatar) {
-    return <Image source={{ uri: peer.avatar }} style={styles.peerAvatar} />;
+    return (
+      <Image
+        source={{ uri: peer.avatar }}
+        style={{ width: size, height: size, borderRadius: radius, backgroundColor: UI.surfaceMuted }}
+      />
+    );
   }
   return (
-    <View style={[styles.peerAvatar, styles.peerAvatarPlaceholder]}>
-      <Ionicons name="person" size={22} color="#fff" />
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        backgroundColor: UI.accent,
+        justifyContent: 'center',
+        alignItems: 'center',
+      }}
+    >
+      <Ionicons name="person" size={Math.round(size * 0.55)} color="#fff" />
     </View>
   );
 }
@@ -97,6 +115,9 @@ export default function RandomChatScreen() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [inputFocused, setInputFocused] = useState(false);
   const [showEncryptionNotice, setShowEncryptionNotice] = useState(false);
+  const [needsSignIn, setNeedsSignIn] = useState(false);
+  const mountedRef = useRef(true);
+  const myUserIdRef = useRef('');
 
   const appendMessage = useCallback(
     (
@@ -217,113 +238,157 @@ export default function RandomChatScreen() {
     return () => clearTimeout(timer);
   }, [peer?.id, sessionId, status]);
 
-  useEffect(() => {
-    let mounted = true;
+  const attachChatHandlers = useCallback(
+    (sock: Socket) => {
+      sock.off('match:searching');
+      sock.off('match:found');
+      sock.off('message:receive');
+      sock.off('message:rejected');
+      sock.off('message:delivered');
+      sock.off('message:seen');
+      sock.off('peer:typing');
+      sock.off('peer:disconnected');
 
-    const setup = async () => {
-      try {
-        const token = await getAccessToken();
-        if (!token) {
-          if (mounted) {
-            setErrorMsg('Please sign in to chat with real learners.');
-            setStatus('error');
-          }
-          return;
-        }
-
-        const uid = await AsyncStorage.getItem(AUTH_KEYS.userId);
-        if (uid && mounted) setMyUserId(uid);
-
-        const sock = await connectChatSocket();
-        if (!mounted) return;
-
-        sock.on('match:searching', () => {
-          setStatus('searching');
-          resetChat();
-        });
-
-        sock.on('match:found', (data: { sessionId: string; peer: ChatPeer }) => {
-          sessionIdRef.current = data.sessionId;
-          setSessionId(data.sessionId);
-          setPeer(data.peer);
-          setStatus('chat');
-          setMessages([]);
-        });
-
-        sock.on(
-          'message:receive',
-          (payload: {
-            id: string;
-            text: string;
-            senderId: string;
-            timestamp?: string;
-          }) => {
-            const currentUid = uid ?? myUserId;
-            if (payload.senderId === currentUid) return;
-            const time = payload.timestamp
-              ? formatMessageTime(new Date(payload.timestamp))
-              : formatMessageTime();
-            appendMessage(payload.text, false, payload.id, time);
-            setIsTyping(false);
-            const sid = sessionIdRef.current;
-            if (sid) emitMessageSeen(sock, sid, [payload.id]);
-          }
-        );
-
-        sock.on(
-          'message:delivered',
-          (payload: { id: string; clientId?: string | null; timestamp?: string }) => {
-            const localId = payload.clientId;
-            if (localId) {
-              patchMessageById(localId, {
-                id: payload.id,
-                status: 'delivered',
-                time: payload.timestamp
-                  ? formatMessageTime(new Date(payload.timestamp))
-                  : undefined,
-              });
-            } else {
-              patchMessageById(payload.id, { status: 'delivered' });
-            }
-          }
-        );
-
-        sock.on('message:seen', (payload: { messageIds: string[] }) => {
-          markMessagesRead(payload.messageIds ?? []);
-        });
-
-        sock.on('peer:typing', ({ isTyping: typing }: { isTyping: boolean }) => {
-          setIsTyping(typing);
-        });
-
-        sock.on('peer:disconnected', () => {
-          Alert.alert('Partner left', 'Your chat partner disconnected. Finding someone new...');
-          beginSearch();
-        });
-
+      sock.on('match:searching', () => {
         setStatus('searching');
-        startMatchmaking(sock);
-      } catch (e) {
-        if (mounted) {
-          setErrorMsg(e instanceof Error ? e.message : 'Could not connect to chat server.');
-          setStatus('error');
+        resetChat();
+      });
+
+      sock.on('match:found', (data: { sessionId: string; peer: ChatPeer }) => {
+        sessionIdRef.current = data.sessionId;
+        setSessionId(data.sessionId);
+        setPeer(data.peer);
+        setStatus('chat');
+        setMessages([]);
+      });
+
+      sock.on(
+        'message:receive',
+        (payload: {
+          id: string;
+          text: string;
+          senderId: string;
+          timestamp?: string;
+        }) => {
+          if (payload.senderId === myUserIdRef.current) return;
+          const incoming = validateChatMessage(payload.text);
+          if (!incoming.valid) return;
+          const time = payload.timestamp
+            ? formatMessageTime(new Date(payload.timestamp))
+            : formatMessageTime();
+          appendMessage(payload.text, false, payload.id, time);
+          setIsTyping(false);
+          const sid = sessionIdRef.current;
+          if (sid) emitMessageSeen(sock, sid, [payload.id]);
         }
+      );
+
+      sock.on(
+        'message:rejected',
+        (payload: { clientId?: string | null; reason?: string; message?: string }) => {
+          if (payload.clientId) {
+            setMessages((prev) => prev.filter((m) => m.id !== payload.clientId));
+          }
+          Alert.alert('Message not sent', payload.message || 'This message is not allowed.');
+        }
+      );
+
+      sock.on(
+        'message:delivered',
+        (payload: { id: string; clientId?: string | null; timestamp?: string }) => {
+          const localId = payload.clientId;
+          if (localId) {
+            patchMessageById(localId, {
+              id: payload.id,
+              status: 'delivered',
+              time: payload.timestamp
+                ? formatMessageTime(new Date(payload.timestamp))
+                : undefined,
+            });
+          } else {
+            patchMessageById(payload.id, { status: 'delivered' });
+          }
+        }
+      );
+
+      sock.on('message:seen', (payload: { messageIds: string[] }) => {
+        markMessagesRead(payload.messageIds ?? []);
+      });
+
+      sock.on('peer:typing', ({ isTyping: typing }: { isTyping: boolean }) => {
+        setIsTyping(typing);
+      });
+
+      sock.on('peer:disconnected', () => {
+        Alert.alert('Partner left', 'Your chat partner disconnected. Finding someone new...');
+        beginSearch();
+      });
+    },
+    [appendMessage, beginSearch, markMessagesRead, patchMessageById, resetChat]
+  );
+
+  const connectAndStartChat = useCallback(async () => {
+    try {
+      setStatus('connecting');
+      setErrorMsg('');
+      setNeedsSignIn(false);
+
+      const loggedIn = await isLoggedInLocally();
+      if (!loggedIn) {
+        setNeedsSignIn(true);
+        setErrorMsg('Please sign in to chat with real learners.');
+        setStatus('error');
+        return;
       }
-    };
 
-    setup();
+      await ensureValidSession();
 
+      disconnectChatSocket();
+
+      const uid = await AsyncStorage.getItem(AUTH_KEYS.userId);
+      if (uid) {
+        myUserIdRef.current = uid;
+        setMyUserId(uid);
+      }
+
+      const sock = await connectChatSocket();
+      if (!mountedRef.current) return;
+
+      attachChatHandlers(sock);
+      setStatus('searching');
+      startMatchmaking(sock);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setErrorMsg(e instanceof Error ? e.message : 'Could not connect to chat server.');
+      setStatus('error');
+    }
+  }, [attachChatHandlers]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    connectAndStartChat();
     return () => {
-      mounted = false;
+      mountedRef.current = false;
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       disconnectChatSocket();
     };
-  }, [appendMessage, beginSearch, markMessagesRead, patchMessageById, resetChat]);
+  }, [connectAndStartChat]);
+
+  const retryChatConnection = useCallback(() => {
+    mountedRef.current = true;
+    connectAndStartChat();
+  }, [connectAndStartChat]);
 
   const handleSend = () => {
     const text = inputText.trim();
     const sock = getChatSocket();
     if (!text || !sock || !sessionId) return;
+
+    const validation = validateChatMessage(text);
+    if (!validation.valid) {
+      Alert.alert('Message not sent', validation.message);
+      return;
+    }
 
     const clientId = `c-${Date.now()}`;
     appendMessage(text, true, clientId, undefined, 'sent');
@@ -379,10 +444,7 @@ export default function RandomChatScreen() {
     ({ item }: { item: Message }) => (
       <Pressable
         onPress={dismissKeyboard}
-        style={[
-          styles.messageWrapper,
-          item.isSelf ? styles.messageWrapperSelf : styles.messageWrapperPeer,
-        ]}
+        style={[styles.messageRow, item.isSelf && styles.messageRowSelf]}
       >
         <View style={[styles.messageBubble, item.isSelf ? styles.messageBubbleSelf : styles.messageBubblePeer]}>
           <View style={styles.messageBody}>
@@ -404,6 +466,9 @@ export default function RandomChatScreen() {
     [dismissKeyboard]
   );
 
+  const trimmedInput = inputText.trim();
+  const canSend = trimmedInput.length > 0 && !isChatMessageBlocked(trimmedInput);
+
   const renderChatInputBar = () => (
     <View style={styles.inputDockInner}>
       <View style={styles.inputRow}>
@@ -411,8 +476,8 @@ export default function RandomChatScreen() {
           <TextInput
             ref={textInputRef}
             style={styles.textInput}
-            placeholder="Message"
-            placeholderTextColor="#8696a0"
+            placeholder="Type in English only…"
+            placeholderTextColor={UI.textTertiary}
             value={inputText}
             onChangeText={handleInputChange}
             onFocus={() => {
@@ -426,8 +491,13 @@ export default function RandomChatScreen() {
           />
         </View>
 
-        <TouchableOpacity style={styles.sendBtn} onPress={handleSend} activeOpacity={0.85}>
-          <Ionicons name="send" size={22} color="#fff" />
+        <TouchableOpacity
+          style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
+          onPress={handleSend}
+          disabled={!canSend}
+          activeOpacity={0.88}
+        >
+          <Feather name="send" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
     </View>
@@ -457,62 +527,78 @@ export default function RandomChatScreen() {
   const renderNavHeader = (
     title: string,
     subtitle: string,
-    options?: { peer?: ChatPeer; onSkip?: () => void }
+    options?: {
+      peer?: ChatPeer;
+      onSkip?: () => void;
+      subtitleAccent?: boolean;
+      hideIcon?: boolean;
+      backOnly?: boolean;
+    }
   ) => {
-    const hasAvatar = !!options?.peer;
-    const subMarginLeft = hasAvatar ? 102 : 52;
-
-    return (
-      <View style={[styles.lbHeader, { paddingTop: insets.top }]}>
-        <View style={styles.lbHeaderRow}>
-          <TouchableOpacity
+    if (options?.backOnly) {
+      return (
+        <View style={[styles.navBar, styles.navBarBackOnly, { paddingTop: insets.top }]}>
+          <Pressable
             onPress={handleBack}
-            style={styles.lbBackBtn}
-            activeOpacity={0.6}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+            hitSlop={12}
             accessibilityLabel="Go back"
           >
-            <Feather name="arrow-left" size={24} color="#101010" />
-          </TouchableOpacity>
-
-          {hasAvatar ? (
-            <View style={styles.headerAvatarWrap}>
-              <PeerAvatar peer={options.peer!} />
-              <View style={styles.onlineBadge} />
-            </View>
-          ) : null}
-
-          <Text style={styles.lbHeaderTitle} numberOfLines={1}>
-            {title}
-          </Text>
-
-          {options?.onSkip ? (
-            <TouchableOpacity
-              onPress={options.onSkip}
-              style={styles.lbBackBtn}
-              activeOpacity={0.85}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel="Find another partner"
-            >
-              <Ionicons name="play-skip-forward" size={20} color="#101010" />
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.lbHeaderSpacer} />
-          )}
+            <Feather name="arrow-left" size={24} color={UI.text} />
+          </Pressable>
         </View>
+      );
+    }
+
+    return (
+    <View style={[styles.navBar, { paddingTop: insets.top }]}>
+      <Pressable
+        onPress={handleBack}
+        style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+        hitSlop={12}
+        accessibilityLabel="Go back"
+      >
+        <Feather name="arrow-left" size={24} color={UI.text} />
+      </Pressable>
+
+      {options?.peer ? (
+        <View style={styles.headerAvatarWrap}>
+          <PeerAvatar peer={options.peer} size={44} />
+          <View style={styles.onlineBadge} />
+        </View>
+      ) : options?.hideIcon ? null : (
+        <View style={styles.headerIconBadge}>
+          <Ionicons name="chatbubbles" size={20} color="#fff" />
+        </View>
+      )}
+
+      <View style={styles.headerText}>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {title}
+        </Text>
         {subtitle ? (
           <Text
-            style={[
-              styles.lbHeaderSub,
-              { marginLeft: subMarginLeft },
-              isTyping && options?.peer && styles.headerSubTyping,
-            ]}
+            style={[styles.headerSubtitle, options?.subtitleAccent && styles.headerSubtitleAccent]}
             numberOfLines={1}
           >
             {subtitle}
           </Text>
         ) : null}
       </View>
+
+      {options?.onSkip ? (
+        <Pressable
+          onPress={options.onSkip}
+          style={({ pressed }) => [styles.skipBtn, pressed && styles.backBtnPressed]}
+          hitSlop={8}
+          accessibilityLabel="Find another partner"
+        >
+          <Feather name="refresh-cw" size={18} color={UI.accent} />
+        </Pressable>
+      ) : (
+        <View style={styles.headerActionSpacer} />
+      )}
+    </View>
     );
   };
 
@@ -525,9 +611,17 @@ export default function RandomChatScreen() {
         <View style={styles.centeredBody}>
           <Feather name="wifi-off" size={48} color="#e60000" />
           <Text style={styles.centeredTitle}>{errorMsg}</Text>
-          <TouchableOpacity style={styles.retryBtn} onPress={() => router.replace('/login')}>
-            <Text style={styles.retryBtnText}>Sign in</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={retryChatConnection}>
+            <Text style={styles.retryBtnText}>Try again</Text>
           </TouchableOpacity>
+          {needsSignIn ? (
+            <TouchableOpacity
+              style={styles.secondaryRetryBtn}
+              onPress={() => router.replace('/login')}
+            >
+              <Text style={styles.secondaryRetryBtnText}>Sign in</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     );
@@ -538,11 +632,10 @@ export default function RandomChatScreen() {
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
         <StatusBar barStyle="dark-content" backgroundColor={AppUI.bg} />
-        {renderNavHeader(
-          'Chat in English',
-          status === 'connecting' ? 'Connecting to server…' : ''
-        )}
-        <MatchmakingScene />
+        {renderNavHeader('', '', { backOnly: true })}
+        <View style={styles.matchmakingBody}>
+          <MatchmakingScene />
+        </View>
       </View>
     );
   }
@@ -552,18 +645,23 @@ export default function RandomChatScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor={AppUI.surface} />
+      <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
 
-      {renderNavHeader(peer.name, '', {
-        peer,
-        onSkip: handleSkip,
-      })}
+      {renderNavHeader(
+        peer.name,
+        isTyping ? 'typing…' : 'Online learner',
+        {
+          peer,
+          onSkip: handleSkip,
+          subtitleAccent: isTyping,
+        }
+      )}
 
       {showEncryptionNotice ? (
         <Pressable onPress={dismissKeyboard} style={styles.encryptionBanner}>
-          <Feather name="lock" size={13} color="#667781" />
+          <Feather name="lock" size={16} color={UI.accent} />
           <Text style={styles.encryptionText}>
-            Messages are end-to-end encrypted. Only you and {peer.name} can read them.
+            Messages are private between you and {peer.name}.
           </Text>
         </Pressable>
       ) : null}
@@ -618,73 +716,105 @@ export default function RandomChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: AppUI.bg },
-  flex1: { flex: 1 },
-  chatKeyboardRoot: { flex: 1, flexDirection: 'column' },
-  lbHeader: {
-    paddingHorizontal: 16,
-    paddingBottom: 14,
-    backgroundColor: AppUI.bg,
+  container: {
+    flex: 1,
+    backgroundColor: UI.bg,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  lbHeaderRow: {
+  chatKeyboardRoot: { flex: 1, flexDirection: 'column' },
+  navBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 48,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
     gap: 12,
+    backgroundColor: UI.bg,
   },
-  lbBackBtn: {
+  navBarBackOnly: {
+    paddingBottom: 8,
+  },
+  backBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    backgroundColor: UI.surface,
     ...cardShadow,
   },
-  lbHeaderTitle: {
-    flex: 1,
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#101010',
-    letterSpacing: -0.4,
-  },
-  lbHeaderSub: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 4,
-    lineHeight: 20,
-  },
-  lbHeaderSpacer: {
+  backBtnPressed: { opacity: 0.85 },
+  skipBtn: {
     width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: UI.surface,
+    ...cardShadow,
+  },
+  headerActionSpacer: { width: 40 },
+  headerIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: UI.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerAvatarWrap: { position: 'relative' },
-  headerSubTyping: { color: '#00b894', fontWeight: '600' },
+  headerText: { flex: 1, minWidth: 0 },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: UI.text,
+    letterSpacing: -0.3,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: UI.textSecondary,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  headerSubtitleAccent: {
+    color: '#12B76A',
+    fontWeight: '600',
+  },
+  matchmakingBody: {
+    flex: 1,
+    backgroundColor: UI.bg,
+  },
   centeredBody: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+    backgroundColor: UI.bg,
   },
   centeredTitle: {
     fontSize: 16,
-    color: AppUI.textSecondary,
+    color: UI.textSecondary,
     textAlign: 'center',
     marginTop: 16,
     lineHeight: 22,
   },
   retryBtn: {
     marginTop: 24,
-    backgroundColor: AppUI.accent,
+    backgroundColor: UI.accent,
     paddingHorizontal: 28,
     paddingVertical: 14,
     borderRadius: 14,
+    ...cardShadow,
   },
   retryBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  peerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' },
-  peerAvatarPlaceholder: {
-    backgroundColor: '#e60000',
-    justifyContent: 'center',
-    alignItems: 'center',
+  secondaryRetryBtn: {
+    marginTop: 12,
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+  },
+  secondaryRetryBtnText: {
+    color: UI.accent,
+    fontWeight: '600',
+    fontSize: 15,
   },
   onlineBadge: {
     position: 'absolute',
@@ -693,49 +823,58 @@ const styles = StyleSheet.create({
     width: 11,
     height: 11,
     borderRadius: 6,
-    backgroundColor: '#00b894',
+    backgroundColor: '#12B76A',
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: UI.surface,
   },
   encryptionBanner: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#efeae2',
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    gap: 6,
+    gap: 10,
+    backgroundColor: UI.accentGlow,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
   },
   encryptionText: {
-    textAlign: 'center',
-    fontSize: 12,
-    lineHeight: 17,
-    color: '#667781',
-    maxWidth: 320,
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    color: UI.textSecondary,
+    fontWeight: '500',
   },
   messagesArea: {
     flex: 1,
-    backgroundColor: '#efeae2',
+    backgroundColor: UI.bg,
   },
   messageList: { flex: 1 },
   inputStickyWrap: {
     width: '100%',
     flexShrink: 0,
-    backgroundColor: '#f0f2f5',
     zIndex: 20,
-    elevation: 24,
   },
   inputFooter: {
     minHeight: DEFAULT_INPUT_DOCK_HEIGHT,
-    backgroundColor: '#f0f2f5',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#d1d7db',
-    paddingTop: Platform.OS === 'android' ? 6 : 8,
-    paddingHorizontal: Platform.OS === 'android' ? 8 : 6,
-    justifyContent: 'center',
+    backgroundColor: UI.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 14,
+    ...Platform.select({
+      ios: {
+        shadowColor: UI.shadow,
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+      },
+      android: { elevation: 12 },
+      default: {},
+    }),
   },
   chatContent: {
-    paddingHorizontal: 10,
-    paddingTop: 12,
+    paddingHorizontal: 16,
+    paddingTop: 8,
     flexGrow: 1,
   },
   emptyChatPress: {
@@ -745,25 +884,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 24,
   },
-  emptyChat: { textAlign: 'center', color: '#667781', fontSize: 15 },
-  messageWrapper: { marginBottom: 4, maxWidth: '82%' },
-  messagePressed: { opacity: 0.92 },
-  messageWrapperSelf: { alignSelf: 'flex-end' },
-  messageWrapperPeer: { alignSelf: 'flex-start' },
+  emptyChat: {
+    textAlign: 'center',
+    color: UI.textSecondary,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  messageRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 12,
+    maxWidth: '92%',
+  },
+  messageRowSelf: {
+    alignSelf: 'flex-end',
+    flexDirection: 'row-reverse',
+  },
   messageBubble: {
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 6,
-    borderRadius: 14,
-    maxWidth: '100%',
+    maxWidth: '88%',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 18,
   },
   messageBubbleSelf: {
     backgroundColor: BUBBLE_SELF_BG,
-    borderTopRightRadius: 4,
+    borderTopRightRadius: 6,
   },
   messageBubblePeer: {
-    backgroundColor: BUBBLE_PEER_BG,
-    borderTopLeftRadius: 4,
+    backgroundColor: UI.surface,
+    borderTopLeftRadius: 6,
+    ...cardShadow,
   },
   messageBody: {
     flexDirection: 'row',
@@ -772,56 +922,57 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   messageText: {
-    fontSize: 16,
-    lineHeight: 21,
+    fontSize: 15,
+    lineHeight: 22,
     flexShrink: 1,
     flexGrow: 1,
   },
   messageTextSelf: { color: '#fff' },
-  messageTextPeer: { color: '#1a1a1a' },
+  messageTextPeer: { color: UI.text },
   messageTicks: {
     marginLeft: 2,
     marginBottom: 1,
   },
   inputDockInner: {
     width: '100%',
+    paddingHorizontal: 16,
+    paddingBottom: 4,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: Platform.OS === 'android' ? 8 : 6,
+    gap: 10,
   },
   inputPill: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: Platform.OS === 'android' ? 4 : 6,
-    minHeight: Platform.OS === 'android' ? 44 : 40,
+    backgroundColor: UI.surfaceMuted,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: UI.divider,
+    minHeight: 46,
+    justifyContent: 'center',
     maxHeight: 120,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e9edef',
   },
   textInput: {
-    flex: 1,
-    fontSize: 16,
-    lineHeight: 20,
-    color: '#111b21',
+    minHeight: 44,
     maxHeight: 100,
-    paddingTop: Platform.OS === 'android' ? 8 : 4,
-    paddingBottom: Platform.OS === 'android' ? 8 : 4,
-    paddingHorizontal: 0,
-    minHeight: Platform.OS === 'android' ? 36 : 32,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontSize: 15,
+    lineHeight: 20,
+    color: UI.text,
   },
   sendBtn: {
-    width: Platform.OS === 'android' ? 48 : 44,
-    height: Platform.OS === 'android' ? 48 : 44,
-    borderRadius: Platform.OS === 'android' ? 24 : 22,
-    backgroundColor: '#e60000',
-    justifyContent: 'center',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: UI.accent,
     alignItems: 'center',
+    justifyContent: 'center',
     flexShrink: 0,
+    ...cardShadow,
+  },
+  sendBtnDisabled: {
+    opacity: 0.45,
   },
 });

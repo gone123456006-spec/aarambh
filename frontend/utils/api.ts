@@ -1,5 +1,5 @@
 import { API_BASE_URL, getApiConnectionHint } from '@/constants/api';
-import { getAccessToken, getRefreshToken, updateAuthTokens } from '@/utils/authStorage';
+import { getAccessToken, getRefreshToken, updateAuthTokens, isLoggedInLocally } from '@/utils/authStorage';
 
 type ApiJson = {
   success?: boolean;
@@ -28,18 +28,42 @@ function decodeJwtExpSec(token: string): number | null {
   }
 }
 
-/** Refresh access token when it is missing or close to expiry (games save often). */
-async function ensureFreshAccessToken(): Promise<void> {
-  const token = await getAccessToken();
-  if (!token) return;
+/** Restore or refresh tokens for API/chat. Never clears local session — logout is manual only. */
+export async function ensureValidSession(): Promise<boolean> {
+  const refreshToken = await getRefreshToken();
+  const accessToken = await getAccessToken();
 
-  const expSec = decodeJwtExpSec(token);
+  if (!refreshToken && !accessToken) {
+    return false;
+  }
+
+  if (!accessToken && refreshToken) {
+    await refreshAccessToken();
+    return true;
+  }
+
+  const expSec = accessToken ? decodeJwtExpSec(accessToken) : null;
   const expiresSoon =
-    expSec !== null && expSec * 1000 <= Date.now() + 2 * 60 * 1000;
+    expSec === null || expSec * 1000 <= Date.now() + 5 * 60 * 1000;
 
-  if (expiresSoon) {
+  if (expiresSoon && refreshToken) {
     await refreshAccessToken();
   }
+
+  return true;
+}
+
+/** Refresh tokens once when the app starts (keeps long sessions alive). */
+export async function bootstrapSession(): Promise<void> {
+  const loggedIn = await isLoggedInLocally();
+  if (loggedIn) {
+    await ensureValidSession();
+  }
+}
+
+/** Refresh access token when it is missing or close to expiry (games save often). */
+async function ensureFreshAccessToken(): Promise<void> {
+  await ensureValidSession();
 }
 
 function isAuthExpired(status: number, message: string): boolean {

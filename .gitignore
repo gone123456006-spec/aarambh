@@ -6,3 +6,7 @@ node_modules/
 
 # macOS
 .DS_Store
+
+# Accidental downloads / large local media (never commit)
+frontend/assets/images/Downloads/
+*.mp4

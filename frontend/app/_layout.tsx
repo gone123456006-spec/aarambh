@@ -1,3 +1,4 @@
+import React from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -17,7 +18,7 @@ enableScreens(true);
 enableFreeze(true);
 
 export const unstable_settings = {
-  initialRouteName: 'intro',
+  initialRouteName: 'index',
 };
 
 export default function RootLayout() {
@@ -28,6 +29,7 @@ export default function RootLayout() {
       <KeyboardProvider preload={false}>
         <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
           <Stack screenOptions={stackScreenOptions}>
+            <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="intro" options={stackFadeScreen} />
             <Stack.Screen name="login" options={stackSlideScreen} />
             <Stack.Screen name="create-profile" options={stackSlideScreen} />

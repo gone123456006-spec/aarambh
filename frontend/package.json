@@ -4,10 +4,13 @@
   "version": "1.0.0",
   "scripts": {
     "sync-api": "node ./scripts/sync-api-env.js",
-    "start": "node ./scripts/sync-api-env.js && expo start --lan",
-    "start:lan": "node ./scripts/sync-api-env.js && expo start --lan",
-    "start:2phones": "node ./scripts/sync-api-env.js && expo start --lan",
-    "start:tunnel": "node ./scripts/sync-api-env.js && expo start --tunnel",
+    "sync-icons": "node ./scripts/sync-icons3d.js",
+    "generate-splash": "node ./scripts/generate-splash-assets.js",
+    "postinstall": "node ./scripts/sync-icons3d.js",
+    "start": "node ./scripts/sync-api-env.js && node ./scripts/sync-icons3d.js && expo start --lan",
+    "start:lan": "node ./scripts/sync-api-env.js && node ./scripts/sync-icons3d.js && expo start --lan",
+    "start:2phones": "node ./scripts/sync-api-env.js && node ./scripts/sync-icons3d.js && expo start --lan",
+    "start:tunnel": "node ./scripts/sync-api-env.js && node ./scripts/sync-icons3d.js && expo start --tunnel",
     "start:local": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
@@ -60,6 +63,7 @@
     "babel-preset-expo": "~54.0.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~10.0.0",
+    "sharp": "^0.34.5",
     "typescript": "~5.9.2"
   },
   "private": true

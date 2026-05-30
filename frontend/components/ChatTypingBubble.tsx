@@ -8,10 +8,9 @@ import Animated, {
   withTiming,
   withDelay,
 } from 'react-native-reanimated';
+import { AppUI, cardShadow } from '@/constants/theme';
 
 const DOT_SIZE = 5;
-const DOT_COLOR = '#8696a0';
-const BUBBLE_PEER_BG = '#d9f5d0';
 
 function ThinkingDot({ delay }: { delay: number }) {
   const scale = useSharedValue(0.55);
@@ -48,7 +47,7 @@ function ThinkingDot({ delay }: { delay: number }) {
   return <Animated.View style={[styles.dot, style]} />;
 }
 
-/** Compact “thinking” typing indicator (pulsing dots). */
+/** Compact typing indicator — Samsung One UI bubble style. */
 export function ChatTypingBubble() {
   return (
     <View style={styles.wrapper}>
@@ -64,24 +63,24 @@ export function ChatTypingBubble() {
 const styles = StyleSheet.create({
   wrapper: {
     alignSelf: 'flex-start',
-    marginBottom: 4,
-    marginTop: 2,
+    marginBottom: 12,
   },
   bubble: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
-    backgroundColor: BUBBLE_PEER_BG,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderTopLeftRadius: 2,
-    minHeight: 28,
+    gap: 4,
+    backgroundColor: AppUI.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    borderTopLeftRadius: 6,
+    minHeight: 32,
+    ...cardShadow,
   },
   dot: {
     width: DOT_SIZE,
     height: DOT_SIZE,
     borderRadius: DOT_SIZE / 2,
-    backgroundColor: DOT_COLOR,
+    backgroundColor: AppUI.textTertiary,
   },
 });

@@ -15,8 +15,8 @@ import {
   Alert,
 } from 'react-native';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { Stack } from 'expo-router';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Stack, useFocusEffect, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Video, ResizeMode, Audio } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
@@ -35,8 +35,9 @@ import {
   saveCourseProgress,
   syncLessonToServer,
 } from '@/utils/courseProgress';
-import { useFocusEffect } from 'expo-router';
 import { apiFetch } from '@/utils/api';
+import { Icons3D } from '@/constants/homeIcons';
+import { useGameTabBar } from '@/contexts/game-tab-bar-context';
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PLAYLIST_PLAYER_HEIGHT = SCREEN_WIDTH * (9 / 16);
 
@@ -46,7 +47,22 @@ const UI = {
   surface: '#FFFFFF',
   surfaceMuted: '#ECEEF2',
   divider: 'rgba(0,0,0,0.06)',
+  text: '#101010',
+  textSecondary: '#6B7280',
+  accent: '#e60000',
+  shadow: '#000000',
 };
+
+const headerShadow = Platform.select({
+  ios: {
+    shadowColor: UI.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+  },
+  android: { elevation: 3 },
+  default: {},
+});
 
 type ServerLessonMedia = {
   _id?: string;
@@ -269,7 +285,7 @@ function PlaylistLessonRow({
           >
             <View style={styles.pdfIconWrap}>
               <Image
-                source={{ uri: 'https://img.icons8.com/3d-fluency/48/pdf.png' }}
+                source={Icons3D.pdf}
                 style={styles.pdfIconImage}
                 resizeMode="contain"
               />
@@ -509,7 +525,16 @@ function CoursePlaylistView({
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function MyCoursesScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { setHideTabBar } = useGameTabBar();
+
+  useFocusEffect(
+    useCallback(() => {
+      setHideTabBar(true);
+      return () => setHideTabBar(false);
+    }, [setHideTabBar]),
+  );
 
   const [completedLessons, setCompletedLessons] = useState<string[]>([]);
   const [lastLessonId, setLastLessonId] = useState<string | null>(null);
@@ -796,6 +821,34 @@ export default function MyCoursesScreen() {
   }, [pauseVideo]);
 
   const activeLevel = COURSE_DATA.find((l) => l.id === selectedCategory)!;
+  const totalLessons = COURSE_DATA.reduce((count, level) => count + level.lessons.length, 0);
+
+  const renderHeader = () => (
+    <View style={[styles.screenHeader, { paddingTop: insets.top }]}>
+      <View style={styles.screenHeaderRow}>
+        <TouchableOpacity
+          onPress={() => router.navigate('/(tabs)/')}
+          style={styles.screenBackBtn}
+          activeOpacity={0.6}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Feather name="arrow-left" size={24} color={UI.text} />
+        </TouchableOpacity>
+        <Text style={styles.screenHeaderTitle} numberOfLines={1}>
+          My Courses
+        </Text>
+        {!loading ? (
+          <View style={styles.screenProgressPill}>
+            <Text style={styles.screenProgressPillText}>
+              {completedLessons.length}/{totalLessons}
+            </Text>
+          </View>
+        ) : (
+          <View style={styles.screenHeaderSpacer} />
+        )}
+      </View>
+    </View>
+  );
 
   const handlePlay = (lessonId: string) => {
     saveCourseProgress(completedLessons, lessonId);
@@ -1155,15 +1208,14 @@ export default function MyCoursesScreen() {
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
+      {renderHeader()}
 
       {loading ? (
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#1A73E8" />
         </View>
       ) : (
-        <View style={styles.mainColumn}>
-          <SafeAreaView edges={['top']} style={styles.safeTop} />
-
+        <View style={[styles.mainColumn, { paddingBottom: insets.bottom }]}>
           <CoursePlaylistView
             level={activeLevel}
             levelUnlocked={isLevelUnlockedForUser(activeLevel.id)}
@@ -1212,14 +1264,53 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: UI.bg,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
+  screenHeader: {
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    backgroundColor: UI.bg,
+  },
+  screenHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 48,
+    gap: 12,
+  },
+  screenHeaderSpacer: {
+    width: 44,
+  },
+  screenBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: UI.surface,
+    ...headerShadow,
+  },
+  screenHeaderTitle: {
+    flex: 1,
+    fontSize: 22,
+    fontWeight: '700',
+    color: UI.text,
+    letterSpacing: -0.4,
+  },
+  screenProgressPill: {
+    backgroundColor: '#FFF0F0',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    minWidth: 44,
+    alignItems: 'center',
+  },
+  screenProgressPillText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: UI.accent,
   },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: UI.bg },
   scrollBody: { flex: 1 },
   mainColumn: { flex: 1, backgroundColor: UI.bg },
-  safeTop: {
-    backgroundColor: UI.bg,
-  },
   levelTabsInSheet: {
     paddingHorizontal: 16,
     paddingTop: 14,

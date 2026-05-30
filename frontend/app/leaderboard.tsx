@@ -20,6 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_KEYS } from '@/utils/authStorage';
 import { getCurrentUserId } from '@/utils/userStorage';
 import { getTotalGameScore } from '@/utils/gameStats';
+import { Icons3D } from '@/constants/homeIcons';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -74,9 +75,8 @@ async function fetchAllEntries(): Promise<LeaderboardUser[]> {
 // ─── Medal colours ────────────────────────────────────────────────────────────
 const MEDAL = { 1: '#FFD700', 2: '#C0C0C0', 3: '#CD7F32' };
 
-/** Icons8 3D Fluency — https://icons8.com/icons/fluency */
-const LB_TROPHY_LOGO = 'https://img.icons8.com/3d-fluency/48/trophy.png';
-const LB_CROWN_LOGO = 'https://img.icons8.com/3d-fluency/48/crown.png';
+const LB_TROPHY_LOGO = Icons3D.trophy;
+const LB_CROWN_LOGO = Icons3D.crown;
 
 /** Space between sticky footer and bottom nav / home indicator */
 const FOOTER_BOTTOM_GAP = 20;
@@ -162,7 +162,7 @@ export default function LeaderboardScreen() {
     >
       {renderMedalBadge(user.rank!)}
       {user.rank === 1 && (
-        <Image source={{ uri: LB_CROWN_LOGO }} style={styles.crownLogo} resizeMode="contain" />
+        <Image source={LB_CROWN_LOGO} style={styles.crownLogo} resizeMode="contain" />
       )}
       <View style={styles.topAvatarCircle}>
         <Text style={styles.topAvatarLetter}>{user.name.charAt(0).toUpperCase()}</Text>
@@ -227,7 +227,7 @@ export default function LeaderboardScreen() {
         <StatusBar barStyle="dark-content" backgroundColor="#F2F3F7" />
         {renderHeader()}
         <View style={styles.emptyBox}>
-          <Image source={{ uri: LB_TROPHY_LOGO }} style={styles.emptyLogo} resizeMode="contain" />
+          <Image source={LB_TROPHY_LOGO} style={styles.emptyLogo} resizeMode="contain" />
           <Text style={styles.emptyTitle}>No scores yet</Text>
           <Text style={styles.emptySub}>Play games to appear on the leaderboard</Text>
         </View>

@@ -40,7 +40,7 @@ const generateRefreshToken = (userId) => {
       expiresIn:
         process.env.JWT_REFRESH_EXPIRY ||
         process.env.REFRESH_TOKEN_EXPIRE ||
-        '7d',
+        '365d',
     }
   );
 };

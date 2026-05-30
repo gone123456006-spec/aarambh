@@ -45,13 +45,14 @@ const TAB_BAR_CONTENT_HEIGHT = 56;
 
 /** Shared tab bar style — keep in sync with app/(tabs)/_layout.tsx */
 export function getDefaultTabBarStyle(bottomInset: number) {
+  const inset = Platform.OS === 'android' ? Math.max(bottomInset, 0) : bottomInset;
   return {
     display: 'flex' as const,
     borderTopWidth: 1,
     borderTopColor: '#E8EAED',
     backgroundColor: '#FFFFFF',
-    height: TAB_BAR_CONTENT_HEIGHT + bottomInset,
-    paddingBottom: bottomInset,
+    height: TAB_BAR_CONTENT_HEIGHT + inset,
+    paddingBottom: inset,
     paddingTop: 8,
     opacity: 1,
     elevation: 12,

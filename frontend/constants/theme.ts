@@ -37,10 +37,14 @@ export const AppUI = {
   textTertiary: '#9CA3AF',
   accent: '#e60000',
   accentGlow: 'rgba(230, 0, 0, 0.12)',
-  /** Samsung One UI — home hero (matches status bar, fades to white) */
-  homeHeroTop: '#F2F3F7',
-  homeHeroMid: '#F7F8FA',
+  /** Home hero — soft English-learning gradient (navbar → Chat with Random) */
+  homeHeroTop: '#EDE9FE',
+  homeHeroMid: '#EDE9FE',
+  homeHeroLower: '#DBEAFE',
+  homeHeroFade: '#F0F9FF',
   homeHeroBottom: '#FFFFFF',
+  homeHeroGradient: ['#EDE9FE', '#DBEAFE', '#E0F2FE', '#F0F9FF', '#FFFFFF'] as const,
+  homeHeroGradientLocations: [0, 0.28, 0.52, 0.8, 1] as const,
   divider: 'rgba(0,0,0,0.06)',
   shadow: '#000000',
 };

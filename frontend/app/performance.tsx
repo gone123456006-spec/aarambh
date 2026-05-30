@@ -27,6 +27,7 @@ import { COURSE_DATA, LevelId } from '@/constants/courseData';
 import { CourseProgressCard } from '@/components/CourseProgressCard';
 import { GameId, loadAllGameProgress } from '@/utils/gameProgress';
 import { loadAllGameStats, getTotals, GameStats } from '@/utils/gameStats';
+import { Icons3D } from '@/constants/homeIcons';
 import {
   getOverallProgress,
   getLastLessonTitle,
@@ -66,16 +67,16 @@ const cardShadow = Platform.select({
   default: {},
 });
 
-const LEVEL_3D_ICONS: Record<LevelId, string> = {
-  beginner: 'https://img.icons8.com/3d-fluency/48/seedling.png',
-  intermediate: 'https://img.icons8.com/3d-fluency/48/graduation-cap.png',
-  advanced: 'https://img.icons8.com/3d-fluency/48/medal2.png',
+const LEVEL_3D_ICONS: Record<LevelId, number> = {
+  beginner: Icons3D.seedling,
+  intermediate: Icons3D.graduationCap,
+  advanced: Icons3D.medal,
 };
 
 const GAME_LIST: {
   id: GameId;
   title: string;
-  imageUrl: string;
+  image: number;
   bg: string;
   totalLevels: number;
   scored: boolean;
@@ -83,7 +84,7 @@ const GAME_LIST: {
   {
     id: 'quiz',
     title: 'Word Quiz',
-    imageUrl: 'https://img.icons8.com/3d-fluency/48/help.png',
+    image: Icons3D.help,
     bg: '#FFF5F5',
     totalLevels: QUIZ_LEVEL_COUNT,
     scored: true,
@@ -91,7 +92,7 @@ const GAME_LIST: {
   {
     id: 'scramble',
     title: 'Word Scramble',
-    imageUrl: 'https://img.icons8.com/3d-fluency/48/puzzle.png',
+    image: Icons3D.puzzle,
     bg: '#F3F0FF',
     totalLevels: SCRAMBLE_LEVEL_COUNT,
     scored: true,
@@ -99,7 +100,7 @@ const GAME_LIST: {
   {
     id: 'fill',
     title: 'Fill in the Blanks',
-    imageUrl: 'https://img.icons8.com/3d-fluency/48/pencil.png',
+    image: Icons3D.pencil,
     bg: '#ECFDF3',
     totalLevels: FILL_BLANK_LEVEL_COUNT,
     scored: true,
@@ -107,7 +108,7 @@ const GAME_LIST: {
   {
     id: 'flash',
     title: 'Flashcards',
-    imageUrl: 'https://img.icons8.com/3d-fluency/48/cards.png',
+    image: Icons3D.cards,
     bg: '#E8F1FE',
     totalLevels: FLASHCARD_LEVEL_COUNT,
     scored: false,
@@ -265,7 +266,7 @@ function GameListItem({
     <>
       <View style={styles.listRow}>
         <View style={[styles.listIcon, { backgroundColor: game.bg }]}>
-          <Image source={{ uri: game.imageUrl }} style={styles.listIconImg} resizeMode="contain" />
+          <Image source={game.image} style={styles.listIconImg} resizeMode="contain" />
         </View>
         <View style={styles.listBody}>
           <View style={styles.listTop}>
@@ -307,14 +308,14 @@ function CourseLevelListItem({
   isLast: boolean;
 }) {
   const percent = Math.round(progress * 100);
-  const levelIconUrl = LEVEL_3D_ICONS[level.id];
+  const levelIcon = LEVEL_3D_ICONS[level.id];
 
   return (
     <>
       <View style={[styles.listRow, !unlocked && styles.listRowLocked]}>
         <View style={[styles.listIcon, { backgroundColor: `${level.color[0]}18` }]}>
           <Image
-            source={{ uri: levelIconUrl }}
+            source={levelIcon}
             style={[styles.listIconImg, !unlocked && styles.listIconLocked]}
             resizeMode="contain"
           />

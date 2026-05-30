@@ -4,6 +4,7 @@ const Message = require('../models/Message');
 const ChatSession = require('../models/ChatSession');
 const chatService = require('../services/chatService');
 const { createNotification } = require('../services/notificationService');
+const { validateChatMessage } = require('../utils/chatMessageValidation');
 
 const emitMatchPair = async (socket, peerSocket, sessionId, userId, peerUserId) => {
   const [peerForSocket, peerForPeerSocket] = await Promise.all([
@@ -103,11 +104,22 @@ const configureChatSocket = (io) => {
     socket.on('message:send', async ({ sessionId, text, clientId }) => {
       if (!sessionId || !text) return;
 
+      const trimmed = String(text).trim();
+      const validation = validateChatMessage(trimmed);
+      if (!validation.valid) {
+        socket.emit('message:rejected', {
+          clientId: clientId || null,
+          reason: validation.reason,
+          message: validation.message,
+        });
+        return;
+      }
+
       try {
         const message = new Message({
           chatSession: sessionId,
           sender: userId,
-          text: text.trim(),
+          text: trimmed,
         });
         await message.save();
 

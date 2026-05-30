@@ -8,6 +8,11 @@
     "scheme": "ohms",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/ohms-logo-mark.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#5c0000"
+    },
     "ios": {
       "supportsTablet": true,
       "requireFullScreen": true,
@@ -32,6 +37,10 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ]
+    },
+    "androidNavigationBar": {
+      "backgroundColor": "#FFFFFF",
+      "barStyle": "dark-content"
     },
     "web": {
       "output": "static",
@@ -65,12 +74,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/aarambh-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/ohms-logo-mark.png",
+          "imageWidth": 180,
           "resizeMode": "contain",
-          "backgroundColor": "#e60000",
+          "backgroundColor": "#5c0000",
           "dark": {
-            "backgroundColor": "#1a1a1a"
+            "backgroundColor": "#5c0000"
           }
         }
       ],
