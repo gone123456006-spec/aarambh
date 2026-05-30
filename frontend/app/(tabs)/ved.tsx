@@ -17,6 +17,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { KeyboardStickyView, useKeyboardHandler } from 'react-native-keyboard-controller';
 import { runOnJS } from 'react-native-reanimated';
 import { ASSISTANT_NAME, VED_FAQ, VED_WELCOME, getVedReply } from '@/constants/vedFaq';
+import { getAndroidHeaderCompactStyle } from '@/utils/safeAreaInsets';
 
 type ChatMessage = {
   id: string;
@@ -179,10 +180,14 @@ export default function VedScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={UI.bg}
+        translucent={Platform.OS === 'android'}
+      />
 
-      <SafeAreaView edges={['top']} style={styles.safeTop}>
-        <View style={styles.navBar}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeTop}>
+        <View style={[styles.navBar, getAndroidHeaderCompactStyle()]}>
           <Pressable
             onPress={() => router.navigate('/(tabs)/')}
             style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
@@ -318,7 +323,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: UI.bg,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   safeTop: {
     backgroundColor: UI.bg,
@@ -327,7 +331,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingTop: Platform.OS === 'android' ? 2 : 0,
+    paddingBottom: Platform.OS === 'android' ? 8 : 12,
     gap: 12,
   },
   backBtn: {

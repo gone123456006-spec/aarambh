@@ -16,6 +16,7 @@
 
 const HORIZONTAL_PADDING = 16;
 const MAX_CARD_WIDTH = 520;
+const TABLET_MAX_CARD_WIDTH = 680;
 const GRADIENT_ASPECT = 2.2; // cardWidth / gradientHeight (smaller = taller)
 const MIN_GRADIENT_HEIGHT = 130;
 const MAX_GRADIENT_HEIGHT = 204;
@@ -46,7 +47,8 @@ export type HomeBannerLayout = {
 export function getHomeBannerLayout(screenWidth: number): HomeBannerLayout {
   const slideWidth = screenWidth;
   const rawCardWidth = screenWidth - HORIZONTAL_PADDING * 2;
-  const cardWidth = Math.min(rawCardWidth, MAX_CARD_WIDTH);
+  const maxCard = screenWidth >= 600 ? TABLET_MAX_CARD_WIDTH : MAX_CARD_WIDTH;
+  const cardWidth = Math.min(rawCardWidth, maxCard);
   const cardOffsetX = HORIZONTAL_PADDING + (rawCardWidth - cardWidth) / 2;
 
   const gradientHeight = clamp(

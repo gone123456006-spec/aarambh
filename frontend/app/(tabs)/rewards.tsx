@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useRouter, useFocusEffect } from 'expo-router';
 import DailyWordCard from '@/components/DailyWordCard';
+import { getAndroidHeaderCompactStyle } from '@/utils/safeAreaInsets';
 import { DAILY_WORD_TOTAL_DAYS } from '@/constants/dailyWords';
 import {
   DAILY_WORD_POINTS,
@@ -112,17 +113,22 @@ export default function RewardsScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
-      <SafeAreaView edges={['top']} style={styles.safeTop} />
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={UI.bg}
+        translucent={Platform.OS === 'android'}
+      />
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.headerSafeArea}>
+        <View style={[styles.pageHeader, getAndroidHeaderCompactStyle()]}>
+          <Text style={styles.pageTitle}>Rewards</Text>
+        </View>
+      </SafeAreaView>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: tabBarHeight + 28 }]}
       >
-        <Text style={styles.pageTitle}>Rewards</Text>
-        <Text style={styles.pageSubtitle}>Earn points daily and complete your vocabulary journey</Text>
-
         {/* Hero — Samsung-style summary widget */}
         <View style={styles.heroCard}>
           <LinearGradient
@@ -282,30 +288,27 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: UI.bg,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  safeTop: {
+  headerSafeArea: {
     backgroundColor: UI.bg,
+  },
+  pageHeader: {
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'android' ? 2 : 8,
+    paddingBottom: Platform.OS === 'android' ? 12 : 16,
   },
   scroll: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 0,
   },
   pageTitle: {
     fontSize: 32,
     fontWeight: '700',
     color: UI.text,
     letterSpacing: -0.8,
-  },
-  pageSubtitle: {
-    fontSize: 15,
-    lineHeight: 22,
-    color: UI.textSecondary,
-    marginTop: 6,
-    marginBottom: 20,
   },
   heroCard: {
     borderRadius: 28,

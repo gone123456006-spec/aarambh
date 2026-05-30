@@ -53,7 +53,7 @@ export const TERMS_SECTIONS: TermsSection[] = [
   },
   {
     title: '11. Permissions',
-    body: `The App requests permissions only when needed: Internet (courses, chat, login); Camera and microphone (video/voice practice you start); Photos (images you choose to share); Notifications (optional reminders). Each permission is explained when your device asks. You can revoke permissions in Settings. Denying permissions may limit related features. This matches Google Play permission and Data safety requirements.`,
+    body: `The App requests permissions only when needed: Internet (courses, chat, login); Camera and microphone (video/voice practice you start). Each permission is explained when your device asks. You can revoke permissions in Settings. Denying permissions may limit related features.`,
   },
   {
     title: '12. Disclaimer of Warranties',
@@ -89,4 +89,4 @@ export const TERMS_SECTIONS: TermsSection[] = [
   },
 ];
 
-export const TERMS_LAST_UPDATED = '26 May 2026';
+export const TERMS_LAST_UPDATED = '28 May 2026';

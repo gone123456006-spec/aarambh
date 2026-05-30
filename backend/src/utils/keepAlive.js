@@ -1,12 +1,22 @@
 const http = require('http');
 const https = require('https');
 
-const PING_INTERVAL_MS = 60 * 1000;
+const DEFAULT_PUBLIC_API = 'https://aarambh-api.onrender.com';
 const HEALTH_PATH = '/health';
 const PING_TIMEOUT_MS = 15000;
+const DEFAULT_INTERVAL_MS = 60 * 1000;
+const MIN_INTERVAL_MS = 30 * 1000;
+
+function getPingIntervalMs() {
+  const raw = Number(process.env.KEEP_ALIVE_INTERVAL_MS);
+  if (!Number.isFinite(raw) || raw < MIN_INTERVAL_MS) {
+    return DEFAULT_INTERVAL_MS;
+  }
+  return raw;
+}
 
 /**
- * Resolve the URL used for self-ping (Render public URL preferred).
+ * Resolve the URL used for self-ping (public HTTPS URL — required for Render free tier).
  */
 function resolvePingUrl() {
   const base =
@@ -20,8 +30,7 @@ function resolvePingUrl() {
   }
 
   if (process.env.NODE_ENV === 'production') {
-    const port = process.env.PORT || 5000;
-    return `http://127.0.0.1:${port}${HEALTH_PATH}`;
+    return `${DEFAULT_PUBLIC_API}${HEALTH_PATH}`;
   }
 
   return null;
@@ -53,30 +62,43 @@ function pingOnce(url) {
 
 /**
  * Sends periodic GET /health requests so Render (and similar hosts) do not idle-spin down.
- * Does not alter routes, sockets, or other application logic.
  */
 function startKeepAlive() {
-  if (!shouldEnableKeepAlive()) return null;
+  if (!shouldEnableKeepAlive()) {
+    console.log('[keep-alive] disabled (set KEEP_ALIVE_ENABLED=true on Render to enable)');
+    return null;
+  }
 
   const url = resolvePingUrl();
-  if (!url) return null;
+  if (!url) {
+    console.warn('[keep-alive] no public URL — set KEEP_ALIVE_URL or RENDER_EXTERNAL_URL');
+    return null;
+  }
+
+  const intervalMs = getPingIntervalMs();
+  let failStreak = 0;
 
   const runPing = async () => {
     const ok = await pingOnce(url);
-    if (!ok) {
-      console.warn(`[keep-alive] ping failed → ${url}`);
+    if (ok) {
+      failStreak = 0;
+      return;
+    }
+    failStreak += 1;
+    if (failStreak === 1 || failStreak % 5 === 0) {
+      console.warn(`[keep-alive] ping failed (${failStreak}x) → ${url}`);
     }
   };
 
   runPing();
 
-  const timer = setInterval(runPing, PING_INTERVAL_MS);
+  const timer = setInterval(runPing, intervalMs);
   if (typeof timer.unref === 'function') {
     timer.unref();
   }
 
   console.log(
-    `[keep-alive] active — pinging every ${PING_INTERVAL_MS / 1000}s → ${url}`
+    `[keep-alive] active — pinging every ${intervalMs / 1000}s → ${url}`
   );
 
   return timer;
@@ -91,5 +113,6 @@ function stopKeepAlive(timer) {
 module.exports = {
   startKeepAlive,
   stopKeepAlive,
-  PING_INTERVAL_MS,
+  PING_INTERVAL_MS: DEFAULT_INTERVAL_MS,
+  getPingIntervalMs,
 };

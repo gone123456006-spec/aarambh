@@ -32,8 +32,8 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
     body: `We use reasonable measures to protect your data. No method is 100% secure. We retain information while your account is active and as needed for legal or operational purposes.`,
   },
   {
-    title: '8. Your choices',
-    body: `You can update profile details in the App, deny camera/microphone/photo permissions in device settings, and contact us to request account-related help. Uninstalling the App stops new data collection from that device.`,
+    title: '8. Your choices and account deletion',
+    body: `You can update profile details in the App, deny camera/microphone permissions in device settings, and delete your account from Contact Us in the menu. Deletion removes your profile, progress, chat history, and associated server data. You may also email ${APP_INFO.email} from your registered address to request deletion.`,
   },
   {
     title: '9. Google Play',
@@ -45,4 +45,4 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
   },
 ];
 
-export const PRIVACY_LAST_UPDATED = '26 May 2026';
+export const PRIVACY_LAST_UPDATED = '28 May 2026';

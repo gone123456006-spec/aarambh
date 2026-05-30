@@ -19,6 +19,10 @@ services:
         value: '*'
       - key: KEEP_ALIVE_ENABLED
         value: 'true'
+      - key: KEEP_ALIVE_URL
+        value: https://aarambh-api.onrender.com
+      - key: KEEP_ALIVE_INTERVAL_MS
+        value: '60000'
       # --- Set these in Render Dashboard (Secrets) — sync: false ---
       - key: MONGODB_URI
         sync: false

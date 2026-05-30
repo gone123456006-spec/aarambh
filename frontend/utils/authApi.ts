@@ -79,3 +79,8 @@ export async function updateUserProfile(body: {
   });
   return res.data;
 }
+
+/** Permanently delete the signed-in account (Google Play account deletion requirement). */
+export async function deleteMyAccount(): Promise<void> {
+  await apiFetch('/api/users/me', { method: 'DELETE' });
+}

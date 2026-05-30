@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Image,
-  useWindowDimensions,
   Platform,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
@@ -22,6 +21,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { FeatureCardImages } from '@/constants/featureCardImages';
 import { AppUI } from '@/constants/theme';
+import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 
 type FeatureCard = {
   id: string;
@@ -161,10 +161,11 @@ function FeatureCarouselCard({
 export default function AppFeatureCards() {
   const router = useRouter();
   const tabBarHeight = useBottomTabBarHeight();
-  const { width: screenWidth } = useWindowDimensions();
-  const cardWidth = Math.min(272, Math.round(screenWidth * 0.74));
+  const { width: screenWidth, isTablet, contentWidth } = useResponsiveLayout();
+  const layoutWidth = isTablet ? contentWidth : screenWidth;
+  const cardWidth = Math.min(isTablet ? 320 : 272, Math.round(layoutWidth * 0.74));
   const snapInterval = cardWidth + CARD_GAP;
-  const sideInset = Math.max(HORIZONTAL_PADDING, (screenWidth - cardWidth) / 2);
+  const sideInset = Math.max(HORIZONTAL_PADDING, (layoutWidth - cardWidth) / 2);
   const scrollX = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({

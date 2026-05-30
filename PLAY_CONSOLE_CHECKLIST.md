@@ -11,8 +11,15 @@ Use this checklist before uploading `com.ohms.english` to Google Play Console.
 | Render API (after redeploy) | `https://aarambh-api.onrender.com/privacy-policy` |
 | Support email | `support@ohmsapp.com` |
 
-**Important:** Enable GitHub Pages once: repo **Settings → Pages → Build and deployment → GitHub Actions**.  
-Also redeploy Render manually if you want the API URLs to work (Dashboard → **Manual Deploy**).
+**Important — enable hosting (pick one):**
+
+1. **GitHub Pages (recommended for Play Console now):**  
+   GitHub repo → **Settings → Pages** → Build from branch **main** → folder **`/docs`** → Save.  
+   After 1–2 minutes open:  
+   `https://gone123456006-spec.github.io/aarambh/privacy-policy.html`
+
+2. **Render API (optional):** Dashboard → **aarambh-api** → **Manual Deploy** → Deploy latest commit.  
+   Then: `https://aarambh-api.onrender.com/privacy-policy`
 
 ---
 

@@ -1,21 +1,26 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { enableFreeze, enableScreens } from 'react-native-screens';
 import 'react-native-reanimated';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import {
   stackFadeScreen,
+  stackModalScreen,
   stackScreenOptions,
   stackSlideScreen,
 } from '@/constants/navigationTransitions';
+import { startApiKeepAlive } from '@/utils/checkApiHealth';
 
 enableScreens(true);
-enableFreeze(true);
+enableFreeze(false);
 
 export const unstable_settings = {
   initialRouteName: 'index',
@@ -24,11 +29,22 @@ export const unstable_settings = {
 export default function RootLayout() {
   const colorScheme = useColorScheme();
 
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      void SystemUI.setBackgroundColorAsync('#FFFFFF');
+    }
+  }, []);
+
+  useEffect(() => {
+    return startApiKeepAlive(60_000);
+  }, []);
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <KeyboardProvider preload={false}>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <Stack screenOptions={stackScreenOptions}>
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+        <KeyboardProvider preload={false}>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <Stack screenOptions={stackScreenOptions}>
             <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="intro" options={stackFadeScreen} />
             <Stack.Screen name="login" options={stackSlideScreen} />
@@ -45,9 +61,7 @@ export default function RootLayout() {
             <Stack.Screen
               name="modal"
               options={{
-                presentation: 'modal',
-                animation: 'slide_from_bottom',
-                animationDuration: 300,
+                ...stackModalScreen,
                 title: 'Modal',
               }}
             />
@@ -56,5 +70,6 @@ export default function RootLayout() {
         </ThemeProvider>
       </KeyboardProvider>
     </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

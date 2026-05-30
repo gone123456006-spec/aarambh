@@ -40,6 +40,7 @@ import { MatchmakingScene } from '@/components/MatchmakingScene';
 import { ChatTypingBubble } from '@/components/ChatTypingBubble';
 import { AppUI, cardShadow } from '@/constants/theme';
 import { validateChatMessage, isChatMessageBlocked } from '@/utils/chatMessageValidation';
+import { getNavBarTopPadding } from '@/utils/safeAreaInsets';
 
 const UI = AppUI;
 const BUBBLE_SELF_BG = '#5b9bd5';
@@ -524,6 +525,8 @@ export default function RandomChatScreen() {
     </>
   );
 
+  const navBarTopPadding = getNavBarTopPadding(insets);
+
   const renderNavHeader = (
     title: string,
     subtitle: string,
@@ -537,7 +540,7 @@ export default function RandomChatScreen() {
   ) => {
     if (options?.backOnly) {
       return (
-        <View style={[styles.navBar, styles.navBarBackOnly, { paddingTop: insets.top }]}>
+        <View style={[styles.navBar, styles.navBarBackOnly, { paddingTop: navBarTopPadding }]}>
           <Pressable
             onPress={handleBack}
             style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
@@ -551,7 +554,7 @@ export default function RandomChatScreen() {
     }
 
     return (
-    <View style={[styles.navBar, { paddingTop: insets.top }]}>
+    <View style={[styles.navBar, { paddingTop: navBarTopPadding }]}>
       <Pressable
         onPress={handleBack}
         style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
@@ -606,7 +609,11 @@ export default function RandomChatScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="dark-content" backgroundColor={AppUI.bg} />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={AppUI.bg}
+          translucent={Platform.OS === 'android'}
+        />
         {renderNavHeader('Chat in English', 'Connection issue')}
         <View style={styles.centeredBody}>
           <Feather name="wifi-off" size={48} color="#e60000" />
@@ -631,7 +638,11 @@ export default function RandomChatScreen() {
     return (
       <View style={styles.container}>
         <Stack.Screen options={{ headerShown: false }} />
-        <StatusBar barStyle="dark-content" backgroundColor={AppUI.bg} />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor={AppUI.bg}
+          translucent={Platform.OS === 'android'}
+        />
         {renderNavHeader('', '', { backOnly: true })}
         <View style={styles.matchmakingBody}>
           <MatchmakingScene />
@@ -645,7 +656,11 @@ export default function RandomChatScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={UI.bg}
+        translucent={Platform.OS === 'android'}
+      />
 
       {renderNavHeader(
         peer.name,
@@ -719,19 +734,18 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: UI.bg,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   chatKeyboardRoot: { flex: 1, flexDirection: 'column' },
   navBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingBottom: Platform.OS === 'android' ? 8 : 12,
     gap: 12,
     backgroundColor: UI.bg,
   },
   navBarBackOnly: {
-    paddingBottom: 8,
+    paddingBottom: Platform.OS === 'android' ? 4 : 8,
   },
   backBtn: {
     width: 40,

@@ -1,10 +1,14 @@
-import React, { useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, Alert, ActivityIndicator } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { ComponentProps } from 'react';
+import { useRouter } from 'expo-router';
 import LegalPageLayout, { legalStyles } from '@/components/LegalPageLayout';
 import { APP_INFO, phoneTelUri, whatsappUri } from '@/constants/appInfo';
+import { PLAY_STORE_URLS } from '@/constants/playStore';
 import { AppUI } from '@/constants/theme';
+import { deleteMyAccount } from '@/utils/authApi';
+import { performLogout } from '@/utils/session';
 
 const ROW_ICON = { strokeWidth: 3 };
 
@@ -13,17 +17,23 @@ type ContactRowProps = {
   label: string;
   value: string;
   onPress: () => void;
+  danger?: boolean;
   isLast?: boolean;
 };
 
-function ContactRow({ icon, label, value, onPress, isLast }: ContactRowProps) {
+function ContactRow({ icon, label, value, onPress, danger, isLast }: ContactRowProps) {
   return (
     <>
       <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.65}>
-        <Feather name={icon} size={22} color={AppUI.text} {...ROW_ICON} />
+        <Feather
+          name={icon}
+          size={22}
+          color={danger ? AppUI.accent : AppUI.text}
+          {...ROW_ICON}
+        />
         <View style={styles.rowText}>
-          <Text style={styles.rowLabel}>{label}</Text>
-          <Text style={styles.rowValue}>{value}</Text>
+          <Text style={[styles.rowLabel, danger && styles.rowLabelDanger]}>{label}</Text>
+          <Text style={[styles.rowValue, danger && styles.rowValueDanger]}>{value}</Text>
         </View>
         <Feather name="chevron-right" size={20} color={AppUI.textTertiary} strokeWidth={2} />
       </TouchableOpacity>
@@ -33,6 +43,9 @@ function ContactRow({ icon, label, value, onPress, isLast }: ContactRowProps) {
 }
 
 export default function ContactUsScreen() {
+  const router = useRouter();
+  const [deleting, setDeleting] = useState(false);
+
   const openUrl = useCallback(async (url: string, failMsg: string) => {
     try {
       const can = await Linking.canOpenURL(url);
@@ -56,6 +69,40 @@ export default function ContactUsScreen() {
       `mailto:${APP_INFO.email}?subject=${encodeURIComponent(`${APP_INFO.appName} App Support`)}`,
       'Could not open your email app.'
     );
+
+  const openPrivacyWeb = () =>
+    openUrl(PLAY_STORE_URLS.privacyPolicy, 'Could not open the privacy policy page.');
+
+  const confirmDeleteAccount = () => {
+    Alert.alert(
+      'Delete account?',
+      'This permanently removes your profile, progress, chat history, and rewards. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete account',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setDeleting(true);
+              try {
+                await deleteMyAccount();
+                await performLogout();
+                router.replace('/intro');
+              } catch {
+                Alert.alert(
+                  'Could not delete account',
+                  `Sign in and try again, or email ${APP_INFO.email} from your registered Gmail.`
+                );
+              } finally {
+                setDeleting(false);
+              }
+            })();
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <LegalPageLayout
@@ -85,9 +132,31 @@ export default function ContactUsScreen() {
           label="Email"
           value={APP_INFO.email}
           onPress={openEmail}
+        />
+        <ContactRow
+          icon="shield"
+          label="Privacy policy (web)"
+          value="aarambh-api.onrender.com/privacy-policy"
+          onPress={openPrivacyWeb}
           isLast
         />
       </View>
+
+      <TouchableOpacity
+        style={[styles.deleteBtn, deleting && styles.deleteBtnDisabled]}
+        onPress={confirmDeleteAccount}
+        disabled={deleting}
+        activeOpacity={0.7}
+      >
+        {deleting ? (
+          <ActivityIndicator color={AppUI.accent} />
+        ) : (
+          <>
+            <Feather name="trash-2" size={18} color={AppUI.accent} strokeWidth={2.5} />
+            <Text style={styles.deleteBtnText}>Delete my account</Text>
+          </>
+        )}
+      </TouchableOpacity>
 
       <View style={styles.noteBox}>
         <Feather name="info" size={20} color={AppUI.textSecondary} strokeWidth={2.5} />
@@ -124,10 +193,35 @@ const styles = StyleSheet.create({
     color: AppUI.textTertiary,
     marginBottom: 2,
   },
+  rowLabelDanger: {
+    color: AppUI.accent,
+  },
   rowValue: {
     fontSize: 16,
     fontWeight: '400',
     color: AppUI.text,
+  },
+  rowValueDanger: {
+    color: AppUI.accent,
+  },
+  deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: AppUI.accent,
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  deleteBtnDisabled: {
+    opacity: 0.6,
+  },
+  deleteBtnText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: AppUI.accent,
   },
   noteBox: {
     flexDirection: 'row',

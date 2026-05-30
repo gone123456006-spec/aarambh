@@ -8,7 +8,6 @@ import {
   Image,
   Platform,
   StatusBar,
-  useWindowDimensions,
   Alert,
   Linking,
 } from 'react-native';
@@ -22,7 +21,10 @@ import Sidebar from '@/components/Sidebar';
 import { HomeMenuIcon } from '@/components/HomeHeaderIcons';
 import DailyWordHomeTeaser from '@/components/DailyWordHomeTeaser';
 import AppFeatureCards from '@/components/AppFeatureCards';
+import ResponsiveContent from '@/components/ResponsiveContent';
 import { getHomeBannerLayout } from '@/utils/homeBannerLayout';
+import { getAndroidHeaderCompactStyle } from '@/utils/safeAreaInsets';
+import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { APP_INFO, phoneTelUri } from '@/constants/appInfo';
 import { AppUI, cardShadow } from '@/constants/theme';
 
@@ -109,7 +111,7 @@ const GREETING_TEXTURE = [
 ];
 
 export default function HomeScreen() {
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, contentWidth, isTablet } = useResponsiveLayout();
   const bannerLayout = getHomeBannerLayout(screenWidth);
   const [isSidebarVisible, setSidebarVisible] = useState(false);
   const [activeBannerIndex, setActiveBannerIndex] = useState(0);
@@ -176,11 +178,15 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="dark-content" backgroundColor={AppUI.homeHeroGradient[0]} />
-      <SafeAreaView edges={['top']} style={styles.statusBarBand} />
-      <SafeAreaView style={styles.safeFill} edges={['left', 'right']}>
-      <View style={styles.stickyHeaderWrap}>
-        <View style={styles.stickyHeader}>
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={AppUI.homeHeroGradient[0]}
+        translucent={Platform.OS === 'android'}
+      />
+      <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
+      <ResponsiveContent>
+      <View style={[styles.stickyHeaderWrap, getAndroidHeaderCompactStyle()]}>
+        <View style={[styles.stickyHeader, isTablet && { maxWidth: contentWidth, alignSelf: 'center', width: '100%' }]}>
         <TouchableOpacity
           style={styles.headerMenuBtn}
           onPress={() => setSidebarVisible(true)}
@@ -232,7 +238,10 @@ export default function HomeScreen() {
         </View>
       </View>
       </View>
+      </ResponsiveContent>
+      </SafeAreaView>
 
+      <SafeAreaView style={styles.safeFill} edges={['left', 'right']}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         style={styles.scroll}
@@ -389,6 +398,7 @@ export default function HomeScreen() {
         </View>
 
         {/* Section 2 — Leaderboard, Performance, Learning English, and below */}
+        <ResponsiveContent>
         <View style={styles.progressSection}>
         <View style={styles.quickActionsContainer}>
           {QUICK_ACTIONS.map((action) => (
@@ -498,8 +508,10 @@ export default function HomeScreen() {
         </View>
 
           <DailyWordHomeTeaser />
-          <AppFeatureCards />
         </View>
+        </ResponsiveContent>
+
+          <AppFeatureCards />
 
       </ScrollView>
 
@@ -516,9 +528,8 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: AppUI.bg,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  statusBarBand: {
+  headerSafeArea: {
     backgroundColor: AppUI.homeHeroGradient[0],
   },
   safeFill: {
@@ -552,7 +563,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: Platform.OS === 'android' ? 2 : 5,
     gap: 6,
     backgroundColor: AppUI.homeHeroGradient[0],
   },

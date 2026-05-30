@@ -36,6 +36,7 @@ import {
   isLevelUnlocked,
   loadCourseProgress,
 } from '@/utils/courseProgress';
+import { getAndroidHeaderCompactStyle } from '@/utils/safeAreaInsets';
 
 type PerformanceCategory = 'games' | 'courses';
 
@@ -408,10 +409,14 @@ export default function PerformanceScreen() {
   return (
     <View style={styles.root}>
       <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="dark-content" backgroundColor={UI.bg} />
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={UI.bg}
+        translucent={Platform.OS === 'android'}
+      />
 
-      <SafeAreaView edges={['top']} style={styles.safeTop}>
-        <View style={styles.navBar}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeTop}>
+        <View style={[styles.navBar, getAndroidHeaderCompactStyle()]}>
           <Pressable
             onPress={() => router.back()}
             style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
@@ -526,7 +531,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: UI.bg,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   safeTop: {
     backgroundColor: UI.bg,
@@ -535,9 +539,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 12,
+    paddingTop: Platform.OS === 'android' ? 2 : 0,
+    paddingBottom: Platform.OS === 'android' ? 8 : 12,
     gap: 12,
-    minHeight: 48,
+    minHeight: Platform.OS === 'android' ? 44 : 48,
   },
   backBtn: {
     width: 40,

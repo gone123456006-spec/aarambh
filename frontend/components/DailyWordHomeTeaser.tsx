@@ -1,5 +1,5 @@
 import React, { memo, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, useWindowDimensions } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -17,14 +17,14 @@ import { DAILY_WORD_POINTS } from '@/utils/dailyWordRewards';
 import { useDailyRewardClaimed } from '@/hooks/use-daily-reward-claimed';
 import { AppUI } from '@/constants/theme';
 
+/** Decorative icons — kept on the left/middle so the right action column never overflows. */
 const WORD_TEXTURE = [
-  { kind: '3d' as const, source: Icons3D.pencil, size: 32, top: 8, left: 10, rotate: '-12deg', opacity: 0.18 },
-  { kind: '3d' as const, source: Icons3D.cards, size: 30, top: 6, right: 14, rotate: '10deg', opacity: 0.16 },
-  { kind: '3d' as const, source: Icons3D.graduationCap, size: 34, bottom: 10, left: 24, rotate: '8deg', opacity: 0.15 },
-  { kind: '3d' as const, source: Icons3D.help, size: 28, bottom: 12, right: 36, rotate: '-6deg', opacity: 0.14 },
-  { kind: 'icon' as const, name: 'library-outline' as const, size: 24, top: 36, right: 8, rotate: '6deg', opacity: 0.13, color: '#6366F1' },
-  { kind: 'icon' as const, name: 'text-outline' as const, size: 22, bottom: 18, right: 10, rotate: '-8deg', opacity: 0.12, color: '#8B5CF6' },
-  { kind: 'icon' as const, name: 'create-outline' as const, size: 20, top: 14, left: 52, rotate: '4deg', opacity: 0.12, color: '#4F46E5' },
+  { kind: '3d' as const, source: Icons3D.pencil, size: 28, top: 8, left: 8, rotate: '-12deg', opacity: 0.16 },
+  { kind: '3d' as const, source: Icons3D.graduationCap, size: 30, top: 4, left: 52, rotate: '8deg', opacity: 0.14 },
+  { kind: '3d' as const, source: Icons3D.cards, size: 26, bottom: 10, left: 18, rotate: '10deg', opacity: 0.14 },
+  { kind: '3d' as const, source: Icons3D.help, size: 24, bottom: 8, left: 88, rotate: '-6deg', opacity: 0.12 },
+  { kind: 'icon' as const, name: 'library-outline' as const, size: 22, top: 34, left: 118, rotate: '6deg', opacity: 0.11, color: '#6366F1' },
+  { kind: 'icon' as const, name: 'create-outline' as const, size: 18, top: 12, left: 34, rotate: '4deg', opacity: 0.11, color: '#4F46E5' },
 ];
 
 type WordTextureItem = (typeof WORD_TEXTURE)[number];
@@ -86,8 +86,13 @@ const WordTextureIcon = memo(function WordTextureIcon({
 
 export default function DailyWordHomeTeaser() {
   const router = useRouter();
+  const { width: screenWidth } = useWindowDimensions();
   const word = getDailyWordForToday();
   const { unclaimed } = useDailyRewardClaimed();
+  const compact = screenWidth < 380;
+  const hintText = unclaimed
+    ? `Reward waiting — claim +${DAILY_WORD_POINTS} pts in Rewards`
+    : 'Reward claimed — tap to review';
 
   return (
     <TouchableOpacity
@@ -100,7 +105,7 @@ export default function DailyWordHomeTeaser() {
         locations={[0, 0.55, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.gradient}
+        style={[styles.gradient, compact && styles.gradientCompact]}
       >
         <View style={styles.decorCircle} pointerEvents="none" />
         <View style={styles.textureLayer} pointerEvents="none">
@@ -112,14 +117,24 @@ export default function DailyWordHomeTeaser() {
         <View style={styles.contentRow}>
           <View style={styles.left}>
             <View style={styles.headingRow}>
-              <Text style={styles.heading}>Word of the Day</Text>
+              <Text style={[styles.heading, compact && styles.headingCompact]} numberOfLines={1}>
+                Word of the Day
+              </Text>
               {unclaimed ? <View style={styles.dot} /> : null}
             </View>
-            <Text style={styles.word}>{word.word}</Text>
-            <Text style={[styles.hint, unclaimed && styles.hintUnclaimed]}>
-              {unclaimed
-                ? `Reward waiting — claim +${DAILY_WORD_POINTS} pts in Rewards`
-                : 'Reward claimed — tap to review'}
+            <Text
+              style={[styles.word, compact && styles.wordCompact]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              {word.word}
+            </Text>
+            <Text
+              style={[styles.hint, unclaimed && styles.hintUnclaimed, compact && styles.hintCompact]}
+              numberOfLines={2}
+            >
+              {hintText}
             </Text>
           </View>
           <View style={styles.right}>
@@ -143,24 +158,32 @@ const styles = StyleSheet.create({
   wrap: {
     marginTop: 16,
     width: '100%',
+    overflow: 'hidden',
   },
   gradient: {
     minHeight: 118,
     paddingVertical: 16,
     paddingHorizontal: 16,
+    overflow: 'hidden',
+  },
+  gradientCompact: {
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    minHeight: 112,
   },
   decorCircle: {
     position: 'absolute',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     backgroundColor: 'rgba(99, 102, 241, 0.08)',
-    top: -30,
-    right: 20,
+    top: -28,
+    left: -18,
   },
   textureLayer: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
+    right: 72,
   },
   contentRow: {
     flexDirection: 'row',
@@ -169,7 +192,8 @@ const styles = StyleSheet.create({
   },
   left: {
     flex: 1,
-    paddingRight: 12,
+    minWidth: 0,
+    paddingRight: 8,
   },
   headingRow: {
     flexDirection: 'row',
@@ -181,12 +205,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: AppUI.text,
     fontWeight: '700',
+    flexShrink: 1,
+  },
+  headingCompact: {
+    fontSize: 15,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     backgroundColor: AppUI.accent,
+    flexShrink: 0,
   },
   word: {
     fontSize: 28,
@@ -194,11 +223,20 @@ const styles = StyleSheet.create({
     color: AppUI.text,
     letterSpacing: -0.3,
   },
+  wordCompact: {
+    fontSize: 24,
+  },
   hint: {
     fontSize: 13,
+    lineHeight: 18,
     color: AppUI.textSecondary,
     fontWeight: '500',
     marginTop: 6,
+    flexShrink: 1,
+  },
+  hintCompact: {
+    fontSize: 12,
+    lineHeight: 16,
   },
   hintUnclaimed: {
     color: AppUI.accent,
@@ -207,7 +245,9 @@ const styles = StyleSheet.create({
   right: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    flexShrink: 0,
+    marginLeft: 4,
   },
   rewardIndicator: {
     flexDirection: 'row',

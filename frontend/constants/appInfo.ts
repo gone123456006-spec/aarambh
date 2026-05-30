@@ -4,13 +4,13 @@ export const APP_INFO = {
   companyName: "Ohm's",
   productLine: 'English Learning',
   tagline: 'Practice English with confidence',
-  version: '0.0.1',
+  version: '1.0.0',
   mobile: '6204111878',
   whatsapp: '6204111878',
   email: 'support@ohmsapp.com',
 };
 
-/** Sidebar / about — e.g. Ohm's : English Learning v0.0.1 */
+/** Sidebar / about — e.g. Ohm's : English Learning v1.0.0 */
 export function appVersionLabel(): string {
   return `${APP_INFO.appName} : ${APP_INFO.productLine} v${APP_INFO.version}`;
 }

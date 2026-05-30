@@ -22,7 +22,7 @@ import {
 import { isProfileCompleteUser } from '@/utils/profile';
 import { saveAuthSession, isLoggedInLocally } from '@/utils/authStorage';
 import { syncUserDataFromServer } from '@/utils/userDataSync';
-import { checkApiHealth } from '@/utils/checkApiHealth';
+import { warmApiServer } from '@/utils/checkApiHealth';
 
 type LoginStep = 'EMAIL_INPUT' | 'OTP_INPUT';
 
@@ -38,31 +38,11 @@ export default function LoginScreen() {
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [connectionWarning, setConnectionWarning] = useState('');
-  const [checkingConnection, setCheckingConnection] = useState(true);
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const runConnectionCheck = async () => {
-    setCheckingConnection(true);
-    setConnectionWarning('');
-    const result = await checkApiHealth();
-    setCheckingConnection(false);
-    if (!result.ok) {
-      setConnectionWarning(result.message);
-    }
-  };
-
   useEffect(() => {
-    let cancelled = false;
-    checkApiHealth().then((result) => {
-      if (cancelled) return;
-      setCheckingConnection(false);
-      if (!result.ok) setConnectionWarning(result.message);
-    });
-    return () => {
-      cancelled = true;
-    };
+    warmApiServer();
   }, []);
 
   useEffect(() => {
@@ -92,7 +72,7 @@ export default function LoginScreen() {
       setStep('OTP_INPUT');
       setOtp('');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to send OTP. Check backend & SMTP settings.');
+      setError(e instanceof Error ? e.message : 'Could not send OTP. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -174,20 +154,6 @@ export default function LoginScreen() {
         <View style={styles.titleContainer}>
           <Text style={styles.title}>{renderHeaderTitle()}</Text>
           <Text style={styles.subtitle}>{renderHeaderSubtitle()}</Text>
-          {checkingConnection ? (
-            <View style={styles.connectionRow}>
-              <ActivityIndicator size="small" color="#666666" />
-              <Text style={styles.connectionText}>Connecting to Ohm&apos;s servers…</Text>
-            </View>
-          ) : null}
-          {connectionWarning ? (
-            <View style={styles.warningBlock}>
-              <Text style={styles.warningText}>{connectionWarning}</Text>
-              <Pressable onPress={runConnectionCheck} disabled={checkingConnection}>
-                <Text style={styles.retryLink}>Retry connection</Text>
-              </Pressable>
-            </View>
-          ) : null}
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
@@ -313,30 +279,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#e60000',
     lineHeight: 20,
-  },
-  connectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
-  },
-  connectionText: {
-    fontSize: 14,
-    color: '#666666',
-  },
-  warningBlock: {
-    marginTop: 12,
-  },
-  warningText: {
-    fontSize: 14,
-    color: '#b45309',
-    lineHeight: 20,
-  },
-  retryLink: {
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#e60000',
   },
   inputContainer: {
     paddingHorizontal: 24,

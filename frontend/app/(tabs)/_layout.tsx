@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { isLoggedInLocally } from '@/utils/authStorage';
 import { ensureValidSession } from '@/utils/api';
+import { getTabBarBottomInset } from '@/utils/safeAreaInsets';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { RewardsTabIcon } from '@/components/RewardsTabIcon';
@@ -13,7 +14,9 @@ import { AppUI, Colors } from '@/constants/theme';
 import {
   getDefaultTabBarStyle,
   getHiddenTabBarStyle,
+  TAB_BAR_CONTENT_HEIGHT,
   tabScreenOptions,
+  NAV_TRANSITION_DEFER_MS,
 } from '@/constants/navigationTransitions';
 import { GameTabBarProvider, useGameTabBar } from '@/contexts/game-tab-bar-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -22,24 +25,28 @@ function TabNavigator() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
+  const bottomInset = getTabBarBottomInset(insets);
   const { hideTabBar } = useGameTabBar();
 
   useFocusEffect(
     useCallback(() => {
       let active = true;
-      (async () => {
-        const loggedIn = await isLoggedInLocally();
-        if (active && !loggedIn) {
-          router.replace('/intro');
-          return;
-        }
-        // Keep tokens fresh in background — never log out on refresh failure
-        if (active) {
-          await ensureValidSession();
-        }
-      })();
+      const timer = setTimeout(() => {
+        (async () => {
+          const loggedIn = await isLoggedInLocally();
+          if (active && !loggedIn) {
+            router.replace('/intro');
+            return;
+          }
+          if (active) {
+            await ensureValidSession();
+          }
+        })();
+      }, NAV_TRANSITION_DEFER_MS);
+
       return () => {
         active = false;
+        clearTimeout(timer);
       };
     }, [router])
   );
@@ -51,17 +58,31 @@ function TabNavigator() {
           ...tabScreenOptions,
           sceneContainerStyle: {
             backgroundColor: AppUI.bg,
+            paddingBottom: hideTabBar ? 0 : TAB_BAR_CONTENT_HEIGHT + bottomInset,
           },
           tabBarActiveTintColor: '#e60000',
           tabBarInactiveTintColor: Colors[colorScheme ?? 'light'].tabIconDefault,
           headerShown: false,
           tabBarButton: HapticTab,
           tabBarBackground: () => (
-            <View style={[StyleSheet.absoluteFillObject, styles.tabBarBackground]} />
+            <View style={[StyleSheet.absoluteFillObject, styles.tabBarBackground]}>
+              {bottomInset > 0 ? (
+                <View
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    right: 0,
+                    bottom: -bottomInset,
+                    height: bottomInset,
+                    backgroundColor: '#FFFFFF',
+                  }}
+                />
+              ) : null}
+            </View>
           ),
           tabBarStyle: hideTabBar
             ? getHiddenTabBarStyle()
-            : getDefaultTabBarStyle(insets.bottom),
+            : getDefaultTabBarStyle(insets),
           tabBarLabelStyle: {
             fontSize: 12,
             fontWeight: '500',

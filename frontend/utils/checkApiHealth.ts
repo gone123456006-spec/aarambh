@@ -61,8 +61,26 @@ export async function checkApiHealth(): Promise<ApiHealthResult> {
   return { ok: false, message: formatReachabilityError({ timedOut, status: lastStatus }) };
 }
 
+/** Lightweight ping — no retries, for periodic keep-alive while app is open. */
+export function pingApiHealth(): void {
+  const url = `${API_BASE_URL.replace(/\/$/, '')}/health`;
+  void fetch(url, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  }).catch(() => {});
+}
+
 /** Fire-and-forget ping so Render wakes during splash (production only). */
 export function warmApiServer(): void {
   if (__DEV__) return;
-  void checkApiHealth();
+  pingApiHealth();
+}
+
+/** Ping Render API every minute while the app runs (production APK/IPA only). */
+export function startApiKeepAlive(intervalMs = 60_000): () => void {
+  if (__DEV__) return () => {};
+
+  pingApiHealth();
+  const timer = setInterval(pingApiHealth, intervalMs);
+  return () => clearInterval(timer);
 }
