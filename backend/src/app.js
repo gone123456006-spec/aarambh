@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const { UPLOAD_ROOT, ensureUploadDirs } = require('./config/uploads');
 
 const { getPublicBaseUrl } = require('./config/env');
+const { privacyPolicyHtml, termsHtml } = require('./content/legalPages');
 const { getCorsOptions } = require('./config/cors');
 const errorHandler = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimiter');
@@ -103,12 +104,11 @@ app.get('/health', (req, res) => {
 });
 
 // Public legal pages (required HTTPS URLs for Google Play Console)
-const legalDir = path.join(__dirname, '..', 'public', 'legal');
 app.get('/privacy-policy', (req, res) => {
-  res.type('html').sendFile(path.join(legalDir, 'privacy-policy.html'));
+  res.type('html').send(privacyPolicyHtml);
 });
 app.get('/terms-and-conditions', (req, res) => {
-  res.type('html').sendFile(path.join(legalDir, 'terms-and-conditions.html'));
+  res.type('html').send(termsHtml);
 });
 
 // OTP (also at /api/auth/send-otp for the mobile app)

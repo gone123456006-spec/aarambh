@@ -1,114 +1,176 @@
-# Google Play Console Upload Checklist (Ohm's)
+# Google Play Console — AAB Upload Guide (Ohm's)
 
-This checklist is based on the current project configuration in `frontend`.
+Use this checklist before uploading `com.ohms.english` to Google Play Console.
 
-## 1) App Bundle / Package
+## Quick URLs (paste into Play Console)
 
-- [x] Application ID (package name): `com.ohms.english`
-- [x] Version name: `1.0.0`
-- [x] Version code present: `1` (auto-increment enabled via EAS production profile)
-- [x] AAB build profile configured (`frontend/eas.json` -> `production.android.buildType: app-bundle`)
-- [ ] Build and upload first `.aab` to Internal testing
+| Field | URL |
+|-------|-----|
+| Privacy policy | `https://gone123456006-spec.github.io/aarambh/privacy-policy.html` |
+| Terms (optional) | `https://gone123456006-spec.github.io/aarambh/terms-and-conditions.html` |
+| Render API (after redeploy) | `https://aarambh-api.onrender.com/privacy-policy` |
+| Support email | `support@ohmsapp.com` |
 
-Commands:
+**Important:** Enable GitHub Pages once: repo **Settings → Pages → Build and deployment → GitHub Actions**.  
+Also redeploy Render manually if you want the API URLs to work (Dashboard → **Manual Deploy**).
+
+---
+
+## Step 1 — Build the AAB
 
 ```bash
 cd frontend
 npx eas login
+npm run build:aab
+```
+
+Or:
+
+```bash
 npx eas build -p android --profile production
 ```
 
-## 2) Store Listing Assets
+Configured in `eas.json`:
+- `buildType: app-bundle` (AAB, not APK)
+- `autoIncrement: true` (version code bumps automatically)
+- Package: `com.ohms.english`
+- Version name: `1.0.0`
+- Target SDK: **35**
 
-### App icon
-- [x] Launcher icon source exists: `frontend/assets/images/aarambh-icon.png` (`1254x1254`)
-- [x] Play icon candidate exists: `frontend/assets/images/icon.png` (`1024x1024`)
-
-### Required Play assets to prepare in Console
-- [ ] Phone screenshots: at least 2 (recommended 4-8), JPEG/24-bit PNG, each side 320-3840 px, aspect ratio 16:9 to 9:16
-- [ ] Feature graphic: exactly `1024x500` PNG/JPG
-- [ ] Optional but recommended: promo video URL
-
-Prepared assets:
-- [x] `play-console-assets/phone-screenshot-1.png` (`1080x1920`)
-- [x] `play-console-assets/phone-screenshot-2.png` (`1080x1920`)
-- [x] `play-console-assets/feature-graphic-1024x500.png` (`1024x500`)
-
-## 3) Privacy Policy / Legal
-
-- [x] In-app privacy page exists: `frontend/app/privacy.tsx`
-- [x] In-app terms page exists: `frontend/app/terms.tsx`
-- [x] In-app contact page exists: `frontend/app/contact-us.tsx`
-- [ ] Public privacy policy URL (HTTPS) for Play Console (required if personal/sensitive data is collected)
-- [ ] Put the same URL in Play listing + in-app where users can open it
-
-Suggested URL format:
-- `https://your-domain.com/privacy-policy`
-- `https://your-domain.com/terms-and-conditions`
-
-Prepared page file:
-- [x] `play-console-assets/privacy-policy.html` (ready to host on HTTPS)
-
-## 4) App Content -> Data safety (fill this carefully)
-
-Based on current code and privacy text, declare the following:
-
-### Data collected
-- [x] Personal info -> Email address (login OTP)
-- [x] Personal info -> Phone number (profile/contact)
-- [x] Personal info -> Name (profile)
-- [x] Personal info -> Other personal info (gender, region, learning level)
-- [x] Messages (random chat content)
-- [x] App info and performance (basic diagnostics/security/performance if collected server-side)
-
-### Data shared with third parties
-- [ ] Mark according to your backend reality.  
-  If only your own backend and essential processors (SMTP/hosting) are used for app operation, do **not** mark advertising sharing.
-
-### Security and handling
-- [x] Data transmitted in transit (socket/API over network)
-- [ ] Account deletion mechanism: confirm and declare accurately in Console
-- [ ] Data deletion request flow: provide email/process in policy
-
-## 5) Permissions / Sensitive APIs
-
-Configured permissions (from app config/plugins):
-- [x] Camera
-- [x] Microphone
-
-Store declaration readiness:
-- [x] Permission purpose text exists for camera/microphone
-- [ ] Ensure no undeclared permission gets added in final Android manifest
-- [ ] If photo/library access is used later, keep Data safety + privacy policy aligned
-
-## 6) Content Rating & Target Audience
-
-Your app includes real-time random chat with user-generated text.  
-This usually increases moderation/safety expectations.
-
-- [ ] Complete Content rating questionnaire conservatively (do not under-rate)
-- [ ] If minors can access app, ensure strong UGC safeguards and reporting/moderation
-- [ ] Target audience form must match terms/privacy age statements (`13+` currently)
-
-## 7) Policy Areas to Double-Check
-
-- [ ] User-generated content policy compliance (report, block, and moderation workflow)
-- [ ] Spam/deceptive behavior: no misleading metadata
-- [ ] Stable support contact in Play listing (email should be monitored)
-- [ ] App access instructions (if login required for reviewer testing)
-
-## 8) Before Final Production Rollout
-
-- [ ] Upload to Internal testing first
-- [ ] Install from Play internal track and verify login/chat/profile flows
-- [ ] Confirm no crash on launch on Android 13/14+
-- [ ] Recheck Data safety answers after first review feedback
+Download the `.aab` from the EAS build page when finished.
 
 ---
 
-## Fast "Not To Miss" Blockers
+## Step 2 — Create app in Play Console
 
-1. Add a real **public privacy policy URL** (HTTPS) in Play Console.
-2. Create valid **phone screenshots** and **1024x500 feature graphic**.
-3. Fill **Data safety** exactly matching collected fields (email/phone/name/profile/chat).
-4. Ensure **content rating/target audience** answers reflect random chat capability.
+1. [Google Play Console](https://play.google.com/console) → **Create app**
+2. App name: **Ohm's**
+3. Default language: English
+4. App / game: **App**
+5. Free or paid: **Free**
+
+---
+
+## Step 3 — Upload AAB (Internal testing first)
+
+1. **Testing → Internal testing → Create new release**
+2. Upload the `.aab` from EAS
+3. Add release notes (e.g. "Initial release — English learning, courses, chat")
+4. Save → Review release → **Start rollout to Internal testing**
+
+Common upload errors and fixes:
+
+| Error | Fix |
+|-------|-----|
+| Version code already used | Run a new EAS production build (`autoIncrement` bumps code) |
+| Wrong signing key | Use the same EAS/Google Play upload key; do not mix local APK signing |
+| Target API level too low | Already set to SDK 35 in `app.json` |
+| Duplicate package name | Package must be unique; `com.ohms.english` |
+
+---
+
+## Step 4 — Store listing
+
+Assets in `play-console-assets/`:
+
+- [x] `phone-screenshot-1.png` (1080×1920)
+- [x] `phone-screenshot-2.png` (1080×1920)
+- [x] `feature-graphic-1024x500.png` (1024×500)
+
+Copy text from `frontend/constants/playStore.ts` → `PLAY_STORE_LISTING`.
+
+Required fields:
+- Short description (≤ 80 chars)
+- Full description
+- App icon (512×512 — export from `ohms-icon.png`)
+- Feature graphic 1024×500
+- At least 2 phone screenshots
+- **Privacy policy URL:** `https://aarambh-api.onrender.com/privacy-policy`
+- Contact email: `support@ohmsapp.com`
+
+---
+
+## Step 5 — App content (required before production)
+
+### Data safety
+Declare data collected (match `frontend/constants/privacyContent.ts`):
+
+- Email (OTP login)
+- Name, phone, gender, region, learning level (profile)
+- Messages (random chat)
+- App activity / diagnostics (if collected server-side)
+
+- Data encrypted in transit: **Yes**
+- Users can request deletion: **Yes** (Contact Us → Delete my account)
+- Account deletion URL: same privacy policy URL
+
+### Ads
+- App does **not** use advertising ID (`AD_ID` blocked in manifest)
+
+### Content rating
+Complete the questionnaire honestly — random chat / user-generated text may affect rating.
+
+### Target audience
+- Minimum age **13+** (matches Terms)
+
+### News apps / COVID / etc.
+- Select **No** where not applicable
+
+---
+
+## Step 6 — Permissions declaration
+
+Declared in app:
+- `CAMERA` — video English practice (user-initiated)
+- `RECORD_AUDIO` — voice/video practice (user-initiated)
+- `INTERNET` — API and chat
+
+Blocked (not used):
+- Advertising ID, media storage, external storage
+
+Explain each sensitive permission in Play Console forms using text from `PLAY_STORE_PERMISSIONS` in `playStore.ts`.
+
+---
+
+## Step 7 — App access (for reviewers)
+
+If login is required:
+- **Testing → Internal testing** → add tester Gmail addresses, or
+- **App content → App access** → provide test Gmail + note that OTP is sent to that email
+
+---
+
+## Step 8 — Submit for review
+
+1. Complete all **Policy** and **Store listing** sections (green checkmarks)
+2. Promote Internal testing → Closed/Open testing when ready
+3. **Production** rollout after testing passes
+
+Optional EAS submit after build:
+
+```bash
+npm run submit:play
+```
+
+---
+
+## Project config summary
+
+| Item | Value |
+|------|-------|
+| Package | `com.ohms.english` |
+| Version | `1.0.0` |
+| EAS project | `7ff2aadf-dae7-4b7c-9024-1bd25662363e` |
+| Backend API | `https://aarambh-api.onrender.com` |
+| Account deletion | Contact Us → Delete my account + `DELETE /api/users/me` |
+
+---
+
+## Before you upload — verify
+
+- [ ] Backend redeployed (legal URLs open in browser)
+- [ ] `npm run build:aab` succeeded on EAS
+- [ ] Privacy policy URL loads over HTTPS
+- [ ] Data safety form filled
+- [ ] Content rating completed
+- [ ] Internal test install works (login, chat, delete account flow)
