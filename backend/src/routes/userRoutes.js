@@ -40,4 +40,6 @@ router.put(
 
 router.get('/me/stats', protect, userController.getStats);
 
+router.delete('/me', protect, userController.deleteMe);
+
 module.exports = router;

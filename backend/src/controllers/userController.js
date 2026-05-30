@@ -1,6 +1,10 @@
 const User = require('../models/User');
 const GameProgress = require('../models/GameProgress');
 const CourseProgress = require('../models/CourseProgress');
+const Notification = require('../models/Notification');
+const ChatSession = require('../models/ChatSession');
+const Message = require('../models/Message');
+const Otp = require('../models/Otp');
 const uploadService = require('../services/uploadService');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
@@ -115,9 +119,44 @@ const getStats = asyncHandler(async (req, res) => {
   );
 });
 
+/**
+ * Permanently delete authenticated user and associated data (Google Play account deletion).
+ */
+const deleteMe = asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const user = await User.findById(userId);
+
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  if (user.avatar) {
+    uploadService.deleteLocalAsset(user.avatar);
+  }
+
+  const sessions = await ChatSession.find({ participants: userId }).select('_id');
+  const sessionIds = sessions.map((session) => session._id);
+
+  await Promise.all([
+    Message.deleteMany({
+      $or: [{ sender: userId }, { chatSession: { $in: sessionIds } }],
+    }),
+    ChatSession.deleteMany({ participants: userId }),
+    GameProgress.deleteMany({ user: userId }),
+    CourseProgress.deleteMany({ user: userId }),
+    Notification.deleteMany({ user: userId }),
+    Otp.deleteMany({ email: user.email }),
+  ]);
+
+  await User.findByIdAndDelete(userId);
+
+  res.status(200).json(new ApiResponse(200, null, 'Account deleted successfully'));
+});
+
 module.exports = {
   getMe,
   updateProfile,
   updateAvatar,
   getStats,
+  deleteMe,
 };

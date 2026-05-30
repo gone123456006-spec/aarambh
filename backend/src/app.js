@@ -102,6 +102,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Public legal pages (required HTTPS URLs for Google Play Console)
+const legalDir = path.join(__dirname, '..', 'public', 'legal');
+app.get('/privacy-policy', (req, res) => {
+  res.type('html').sendFile(path.join(legalDir, 'privacy-policy.html'));
+});
+app.get('/terms-and-conditions', (req, res) => {
+  res.type('html').sendFile(path.join(legalDir, 'terms-and-conditions.html'));
+});
+
 // OTP (also at /api/auth/send-otp for the mobile app)
 app.post('/send-otp', ...authRoutes.sendOtpHandlers);
 
