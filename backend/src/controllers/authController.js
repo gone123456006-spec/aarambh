@@ -28,12 +28,20 @@ const sendOtp = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Only Gmail (@gmail.com) accounts are allowed');
   }
 
+  // Google Play reviewer account — fixed OTP from env; no email sent (normal users unchanged)
+  if (otpService.isPlayReviewerEmail(trimmedEmail)) {
+    res
+      .status(200)
+      .json(new ApiResponse(200, null, `OTP code successfully sent to ${trimmedEmail}`));
+    return;
+  }
+
   // Generate and send OTP
   const otpCode = otpService.generateOtpCode();
-  
+
   // Send email via SMTP (Brevo)
   await otpService.sendOtpEmail(trimmedEmail, otpCode);
-  
+
   // Save OTP code hashed in database (valid for 5 mins)
   await otpService.saveOtp(trimmedEmail, otpCode);
 

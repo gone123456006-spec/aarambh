@@ -11,6 +11,27 @@ const {
 const ApiError = require('../utils/ApiError');
 const { OTP_EXPIRY_MINUTES, MAX_OTP_ATTEMPTS } = require('../utils/constants');
 
+/** Google Play review login — optional env PLAY_REVIEWER_EMAIL + PLAY_REVIEWER_OTP only. */
+function getPlayReviewerLogin() {
+  const email = process.env.PLAY_REVIEWER_EMAIL?.trim().toLowerCase();
+  const otp = process.env.PLAY_REVIEWER_OTP?.trim();
+  if (!email || !otp || !/^\d{6}$/.test(otp)) {
+    return null;
+  }
+  return { email, otp };
+}
+
+function isPlayReviewerEmail(email) {
+  const cfg = getPlayReviewerLogin();
+  return Boolean(cfg && email.trim().toLowerCase() === cfg.email);
+}
+
+function isPlayReviewerOtp(email, otpCode) {
+  const cfg = getPlayReviewerLogin();
+  if (!cfg) return false;
+  return email.trim().toLowerCase() === cfg.email && String(otpCode).trim() === cfg.otp;
+}
+
 /**
  * Generate a 6-digit numeric OTP
  */
@@ -103,6 +124,10 @@ const saveOtp = async (email, otpCode) => {
  * Verify OTP code
  */
 const verifyOtp = async (email, otpCode) => {
+  if (isPlayReviewerOtp(email, otpCode)) {
+    return true;
+  }
+
   const otpDoc = await Otp.findOne({ email });
 
   if (!otpDoc) {
@@ -139,4 +164,5 @@ module.exports = {
   sendOtpEmail,
   saveOtp,
   verifyOtp,
+  isPlayReviewerEmail,
 };
