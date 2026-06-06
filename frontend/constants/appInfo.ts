@@ -4,7 +4,7 @@ export const APP_INFO = {
   companyName: "Ohm's",
   productLine: 'English Learning',
   tagline: 'Practice English with confidence',
-  version: '1.0.0',
+  version: '1.0.1',
   mobile: '6204111878',
   whatsapp: '6204111878',
   email: 'aarambhfoundation111@gmail.com',
