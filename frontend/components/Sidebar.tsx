@@ -7,19 +7,20 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
   Dimensions,
-  SafeAreaView,
   Platform,
-  StatusBar,
   Animated,
   Easing,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_KEYS } from '@/utils/authStorage';
 import { performLogout } from '@/utils/session';
 import { appVersionLabel } from '@/constants/appInfo';
 import { AppUI } from '@/constants/theme';
+import { getNavBarTopPadding } from '@/utils/safeAreaInsets';
 
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(width * 0.82, 320);
@@ -64,6 +65,8 @@ function MenuRow({ icon, label, onPress, danger }: MenuItem) {
 
 export default function Sidebar({ visible, onClose }: SidebarProps) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const navTopPadding = getNavBarTopPadding(insets);
   const [userName, setUserName] = useState('User');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -146,7 +149,6 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
   };
 
   const mainItems: MenuItem[] = [
-    { icon: 'briefcase', label: 'My Purchases', onPress: onClose },
     { icon: 'info', label: 'About Us', onPress: () => navigateTo('/about') },
     { icon: 'phone', label: 'Contact Us', onPress: () => navigateTo('/contact-us') },
     { icon: 'file-text', label: 'Terms & Conditions', onPress: () => navigateTo('/terms') },
@@ -161,8 +163,8 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
         <Animated.View
           style={[styles.sidebarContainer, { transform: [{ translateX: slideX }] }]}
         >
-          <SafeAreaView style={styles.safeArea}>
-            <View style={styles.drawerHeader}>
+          <SafeAreaView style={styles.safeArea} edges={['bottom', 'left']}>
+            <View style={[styles.drawerHeader, { paddingTop: navTopPadding + 2 }]}>
               <Text style={styles.drawerTitle}>Menu</Text>
               <TouchableOpacity
                 onPress={onClose}
@@ -257,15 +259,13 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   drawerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingBottom: 6,
   },
   drawerTitle: {
     fontSize: 22,
@@ -282,7 +282,8 @@ const styles = StyleSheet.create({
   profileSection: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingTop: 12,
+    paddingBottom: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: AppUI.divider,
   },
@@ -317,7 +318,7 @@ const styles = StyleSheet.create({
   },
   menuList: {
     flex: 1,
-    paddingTop: 4,
+    paddingTop: 8,
   },
   menuRow: {
     flexDirection: 'row',

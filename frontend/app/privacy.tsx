@@ -14,8 +14,9 @@ export default function PrivacyScreen() {
   return (
     <LegalPageLayout title="Privacy Policy" subtitle={`Last updated: ${PRIVACY_LAST_UPDATED}`}>
       <Text style={[legalStyles.body, styles.intro]}>
-        {APP_INFO.appName} explains how we handle your data, including sign-in, profile, learning
-        progress, and camera or microphone when you use video practice.
+        {APP_INFO.appName} explains how we handle sign-in, profile, learning progress, random chat,
+        account deletion, and camera or microphone when you start practice features. We do not collect
+        contacts or location.
       </Text>
 
       <TouchableOpacity style={styles.webLink} onPress={openWebPolicy} activeOpacity={0.7}>

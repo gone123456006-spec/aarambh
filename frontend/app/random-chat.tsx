@@ -12,6 +12,7 @@ import {
   Image,
   Alert,
   Keyboard,
+  Linking,
   TouchableWithoutFeedback,
 } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
@@ -39,6 +40,7 @@ import { ensureValidSession } from '@/utils/api';
 import { MatchmakingScene } from '@/components/MatchmakingScene';
 import { ChatTypingBubble } from '@/components/ChatTypingBubble';
 import { AppUI, cardShadow } from '@/constants/theme';
+import { APP_INFO } from '@/constants/appInfo';
 import { validateChatMessage, isChatMessageBlocked } from '@/utils/chatMessageValidation';
 import { getNavBarTopPadding } from '@/utils/safeAreaInsets';
 
@@ -426,6 +428,27 @@ export default function RandomChatScreen() {
     resetChat();
   };
 
+  const handleReport = () => {
+    const partnerName = peer?.name ?? 'learner';
+    Alert.alert(
+      'Report or skip',
+      'Random chat is for English practice only. Skip this partner or email support to report abuse.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Skip partner', onPress: handleSkip },
+        {
+          text: 'Report',
+          style: 'destructive',
+          onPress: () => {
+            void Linking.openURL(
+              `mailto:${APP_INFO.email}?subject=${encodeURIComponent(`${APP_INFO.appName} — Random chat report`)}&body=${encodeURIComponent(`Partner: ${partnerName}\n\nDescribe what happened:\n`)}`
+            );
+          },
+        },
+      ]
+    );
+  };
+
   const handleBack = () => {
     const sock = getChatSocket();
     if (sock) cancelMatchmaking(sock);
@@ -533,6 +556,7 @@ export default function RandomChatScreen() {
     options?: {
       peer?: ChatPeer;
       onSkip?: () => void;
+      onReport?: () => void;
       subtitleAccent?: boolean;
       hideIcon?: boolean;
       backOnly?: boolean;
@@ -588,6 +612,17 @@ export default function RandomChatScreen() {
           </Text>
         ) : null}
       </View>
+
+      {options?.onReport ? (
+        <Pressable
+          onPress={options.onReport}
+          style={({ pressed }) => [styles.reportBtn, pressed && styles.backBtnPressed]}
+          hitSlop={8}
+          accessibilityLabel="Report user"
+        >
+          <Feather name="flag" size={18} color={UI.textSecondary} />
+        </Pressable>
+      ) : null}
 
       {options?.onSkip ? (
         <Pressable
@@ -668,6 +703,7 @@ export default function RandomChatScreen() {
         {
           peer,
           onSkip: handleSkip,
+          onReport: handleReport,
           subtitleAccent: isTyping,
         }
       )}
@@ -764,6 +800,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: UI.surface,
+    ...cardShadow,
+  },
+  reportBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: UI.surface,
+    marginRight: 8,
     ...cardShadow,
   },
   headerActionSpacer: { width: 40 },

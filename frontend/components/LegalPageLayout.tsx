@@ -5,13 +5,13 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Platform,
   StatusBar,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppUI, cardShadow } from '@/constants/theme';
+import { getNavBarTopPadding } from '@/utils/safeAreaInsets';
 
 const NAV_ICON = { color: AppUI.text, strokeWidth: 3 };
 
@@ -24,11 +24,12 @@ type Props = {
 export default function LegalPageLayout({ title, subtitle, children }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const navTopPadding = getNavBarTopPadding(insets);
 
   return (
     <View style={styles.root}>
       <StatusBar barStyle="dark-content" backgroundColor={AppUI.bg} />
-      <View style={[styles.navBar, { paddingTop: insets.top + 4 }]}>
+      <View style={[styles.navBar, { paddingTop: navTopPadding + 2 }]}>
         <TouchableOpacity
           onPress={() => router.back()}
           style={styles.backBtn}
@@ -93,13 +94,12 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: AppUI.bg,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
   navBar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingBottom: 10,
+    paddingBottom: 6,
     backgroundColor: AppUI.bg,
   },
   backBtn: {

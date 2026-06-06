@@ -7,7 +7,7 @@ export const APP_INFO = {
   version: '1.0.0',
   mobile: '6204111878',
   whatsapp: '6204111878',
-  email: 'support@ohmsapp.com',
+  email: 'aarambhfoundation111@gmail.com',
 };
 
 /** Sidebar / about — e.g. Ohm's : English Learning v1.0.0 */
