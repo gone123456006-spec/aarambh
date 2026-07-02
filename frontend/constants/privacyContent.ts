@@ -18,11 +18,11 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
   },
   {
     title: '4. Camera and microphone',
-    body: `If you use video or voice practice, ${APP_INFO.appName} requests camera and/or microphone permission only when you start that feature. We do not access camera or microphone in the background. We do not browse your photo library. Do not share inappropriate content. User content must follow Google Play policies and our Terms & Conditions.`,
+    body: `If you use video or voice practice, ${APP_INFO.appName} requests camera and/or microphone permission only when you tap to start that feature. Live audio and video are sent directly between matched learners (peer-to-peer) for practice and are not recorded or stored on our servers. We do not access camera or microphone in the background. We do not browse your photo library. Do not share inappropriate content. User content must follow Google Play policies and our Terms & Conditions.`,
   },
   {
     title: '5. Random chat and user content',
-    body: `Random chat lets matched learners exchange text messages for English practice. Messages are visible to your chat partner during an active session. We use automated filters for abusive or non-English content. You can skip a partner or report a user from chat (flag icon) or Contact Us. Random chat is for learning, not dating or matchmaking.`,
+    body: `Random chat lets matched learners exchange text messages for English practice. Optional voice or video practice is available only when both users agree to start a call. Messages are visible to your chat partner during an active session. We use automated filters for abusive or non-English content. You can skip a partner or report a user from chat (flag icon) or Contact Us. Random chat is for learning, not dating or matchmaking.`,
   },
   {
     title: '6. How we use information',

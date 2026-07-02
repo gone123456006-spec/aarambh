@@ -306,7 +306,6 @@ function PleaseWaitLabel() {
 function MatchmakingFooter() {
   return (
     <View style={styles.footer}>
-      <Text style={styles.findingTitle}>Finding Your Learner</Text>
       <PleaseWaitLabel />
     </View>
   );

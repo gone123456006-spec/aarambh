@@ -6,6 +6,33 @@ const chatService = require('../services/chatService');
 const { createNotification } = require('../services/notificationService');
 const { validateChatMessage } = require('../utils/chatMessageValidation');
 
+/** Per-session call state: idle | ringing | active */
+const sessionCallState = new Map();
+
+function setCallState(sessionId, state) {
+  if (!sessionId) return;
+  if (state === 'idle') {
+    sessionCallState.delete(sessionId);
+  } else {
+    sessionCallState.set(sessionId, state);
+  }
+}
+
+function getCallState(sessionId) {
+  return sessionCallState.get(sessionId) || 'idle';
+}
+
+async function assertSessionParticipant(sessionId, userId) {
+  if (!sessionId) return false;
+  try {
+    const session = await ChatSession.findById(sessionId);
+    if (!session || session.status !== 'active') return false;
+    return session.hasParticipant(userId);
+  } catch {
+    return false;
+  }
+}
+
 const emitMatchPair = async (socket, peerSocket, sessionId, userId, peerUserId) => {
   const [peerForSocket, peerForPeerSocket] = await Promise.all([
     chatService.getPeerProfile(peerUserId),
@@ -170,6 +197,7 @@ const configureChatSocket = (io) => {
 
       try {
         await chatService.endSession(sessionId);
+        setCallState(sessionId, 'idle');
 
         // Notify peer they were skipped
         socket.to(`room:${sessionId}`).emit('peer:disconnected');
@@ -212,18 +240,79 @@ const configureChatSocket = (io) => {
       }
     });
 
-    // 6. Video practice room (real users in same session — camera on/off signals)
-    socket.on('video:join', ({ sessionId }) => {
+    // 6. Video practice + WebRTC signaling (participant-gated)
+    socket.on('video:call-start', async ({ sessionId, mode }) => {
       if (!sessionId) return;
-      socket.to(`room:${sessionId}`).emit('video:peer-joined', { userId });
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
+
+      const current = getCallState(sessionId);
+      if (current !== 'idle') {
+        socket.emit('video:call-busy', { sessionId });
+        return;
+      }
+
+      setCallState(sessionId, 'ringing');
+      const callMode = mode === 'voice' ? 'voice' : 'video';
+      socket.to(`room:${sessionId}`).emit('video:call-incoming', { callerId: userId, mode: callMode });
     });
 
-    socket.on('video:leave', ({ sessionId }) => {
+    socket.on('video:call-accept', async ({ sessionId, mode }) => {
       if (!sessionId) return;
-      socket.to(`room:${sessionId}`).emit('video:peer-left', { userId });
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
+
+      setCallState(sessionId, 'active');
+      const callMode = mode === 'voice' ? 'voice' : 'video';
+      socket.to(`room:${sessionId}`).emit('video:call-accepted', { acceptorId: userId, mode: callMode });
     });
 
-    // 7. Manual leave matching search queue
+    socket.on('video:call-reject', async ({ sessionId }) => {
+      if (!sessionId) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
+
+      setCallState(sessionId, 'idle');
+      socket.to(`room:${sessionId}`).emit('video:call-rejected', { rejectorId: userId });
+    });
+
+    socket.on('video:call-end', async ({ sessionId }) => {
+      if (!sessionId) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
+
+      setCallState(sessionId, 'idle');
+      socket.to(`room:${sessionId}`).emit('video:call-ended', { enderId: userId });
+    });
+
+    socket.on('webrtc:offer', async ({ sessionId, offer, mode }) => {
+      if (!sessionId || !offer) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
+      if (getCallState(sessionId) !== 'active') return;
+
+      const sdp = typeof offer === 'object' && offer.sdp ? String(offer.sdp) : '';
+      if (sdp.length > 50_000) return;
+
+      const callMode = mode === 'voice' ? 'voice' : 'video';
+      socket.to(`room:${sessionId}`).emit('webrtc:offer', { offer, senderId: userId, mode: callMode });
+    });
+
+    socket.on('webrtc:answer', async ({ sessionId, answer }) => {
+      if (!sessionId || !answer) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
+      if (getCallState(sessionId) !== 'active') return;
+
+      const sdp = typeof answer === 'object' && answer.sdp ? String(answer.sdp) : '';
+      if (sdp.length > 50_000) return;
+
+      socket.to(`room:${sessionId}`).emit('webrtc:answer', { answer, senderId: userId });
+    });
+
+    socket.on('webrtc:ice-candidate', async ({ sessionId, candidate }) => {
+      if (!sessionId || !candidate) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
+      if (getCallState(sessionId) !== 'active') return;
+
+      socket.to(`room:${sessionId}`).emit('webrtc:ice-candidate', { candidate, senderId: userId });
+    });
+
+    // 8. Manual leave matching search queue
     socket.on('match:cancel', () => {
       console.log(`User ${userId} cancelled matching queue`);
       chatService.removeFromWaitingPool(userId);
@@ -253,6 +342,7 @@ const configureChatSocket = (io) => {
 
         if (activeSession) {
           const sessionId = activeSession._id.toString();
+          setCallState(sessionId, 'idle');
           await chatService.endSession(sessionId);
 
           // Inform peer user they disconnected

@@ -20,13 +20,34 @@ function decodeJwtExpSec(token: string): number | null {
     const payload = token.split('.')[1];
     if (!payload) return null;
     const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-    if (typeof atob !== 'function') return null;
-    const json = atob(base64);
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+
+    let json: string;
+    if (typeof globalThis.atob === 'function') {
+      json = globalThis.atob(padded);
+    } else if (typeof (globalThis as { Buffer?: { from: (s: string, enc: string) => { toString: (enc: string) => string } } }).Buffer !== 'undefined') {
+      json = (globalThis as { Buffer: { from: (s: string, enc: string) => { toString: (enc: string) => string } } }).Buffer.from(padded, 'base64').toString('utf8');
+    } else {
+      return null;
+    }
+
     const data = JSON.parse(json) as { exp?: number };
     return typeof data.exp === 'number' ? data.exp : null;
   } catch {
     return null;
   }
+}
+
+function isAccessTokenExpired(accessToken: string): boolean {
+  const expSec = decodeJwtExpSec(accessToken);
+  if (expSec === null) return true;
+  return expSec * 1000 <= Date.now();
+}
+
+function isAccessTokenExpiringSoon(accessToken: string): boolean {
+  const expSec = decodeJwtExpSec(accessToken);
+  if (expSec === null) return true;
+  return expSec * 1000 <= Date.now() + 5 * 60 * 1000;
 }
 
 /** Restore or refresh tokens for API/chat. Never clears local session — logout is manual only. */
@@ -39,16 +60,18 @@ export async function ensureValidSession(): Promise<boolean> {
   }
 
   if (!accessToken && refreshToken) {
-    await refreshAccessToken();
-    return true;
+    return refreshAccessToken();
   }
 
-  const expSec = accessToken ? decodeJwtExpSec(accessToken) : null;
-  const expiresSoon =
-    expSec === null || expSec * 1000 <= Date.now() + 5 * 60 * 1000;
+  if (!accessToken) {
+    return false;
+  }
 
-  if (expiresSoon && refreshToken) {
-    await refreshAccessToken();
+  if (isAccessTokenExpiringSoon(accessToken) && refreshToken) {
+    const refreshed = await refreshAccessToken();
+    if (!refreshed && isAccessTokenExpired(accessToken)) {
+      return false;
+    }
   }
 
   return true;
@@ -60,11 +83,6 @@ export async function bootstrapSession(): Promise<void> {
   if (loggedIn) {
     await ensureValidSession();
   }
-}
-
-/** Refresh access token when it is missing or close to expiry (games save often). */
-async function ensureFreshAccessToken(): Promise<void> {
-  await ensureValidSession();
 }
 
 function isAuthExpired(status: number, message: string): boolean {
@@ -115,7 +133,10 @@ export async function apiFetch<T = ApiJson>(
   const { _retryAfterRefresh, ...fetchOptions } = options;
 
   if (auth && !_retryAfterRefresh) {
-    await ensureFreshAccessToken();
+    const sessionOk = await ensureValidSession();
+    if (!sessionOk) {
+      throw new Error('Session expired. Please sign in again.');
+    }
   }
 
   const headers: Record<string, string> = {
@@ -153,6 +174,7 @@ export async function apiFetch<T = ApiJson>(
       if (refreshed) {
         return apiFetch<T>(path, { ...fetchOptions, _retryAfterRefresh: true }, auth);
       }
+      throw new Error('Session expired. Please sign in again.');
     }
 
     throw new Error(message);

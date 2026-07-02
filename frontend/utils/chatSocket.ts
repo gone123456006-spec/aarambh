@@ -3,6 +3,8 @@ import { getSocketUrl } from '@/constants/socket';
 import { getAccessToken } from '@/utils/authStorage';
 import { ensureValidSession, refreshAccessToken } from '@/utils/api';
 
+import type { CallMode } from './mediaPermissions';
+
 export type ChatPeer = {
   id: string;
   name: string;
@@ -155,6 +157,35 @@ export function emitTypingStart(sock: Socket, sessionId: string) {
 
 export function emitTypingStop(sock: Socket, sessionId: string) {
   sock.emit('typing:stop', { sessionId });
+}
+
+// WebRTC Signaling
+export function emitWebRTCOffer(sock: Socket, sessionId: string, offer: unknown, mode: CallMode = 'video') {
+  sock.emit('webrtc:offer', { sessionId, offer, mode });
+}
+
+export function emitWebRTCAnswer(sock: Socket, sessionId: string, answer: any) {
+  sock.emit('webrtc:answer', { sessionId, answer });
+}
+
+export function emitWebRTCIceCandidate(sock: Socket, sessionId: string, candidate: any) {
+  sock.emit('webrtc:ice-candidate', { sessionId, candidate });
+}
+
+export function startVideoCall(sock: Socket, sessionId: string, mode: CallMode = 'video') {
+  sock.emit('video:call-start', { sessionId, mode });
+}
+
+export function acceptVideoCall(sock: Socket, sessionId: string, mode: CallMode = 'video') {
+  sock.emit('video:call-accept', { sessionId, mode });
+}
+
+export function rejectVideoCall(sock: Socket, sessionId: string) {
+  sock.emit('video:call-reject', { sessionId });
+}
+
+export function endVideoCall(sock: Socket, sessionId: string) {
+  sock.emit('video:call-end', { sessionId });
 }
 
 export type { MatchFoundPayload };

@@ -5,5 +5,9 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-module.exports = config;
+config.resolver.blockList = [
+  ...Array.from(config.resolver.blockList || []),
+  /.*android\/\.cxx.*/,
+];
 
+module.exports = config;

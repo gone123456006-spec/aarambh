@@ -18,7 +18,7 @@ export const TERMS_SECTIONS: TermsSection[] = [
   },
   {
     title: '3. Description of Service',
-    body: `${APP_INFO.appName} provides English learning features including courses, games, daily vocabulary rewards, leaderboards, random text chat with other learners for practice, and in-app support (Ohm Assist). The App is for education and personal learning, not dating or matchmaking. We may add, modify, or remove features at any time.`,
+    body: `${APP_INFO.appName} provides English learning features including courses, games, daily vocabulary rewards, leaderboards, random text chat with other learners for practice, optional voice or video practice when both users agree to start a call, and in-app support (Ohm Assist). The App is for education and personal learning, not dating or matchmaking. We may add, modify, or remove features at any time.`,
   },
   {
     title: '4. Account and Authentication',

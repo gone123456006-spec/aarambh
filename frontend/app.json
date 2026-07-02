@@ -7,12 +7,6 @@
     "icon": "./assets/images/ohms-icon.png",
     "scheme": "ohms",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/images/ohms-logo-mark.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#5c0000"
-    },
     "ios": {
       "supportsTablet": true,
       "requireFullScreen": true,
@@ -30,7 +24,6 @@
         "backgroundColor": "#e60000",
         "foregroundImage": "./assets/images/ohms-adaptive-foreground.png"
       },
-      "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
@@ -57,10 +50,6 @@
         "android.permission.READ_CALL_LOG",
         "android.permission.PROCESS_OUTGOING_CALLS"
       ]
-    },
-    "androidNavigationBar": {
-      "backgroundColor": "#FFFFFF",
-      "barStyle": "dark-content"
     },
     "web": {
       "output": "static",
@@ -112,6 +101,7 @@
       ],
       "./plugins/withAndroidWindowsLongPaths",
       "./plugins/withAndroidReleaseSigning",
+      "@config-plugins/react-native-webrtc",
       "expo-font"
     ],
     "experiments": {

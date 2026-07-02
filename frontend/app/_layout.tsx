@@ -18,8 +18,10 @@ import {
   stackSlideScreen,
 } from '@/constants/navigationTransitions';
 import { startApiKeepAlive } from '@/utils/checkApiHealth';
+import { initWebRTC } from '@/utils/webrtcNative';
 
 enableScreens(true);
+initWebRTC();
 enableFreeze(false);
 
 export const unstable_settings = {

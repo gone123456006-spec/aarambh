@@ -35,7 +35,7 @@ import {
   saveCourseProgress,
   syncLessonToServer,
 } from '@/utils/courseProgress';
-import { apiFetch } from '@/utils/api';
+import { apiFetch, ensureValidSession } from '@/utils/api';
 import { Icons3D } from '@/constants/homeIcons';
 import { useGameTabBar } from '@/contexts/game-tab-bar-context';
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -594,6 +594,12 @@ export default function MyCoursesScreen() {
 
   const loadServerCourses = useCallback(async () => {
     try {
+      const sessionOk = await ensureValidSession();
+      if (!sessionOk) {
+        setServerCoursesError('Session expired. Please sign in again.');
+        return;
+      }
+
       setServerCoursesError(null);
       const res = await apiFetch<{ data: { level?: string; lessons?: ServerLessonMedia[] }[] }>(
         '/api/courses'
@@ -609,8 +615,13 @@ export default function MyCoursesScreen() {
 
       setServerCoursesByLevel(byLevel);
     } catch (e) {
+      const message = e instanceof Error ? e.message : 'Failed to load server courses';
+      if (/session expired|sign in again/i.test(message)) {
+        setServerCoursesError(message);
+        return;
+      }
       console.warn('Failed to load server courses', e);
-      setServerCoursesError(e instanceof Error ? e.message : 'Failed to load server courses');
+      setServerCoursesError(message);
     }
   }, []);
 
@@ -624,8 +635,8 @@ export default function MyCoursesScreen() {
       // Refresh server-driven lesson media frequently so add/delete updates reflect quickly.
       loadServerCourses();
       const interval = setInterval(() => {
-        loadServerCourses();
-      }, 5000);
+        void loadServerCourses();
+      }, 30000);
 
       return () => clearInterval(interval);
     }, [])
