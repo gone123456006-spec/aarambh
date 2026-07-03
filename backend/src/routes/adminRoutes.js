@@ -27,6 +27,8 @@ router.get('/users', adminController.getUsers);
 
 router.get('/users/:id', adminController.getUserById);
 
+router.get('/courses', adminController.getAdminCourses);
+
 router.post(
   '/courses',
   [
@@ -51,6 +53,17 @@ router.put(
 );
 
 router.post(
+  '/courses/:id/lessons/upsert',
+  [
+    body('lessonKey').trim().notEmpty().withMessage('lessonKey is required'),
+    body('title').trim().notEmpty().withMessage('Lesson title is required'),
+    body('duration').notEmpty().withMessage('Duration is required'),
+  ],
+  validate,
+  adminController.upsertLesson
+);
+
+router.post(
   '/courses/:id/lessons',
   [
     body('title').trim().notEmpty().withMessage('Lesson title is required'),
@@ -59,6 +72,8 @@ router.post(
   validate,
   adminController.addLesson
 );
+
+router.delete('/courses/:courseId/lessons/:lessonId', adminController.deleteLesson);
 
 router.delete('/courses/:id', adminController.deleteCourse);
 

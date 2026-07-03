@@ -6,6 +6,7 @@ const CourseProgress = require('../models/CourseProgress');
 const GameProgress = require('../models/GameProgress');
 const uploadService = require('../services/uploadService');
 const tokenService = require('../services/tokenService');
+const { sortCourseLessons } = require('../constants/curriculum');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
@@ -311,13 +312,119 @@ const addLesson = asyncHandler(async (req, res) => {
     pdfUrl,
     videoAvailableAt,
     pdfAvailableAt,
+    lessonKey: req.body.lessonKey?.trim() || undefined,
     order: course.lessons.length,
   };
 
   course.lessons.push(newLesson);
+  course.lessons = sortCourseLessons(course.lessons);
   await course.save();
 
   res.status(201).json(new ApiResponse(201, course, 'Lesson added successfully'));
+});
+
+/**
+ * List all courses for admin (includes pending media URLs).
+ */
+const getAdminCourses = asyncHandler(async (req, res) => {
+  const courses = await Course.find({}).sort({ level: 1 }).lean();
+  res.status(200).json(new ApiResponse(200, courses, 'Courses retrieved successfully'));
+});
+
+/**
+ * Create or update a lesson by lessonKey (stable app id like b1, i2).
+ */
+const upsertLesson = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const {
+    lessonKey,
+    title,
+    duration,
+    description,
+    type,
+    pdfTitle,
+    videoUrl,
+    pdfUrl,
+    videoAvailableAt,
+    pdfAvailableAt,
+  } = req.body;
+
+  if (!lessonKey?.trim()) {
+    throw new ApiError(400, 'lessonKey is required (e.g. b1, i2, a3)');
+  }
+  if (!title?.trim() || !duration) {
+    throw new ApiError(400, 'Title and duration are required');
+  }
+
+  const course = await Course.findById(id);
+  if (!course) {
+    throw new ApiError(404, 'Course not found');
+  }
+
+  const key = lessonKey.trim();
+  let lesson = course.lessons.find((l) => l.lessonKey === key);
+
+  if (lesson) {
+    if (videoUrl && lesson.videoUrl && lesson.videoUrl !== videoUrl) {
+      uploadService.deleteLocalAsset(lesson.videoUrl);
+    }
+    if (pdfUrl && lesson.pdfUrl && lesson.pdfUrl !== pdfUrl) {
+      uploadService.deleteLocalAsset(lesson.pdfUrl);
+    }
+    lesson.title = title.trim();
+    lesson.duration = duration;
+    lesson.description = description;
+    lesson.type = type || 'video';
+    lesson.pdfTitle = pdfTitle;
+    if (videoUrl !== undefined) lesson.videoUrl = videoUrl || undefined;
+    if (pdfUrl !== undefined) lesson.pdfUrl = pdfUrl || undefined;
+    if (videoAvailableAt !== undefined) lesson.videoAvailableAt = videoAvailableAt || undefined;
+    if (pdfAvailableAt !== undefined) lesson.pdfAvailableAt = pdfAvailableAt || undefined;
+  } else {
+    course.lessons.push({
+      lessonKey: key,
+      title: title.trim(),
+      duration,
+      description,
+      type: type || 'video',
+      pdfTitle,
+      videoUrl,
+      pdfUrl,
+      videoAvailableAt,
+      pdfAvailableAt,
+      order: course.lessons.length,
+    });
+  }
+
+  course.lessons = sortCourseLessons(course.lessons);
+  await course.save();
+
+  res.status(200).json(new ApiResponse(200, course, 'Lesson saved successfully'));
+});
+
+/**
+ * Delete an entire lesson (and its media files).
+ */
+const deleteLesson = asyncHandler(async (req, res) => {
+  const { courseId, lessonId } = req.params;
+
+  const course = await Course.findById(courseId);
+  if (!course) {
+    throw new ApiError(404, 'Course not found');
+  }
+
+  const lesson = course.lessons?.id(lessonId);
+  if (!lesson) {
+    throw new ApiError(404, 'Lesson not found');
+  }
+
+  if (lesson.videoUrl) uploadService.deleteLocalAsset(lesson.videoUrl);
+  if (lesson.pdfUrl) uploadService.deleteLocalAsset(lesson.pdfUrl);
+
+  course.lessons.pull(lessonId);
+  await course.save();
+
+  res.status(200).json(new ApiResponse(200, course, 'Lesson deleted successfully'));
 });
 
 /**
@@ -453,9 +560,12 @@ module.exports = {
   getDashboardStats,
   getUsers,
   getUserById,
+  getAdminCourses,
   createCourse,
   updateCourse,
   addLesson,
+  upsertLesson,
+  deleteLesson,
   deleteCourse,
   deleteLessonMedia,
   uploadVideo,

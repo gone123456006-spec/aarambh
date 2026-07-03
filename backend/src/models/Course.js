@@ -40,6 +40,11 @@ const lessonSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
+  /** Stable id matching app curriculum (e.g. b1, i2, a3) */
+  lessonKey: {
+    type: String,
+    trim: true,
+  },
 });
 
 const courseSchema = new mongoose.Schema(

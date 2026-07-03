@@ -1,5 +1,5 @@
 /**
- * Hide video/PDF URLs until availableAt (30s after upload).
+ * Hide video/PDF URLs until availableAt (short delay after upload).
  */
 function applyLessonMediaAvailability(lesson) {
   const out = lesson.toObject ? lesson.toObject() : { ...lesson };

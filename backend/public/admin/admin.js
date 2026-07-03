@@ -1,10 +1,41 @@
 const API = window.location.origin.replace(/\/$/, '');
 const AUTO_REFRESH_MS = 60 * 1000; // 1 minute
 
+/** Matches frontend constants/courseData.ts lesson ids */
+const CURRICULUM = {
+  beginner: [
+    { lessonKey: 'b1', title: 'Introduction to English', duration: '8:45', pdfTitle: 'Lesson 1 — Introduction Notes' },
+    { lessonKey: 'b2', title: 'Basic Grammar Rules', duration: '12:20', pdfTitle: 'Lesson 2 — Grammar Basics PDF' },
+    { lessonKey: 'b3', title: 'Common Greetings', duration: '10:15', pdfTitle: 'Lesson 3 — Greetings Worksheet' },
+    { lessonKey: 'b4', title: 'Numbers & Counting', duration: '15:30', pdfTitle: 'Lesson 4 — Numbers Practice PDF' },
+    { lessonKey: 'b5', title: 'Daily Objects', duration: '9:50', pdfTitle: 'Lesson 5 — Daily Objects PDF' },
+  ],
+  intermediate: [
+    { lessonKey: 'i1', title: 'Sentence Structures', duration: '20:10', pdfTitle: 'Lesson 1 — Sentence Structures PDF' },
+    { lessonKey: 'i2', title: 'Verbs & Tenses', duration: '18:45', pdfTitle: 'Lesson 2 — Verbs & Tenses PDF' },
+    { lessonKey: 'i3', title: 'Travel Vocabulary', duration: '22:30', pdfTitle: 'Lesson 3 — Travel English PDF' },
+    { lessonKey: 'i4', title: 'Expressing Opinions', duration: '19:15', pdfTitle: 'Lesson 4 — Opinions & Debate PDF' },
+    { lessonKey: 'i5', title: 'Listening Practice', duration: '25:00', pdfTitle: 'Lesson 5 — Listening Workbook' },
+  ],
+  advanced: [
+    { lessonKey: 'a1', title: 'Business English Basics', duration: '30:00', pdfTitle: 'Lesson 1 — Business English PDF' },
+    { lessonKey: 'a2', title: 'Public Speaking Tips', duration: '28:45', pdfTitle: 'Lesson 2 — Public Speaking PDF' },
+    { lessonKey: 'a3', title: 'Idioms & Phrasal Verbs', duration: '32:15', pdfTitle: 'Lesson 3 — Idioms Guide PDF' },
+    { lessonKey: 'a4', title: 'Academic Writing', duration: '35:20', pdfTitle: 'Lesson 4 — Academic Writing PDF' },
+    { lessonKey: 'a5', title: 'Advanced Pronunciation', duration: '25:45', pdfTitle: 'Lesson 5 — Pronunciation PDF' },
+    { lessonKey: 'a6', title: 'Debating Techniques', duration: '29:30', pdfTitle: 'Lesson 6 — Debating PDF' },
+    { lessonKey: 'a7', title: 'Understanding Accents', duration: '31:10', pdfTitle: 'Lesson 7 — Accents PDF' },
+    { lessonKey: 'a8', title: 'Creative Storytelling', duration: '27:50', pdfTitle: 'Lesson 8 — Storytelling PDF' },
+    { lessonKey: 'a9', title: 'Professional Interviews', duration: '33:40', pdfTitle: 'Lesson 9 — Interview Prep PDF' },
+    { lessonKey: 'a10', title: 'Final Graduation Project', duration: '45:00', pdfTitle: 'Lesson 10 — Graduation Project PDF' },
+  ],
+};
+
 let token = sessionStorage.getItem('adminToken') || '';
 let usersPage = 1;
 let usersPagination = { pages: 1 };
 let autoRefreshTimer = null;
+let cachedCourses = [];
 
 const $ = (id) => document.getElementById(id);
 
@@ -67,7 +98,11 @@ function switchTab(name) {
   if (name === 'users') loadUsers();
   if (name === 'overview') loadStats();
   if (name === 'content') {
-    loadCourses().then(() => loadExistingLessons());
+    loadCourses().then(() => {
+      loadCourseList();
+      loadExistingLessons();
+      populateLessonSlots();
+    });
   }
 }
 
@@ -90,11 +125,10 @@ function setLoggedIn(user) {
   $('loginCard').classList.add('hidden');
   $('dashboard').classList.remove('hidden');
   $('userBadge').textContent = user?.username || user?.name || 'Admin';
-  loadStats();
-  loadUsers();
   startAutoRefresh();
   const hint = $('autoRefreshHint');
-  if (hint) hint.textContent = 'Auto-refresh every 1 minute';
+  if (hint) hint.textContent = 'Uploads go live in app in ~2 seconds';
+  switchTab('content');
 }
 
 async function loadStats() {
@@ -256,7 +290,11 @@ function refreshAll(silent = false) {
   loadStats();
   if (!$('panel-users').classList.contains('hidden')) loadUsers();
   if (!$('panel-content').classList.contains('hidden')) {
-    loadCourses().then(() => loadExistingLessons());
+    loadCourses().then(() => {
+      loadCourseList();
+      loadExistingLessons();
+      populateLessonSlots();
+    });
   }
   if (!silent) {
     const hint = $('autoRefreshHint');
@@ -283,8 +321,15 @@ async function createCourse() {
         lessons: [],
       }),
     });
-    showStatus($('createCourseStatus'), `Course "${title}" created`, 'ok');
-    loadCourses();
+    showStatus($('createCourseStatus'), `Course "${title}" created — select it above to upload`, 'ok');
+    $('newCourseTitle').value = '';
+    await loadCourses();
+    loadCourseList();
+    const created = cachedCourses.find((c) => c.level === level);
+    if (created && $('uploadCourseId')) {
+      $('uploadCourseId').value = created._id;
+      populateLessonSlots();
+    }
   } catch (e) {
     showStatus($('createCourseStatus'), e.message, 'err');
   } finally {
@@ -294,17 +339,337 @@ async function createCourse() {
 
 async function loadCourses() {
   try {
-    const courses = await api('/api/courses');
-    const select = $('courseId');
+    const courses = await api('/api/admin/courses');
+    cachedCourses = courses || [];
+    fillCourseSelects(cachedCourses);
+    return cachedCourses;
+  } catch {
+    cachedCourses = [];
+    return [];
+  }
+}
+
+function fillCourseSelects(courses) {
+  const selects = [$('courseId'), $('uploadCourseId')];
+  const noCourseHint = $('noCourseHint');
+
+  if (noCourseHint) {
+    noCourseHint.classList.toggle('hidden', courses.length > 0);
+  }
+
+  selects.forEach((select) => {
+    if (!select) return;
+    const prev = select.value;
     select.innerHTML = '<option value="">Select course…</option>';
-    (courses || []).forEach((c) => {
+    courses.forEach((c) => {
       const opt = document.createElement('option');
       opt.value = c._id;
       opt.textContent = `${c.title} (${c.level}) — ${c.lessons?.length || 0} lessons`;
+      opt.dataset.level = c.level;
       select.appendChild(opt);
     });
-  } catch {
-    /* optional on content tab */
+    if (prev && courses.some((c) => String(c._id) === String(prev))) {
+      select.value = prev;
+    } else if (select.id === 'uploadCourseId' && courses.length === 1) {
+      select.value = courses[0]._id;
+      populateLessonSlots();
+    }
+  });
+}
+
+function showAppLiveBanner(lessonTitle, seconds) {
+  const banner = $('appLiveBanner');
+  if (!banner) return;
+  banner.classList.remove('hidden');
+
+  let left = seconds;
+  const tick = () => {
+    if (left > 0) {
+      banner.textContent = `✓ "${lessonTitle}" publishing… live in app in ${left}s (pull down My Courses to refresh)`;
+      left -= 1;
+      setTimeout(tick, 1000);
+    } else {
+      banner.textContent = `✓ "${lessonTitle}" is now live in the app! Open My Courses and pull down to refresh.`;
+    }
+  };
+  tick();
+}
+
+async function loadCourseList() {
+  const container = $('courseList');
+  if (!container) return;
+
+  try {
+    const courses = cachedCourses.length ? cachedCourses : await loadCourses();
+
+    if (!courses.length) {
+      container.innerHTML =
+        '<p style="color:#636e72; margin:0">No courses yet. Create one below.</p>';
+      return;
+    }
+
+    container.innerHTML = courses
+      .map(
+        (c) => `
+        <div class="course-row">
+          <div class="course-row-meta">
+            <strong>${c.title}</strong>
+            <span>${c.level} · ${c.lessons?.length || 0} lesson(s) · ${c.views || 0} views</span>
+          </div>
+          <button type="button" class="danger" data-delete-course="${c._id}" data-course-title="${c.title}">
+            Delete course
+          </button>
+        </div>`
+      )
+      .join('');
+
+    container.querySelectorAll('[data-delete-course]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.deleteCourse;
+        const title = btn.dataset.courseTitle || 'this course';
+        if (!confirm(`Delete "${title}" and all its videos/PDFs? This cannot be undone.`)) return;
+
+        btn.disabled = true;
+        try {
+          await api(`/api/admin/courses/${id}`, { method: 'DELETE' });
+          showStatus($('publishStatus'), 'Course deleted', 'ok');
+          await loadCourses();
+          loadCourseList();
+          loadExistingLessons();
+          populateLessonSlots();
+        } catch (e) {
+          showStatus($('publishStatus'), e.message, 'err');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch (e) {
+    container.innerHTML = `<p class="status err">${e.message}</p>`;
+  }
+}
+
+function populateLessonSlots() {
+  const courseSelect = $('uploadCourseId');
+  const slotSelect = $('lessonSlot');
+  if (!courseSelect || !slotSelect) return;
+
+  const selected = courseSelect.selectedOptions[0];
+  const level = selected?.dataset?.level;
+  slotSelect.innerHTML = '';
+
+  if (!level || !CURRICULUM[level]) {
+    slotSelect.innerHTML = '<option value="">Select course first…</option>';
+    return;
+  }
+
+  slotSelect.innerHTML = '<option value="">Select lesson…</option>';
+  CURRICULUM[level].forEach((slot, i) => {
+    const opt = document.createElement('option');
+    opt.value = slot.lessonKey;
+    opt.textContent = `Lesson ${i + 1}: ${slot.title} (${slot.lessonKey})`;
+    slotSelect.appendChild(opt);
+  });
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function setupDropZone(zoneId, inputId, nameId) {
+  const zone = $(zoneId);
+  const input = $(inputId);
+  const nameEl = $(nameId);
+  if (!zone || !input) return;
+
+  const showFile = (file) => {
+    if (!file) return;
+    nameEl.textContent = `${file.name} (${formatFileSize(file.size)})`;
+    nameEl.classList.remove('hidden');
+  };
+
+  zone.addEventListener('click', () => input.click());
+  zone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      input.click();
+    }
+  });
+  input.addEventListener('change', () => {
+    if (input.files?.[0]) showFile(input.files[0]);
+  });
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    zone.classList.add('dragover');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    showFile(file);
+  });
+}
+
+function setUploadProgress(pct, text) {
+  const wrap = $('uploadProgressWrap');
+  const fill = $('uploadProgressFill');
+  const label = $('uploadProgressText');
+  if (!wrap || !fill) return;
+  wrap.classList.remove('hidden');
+  fill.style.width = `${Math.round(pct * 100)}%`;
+  if (label) label.textContent = text || `Uploading… ${Math.round(pct * 100)}%`;
+}
+
+function hideUploadProgress() {
+  $('uploadProgressWrap')?.classList.add('hidden');
+  const fill = $('uploadProgressFill');
+  if (fill) fill.style.width = '0%';
+}
+
+function uploadWithProgress(path, formData, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API}${path}`);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      try {
+        const json = JSON.parse(xhr.responseText || '{}');
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(json.data !== undefined ? json.data : json);
+        } else {
+          reject(new Error(json.message || json.data?.message || 'Upload failed'));
+        }
+      } catch {
+        reject(new Error('Invalid server response'));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error during upload'));
+    xhr.send(formData);
+  });
+}
+
+async function publishLesson() {
+  const courseId = $('uploadCourseId')?.value;
+  const lessonKey = $('lessonSlot')?.value;
+  const videoInput = $('videoFile');
+  const pdfInput = $('pdfFile');
+  const statusEl = $('publishStatus');
+  const previewEl = $('videoPreview');
+  const btn = $('publishLessonBtn');
+
+  if (!courseId) {
+    showStatus(statusEl, 'Select a course', 'err');
+    return;
+  }
+  if (!lessonKey) {
+    showStatus(statusEl, 'Select a lesson slot', 'err');
+    return;
+  }
+  if (!videoInput?.files?.[0] && !pdfInput?.files?.[0]) {
+    showStatus(statusEl, 'Choose a video or PDF file', 'err');
+    return;
+  }
+
+  const course = cachedCourses.find((c) => String(c._id) === String(courseId));
+  const slotMeta = CURRICULUM[course?.level]?.find((s) => s.lessonKey === lessonKey);
+  if (!slotMeta) {
+    showStatus(statusEl, 'Invalid lesson slot', 'err');
+    return;
+  }
+
+  btn.disabled = true;
+  hideUploadProgress();
+  previewEl?.classList.add('hidden');
+
+  try {
+    let videoUrl;
+    let videoAvailableAt;
+    let pdfUrl;
+    let pdfAvailableAt;
+
+    if (videoInput.files?.[0]) {
+      const fd = new FormData();
+      fd.append('video', videoInput.files[0]);
+      setUploadProgress(0, 'Uploading video…');
+      const data = await uploadWithProgress('/api/admin/upload/video', fd, (p) =>
+        setUploadProgress(p * 0.7, `Uploading video… ${Math.round(p * 100)}%`)
+      );
+      videoUrl = data.url || data.videoUrl;
+      videoAvailableAt = data.videoAvailableAt || data.availableAt;
+    }
+
+    if (pdfInput.files?.[0]) {
+      const fd = new FormData();
+      fd.append('pdf', pdfInput.files[0]);
+      setUploadProgress(0.7, 'Uploading PDF…');
+      const data = await uploadWithProgress('/api/admin/upload/pdf', fd, (p) =>
+        setUploadProgress(0.7 + p * 0.2, `Uploading PDF… ${Math.round(p * 100)}%`)
+      );
+      pdfUrl = data.url || data.pdfUrl;
+      pdfAvailableAt = data.pdfAvailableAt || data.availableAt;
+    }
+
+    setUploadProgress(0.92, 'Publishing to app…');
+    await api(`/api/admin/courses/${courseId}/lessons/upsert`, {
+      method: 'POST',
+      body: JSON.stringify({
+        lessonKey,
+        title: slotMeta.title,
+        duration: slotMeta.duration,
+        pdfTitle: slotMeta.pdfTitle,
+        type: 'video',
+        videoUrl,
+        pdfUrl,
+        videoAvailableAt,
+        pdfAvailableAt,
+      }),
+    });
+
+    setUploadProgress(1, 'Done!');
+    showAppLiveBanner(slotMeta.title, 2);
+    showStatus(
+      statusEl,
+      `Published "${slotMeta.title}". Check My Courses in the app within 2 seconds.`,
+      'ok'
+    );
+
+    if (previewEl && videoUrl) {
+      previewEl.classList.remove('hidden');
+      previewEl.innerHTML = `
+        <strong>Video preview</strong><br>
+        <video src="${videoUrl}" controls style="max-width:100%;margin-top:0.5rem;border-radius:8px"></video>
+        <p style="margin:0.35rem 0 0;color:#636e72">Slot: ${lessonKey} · ${slotMeta.title}</p>`;
+    }
+
+    videoInput.value = '';
+    pdfInput.value = '';
+    $('videoFileName')?.classList.add('hidden');
+    $('pdfFileName')?.classList.add('hidden');
+
+    await loadCourses();
+    loadCourseList();
+    loadExistingLessons();
+
+    if ($('courseId')?.value === courseId) loadExistingLessons();
+    else if ($('courseId')) {
+      $('courseId').value = courseId;
+      loadExistingLessons();
+    }
+  } catch (e) {
+    showStatus(statusEl, e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    setTimeout(hideUploadProgress, 1500);
   }
 }
 
@@ -322,38 +687,38 @@ async function loadExistingLessons() {
   container.innerHTML = '<p style="color:#636e72; margin:0">Loading…</p>';
 
   try {
-    const courses = await api('/api/courses');
+    const courses = cachedCourses.length ? cachedCourses : await loadCourses();
     const course = (courses || []).find((c) => String(c._id) === String(courseId));
     const lessons = course?.lessons || [];
 
     if (!lessons.length) {
-      container.innerHTML = '<p style="color:#636e72; margin:0">No lessons found for this course.</p>';
+      container.innerHTML = '<p style="color:#636e72; margin:0">No lessons yet. Use Upload above.</p>';
       return;
     }
 
     container.innerHTML = lessons
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map((lesson) => {
         const videoStatus = lesson.videoUrl
           ? '<span class="badge ok">Video ✓</span>'
-          : lesson.videoAvailableIn
-            ? `<span class="badge warn">Video in ~${lesson.videoAvailableIn}s</span>`
+          : lesson.videoAvailableAt
+            ? '<span class="badge warn">Video pending</span>'
             : '<span class="badge">No video</span>';
 
         const pdfStatus = lesson.pdfUrl
           ? '<span class="badge ok">PDF ✓</span>'
-          : lesson.pdfAvailableIn
-            ? `<span class="badge warn">PDF in ~${lesson.pdfAvailableIn}s</span>`
+          : lesson.pdfAvailableAt
+            ? '<span class="badge warn">PDF pending</span>'
             : '<span class="badge">No PDF</span>';
 
-        const canDeleteVideo = !!lesson.videoUrl || !!lesson.videoAvailableIn;
-        const canDeletePdf = !!lesson.pdfUrl || !!lesson.pdfAvailableIn;
+        const canDeleteVideo = !!lesson.videoUrl || !!lesson.videoAvailableAt;
+        const canDeletePdf = !!lesson.pdfUrl || !!lesson.pdfAvailableAt;
+        const keyLabel = lesson.lessonKey ? ` · ${lesson.lessonKey}` : '';
 
         return `
           <div class="lesson-row">
             <div class="lesson-title">
               <strong>${lesson.title || 'Untitled'}</strong>
-              <span style="color:#636e72; font-size:0.82rem; margin-left:0.4rem">${lesson.duration || ''}</span>
+              <span style="color:#636e72; font-size:0.82rem; margin-left:0.4rem">${lesson.duration || ''}${keyLabel}</span>
             </div>
 
             <div class="lesson-status">
@@ -380,13 +745,21 @@ async function loadExistingLessons() {
               >
                 Delete PDF
               </button>
+
+              <button type="button"
+                class="danger"
+                data-del-lesson-course="${courseId}"
+                data-del-lesson-id="${lesson._id}"
+              >
+                Delete lesson
+              </button>
             </div>
           </div>
         `;
       })
       .join('');
 
-    container.querySelectorAll('[data-del-lesson-id]').forEach((btn) => {
+    container.querySelectorAll('[data-del-kind]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const lessonId = btn.dataset.delLessonId;
         const kind = btn.dataset.delKind;
@@ -402,8 +775,29 @@ async function loadExistingLessons() {
             { method: 'DELETE' }
           );
           showStatus($('lessonStatus'), 'Deleted successfully', 'ok');
+          await loadCourses();
+          loadCourseList();
           loadExistingLessons();
-          loadCourses();
+        } catch (e) {
+          showStatus($('lessonStatus'), e.message, 'err');
+        }
+      });
+    });
+
+    container.querySelectorAll('[data-del-lesson-course]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const lessonId = btn.dataset.delLessonId;
+        const cid = btn.dataset.delLessonCourse;
+        if (!lessonId || !cid) return;
+
+        if (!confirm('Delete this entire lesson from the app?')) return;
+
+        try {
+          await api(`/api/admin/courses/${cid}/lessons/${lessonId}`, { method: 'DELETE' });
+          showStatus($('lessonStatus'), 'Lesson deleted', 'ok');
+          await loadCourses();
+          loadCourseList();
+          loadExistingLessons();
         } catch (e) {
           showStatus($('lessonStatus'), e.message, 'err');
         }
@@ -411,82 +805,6 @@ async function loadExistingLessons() {
     });
   } catch (e) {
     container.innerHTML = `<p class="status err">${e.message}</p>`;
-  }
-}
-
-async function uploadFile(kind) {
-  const input = kind === 'video' ? $('videoFile') : $('pdfFile');
-  const statusEl = kind === 'video' ? $('videoStatus') : $('pdfStatus');
-  const previewEl = kind === 'video' ? $('videoPreview') : $('pdfPreview');
-
-  if (!input.files?.[0]) {
-    showStatus(statusEl, 'Choose a file first', 'err');
-    return;
-  }
-
-  const fd = new FormData();
-  fd.append(kind, input.files[0]);
-  const btn = kind === 'video' ? $('uploadVideoBtn') : $('uploadPdfBtn');
-  btn.disabled = true;
-
-  try {
-    const data = await api(`/api/admin/upload/${kind}`, { method: 'POST', body: fd });
-    const url = data.url || data.videoUrl || data.pdfUrl;
-    const availableAt = data.videoAvailableAt || data.pdfAvailableAt || data.availableAt;
-
-    if (kind === 'video') {
-      $('lessonVideoUrl').value = url || '';
-      $('lessonVideoAt').value = availableAt || '';
-    } else {
-      $('lessonPdfUrl').value = url || '';
-      $('lessonPdfAt').value = availableAt || '';
-    }
-
-    previewEl.innerHTML = `<strong>URL:</strong> ${url}<br><em>Available in app in ~30s</em>`;
-    showStatus(statusEl, 'Uploaded successfully', 'ok');
-  } catch (e) {
-    showStatus(statusEl, e.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function addLesson() {
-  const courseId = $('courseId').value;
-  if (!courseId) {
-    showStatus($('lessonStatus'), 'Select a course', 'err');
-    return;
-  }
-
-  const body = {
-    title: $('lessonTitle').value.trim(),
-    duration: $('lessonDuration').value.trim(),
-    description: $('lessonDesc').value.trim(),
-    pdfTitle: $('lessonPdfTitle').value.trim(),
-    type: 'video',
-    videoUrl: $('lessonVideoUrl').value.trim() || undefined,
-    pdfUrl: $('lessonPdfUrl').value.trim() || undefined,
-    videoAvailableAt: $('lessonVideoAt').value || undefined,
-    pdfAvailableAt: $('lessonPdfAt').value || undefined,
-  };
-
-  if (!body.title || !body.duration) {
-    showStatus($('lessonStatus'), 'Title and duration required', 'err');
-    return;
-  }
-
-  $('addLessonBtn').disabled = true;
-  try {
-    await api(`/api/admin/courses/${courseId}/lessons`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    showStatus($('lessonStatus'), 'Lesson saved', 'ok');
-    loadCourses();
-  } catch (e) {
-    showStatus($('lessonStatus'), e.message, 'err');
-  } finally {
-    $('addLessonBtn').disabled = false;
   }
 }
 
@@ -515,11 +833,13 @@ $('closeModalBtn').addEventListener('click', closeUserModal);
 $('userModal').addEventListener('click', (e) => {
   if (e.target === $('userModal')) closeUserModal();
 });
-$('uploadVideoBtn').addEventListener('click', () => uploadFile('video'));
-$('uploadPdfBtn').addEventListener('click', () => uploadFile('pdf'));
-$('addLessonBtn').addEventListener('click', addLesson);
+$('publishLessonBtn')?.addEventListener('click', publishLesson);
+$('uploadCourseId')?.addEventListener('change', populateLessonSlots);
 $('createCourseBtn').addEventListener('click', createCourse);
 $('courseId').addEventListener('change', () => loadExistingLessons());
+
+setupDropZone('videoDropZone', 'videoFile', 'videoFileName');
+setupDropZone('pdfDropZone', 'pdfFile', 'pdfFileName');
 
 $('userSearch').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadUsers(1);

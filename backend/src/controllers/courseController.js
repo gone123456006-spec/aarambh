@@ -4,13 +4,18 @@ const ApiResponse = require('../utils/ApiResponse');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { applyCourseMediaAvailability } = require('../utils/mediaAvailability');
+const { sortCourseLessons } = require('../constants/curriculum');
 
 /**
  * Get all courses, grouped or sorted by level
  */
 const getCourses = asyncHandler(async (req, res) => {
   const courses = await Course.find({}).sort({ createdAt: 1 });
-  const withMedia = courses.map(applyCourseMediaAvailability);
+  const withMedia = courses.map((course) => {
+    const doc = course.toObject();
+    doc.lessons = sortCourseLessons(doc.lessons || []);
+    return applyCourseMediaAvailability(doc);
+  });
   res.status(200).json(new ApiResponse(200, withMedia, 'Courses retrieved successfully'));
 });
 
