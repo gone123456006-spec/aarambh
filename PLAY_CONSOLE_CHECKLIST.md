@@ -9,7 +9,7 @@ Use this checklist before uploading `com.ohms.english` to Google Play Console.
 | Privacy policy | `https://gone123456006-spec.github.io/aarambh/privacy-policy.html` |
 | Terms (optional) | `https://gone123456006-spec.github.io/aarambh/terms-and-conditions.html` |
 | Render API (after redeploy) | `https://aarambh-api.onrender.com/privacy-policy` |
-| Support email | `support@ohmsapp.com` |
+| Support email | `aarambhfoundation111@gmail.com` |
 
 **Important — enable hosting (pick one):**
 
@@ -93,11 +93,20 @@ Required fields:
 - Feature graphic 1024×500
 - At least 2 phone screenshots
 - **Privacy policy URL:** `https://aarambh-api.onrender.com/privacy-policy`
-- Contact email: `support@ohmsapp.com`
+- Contact email: `aarambhfoundation111@gmail.com`
 
 ---
 
 ## Step 5 — App content (required before production)
+
+**Full policy guide:** see **`PLAY_POLICY_COMPLIANCE.md`**  
+**Reviewer login:** see **`PLAY_REVIEWER_LOGIN.md`**
+
+### Sign in details (required — fixes most rejections)
+
+- Select **Yes** (login required)
+- Gmail: `ohmsplayreview@gmail.com`
+- OTP: `847291` (after Render env + redeploy)
 
 ### Data safety
 Declare data collected (match `frontend/constants/privacyContent.ts`):
@@ -116,6 +125,13 @@ Declare data collected (match `frontend/constants/privacyContent.ts`):
 
 ### Content rating
 Complete the questionnaire honestly — random chat / user-generated text may affect rating.
+
+### User-generated content (random chat)
+
+- **UGC:** Yes (chat messages)
+- **Not dating** — English practice only
+- **Moderation:** profanity filter, skip partner, report button, Contact Us
+- See `PLAY_POLICY_COMPLIANCE.md` section 7
 
 ### Target audience
 - Minimum age **13+** (matches Terms)

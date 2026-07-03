@@ -7,7 +7,10 @@ Use this as a copy-paste guide while filling Play Console.
 You must host `play-console-assets/privacy-policy.html` on a public HTTPS URL.
 
 Recommended final URL:
-- `https://ohmsapp.com/privacy-policy`
+- `https://gone123456006-spec.github.io/aarambh/privacy-policy.html`
+
+Support / contact email (use everywhere in Play Console):
+- `aarambhfoundation111@gmail.com`
 
 Temporary option (fast):
 - Upload `play-console-assets/privacy-policy.html` to any static host (Netlify / Vercel / GitHub Pages) and use that HTTPS URL in Play Console.
@@ -35,7 +38,7 @@ Do not submit with a localhost, private IP, or non-HTTPS URL.
 - **Yes**
 
 ### Can users request data deletion?
-- **Yes** (provide support email process: `support@ohmsapp.com`)
+- **Yes** (provide support email process: `aarambhfoundation111@gmail.com`)
 
 ### Data collection purpose (mark as applicable)
 - App functionality
