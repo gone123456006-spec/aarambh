@@ -16,6 +16,10 @@ if ($longPaths -ne 1) {
     Write-Host ''
 }
 
+& (Join-Path $PSScriptRoot 'android-stop-gradle.ps1')
+& (Join-Path $PSScriptRoot 'android-clean-native.ps1')
+
 Set-Location $androidDir
-.\gradlew.bat assembleRelease
+# arm64-v8a only — faster, avoids armeabi-v7a CMake failures on Windows; covers all modern phones.
+.\gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 exit $LASTEXITCODE

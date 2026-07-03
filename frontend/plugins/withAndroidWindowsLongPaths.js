@@ -1,6 +1,33 @@
-const { withAppBuildGradle } = require('@expo/config-plugins');
+const { withAppBuildGradle, withProjectBuildGradle } = require('@expo/config-plugins');
 
 const MARKER = 'CMAKE_OBJECT_PATH_MAX';
+const ROOT_MARKER = 'OHMS_WINDOWS_NATIVE_SUBPROJECTS';
+
+const ROOT_SUBPROJECTS_BLOCK = `
+
+// ${ROOT_MARKER}: CMake path limits for all native library modules on Windows
+def isWindowsBuild = System.getProperty('os.name').toLowerCase().contains('windows')
+
+subprojects { subproject ->
+    subproject.plugins.withId('com.android.library') {
+        subproject.android {
+            if (isWindowsBuild) {
+                defaultConfig {
+                    externalNativeBuild {
+                        cmake {
+                            def shortNinja = new File('C:/ninja/ninja.exe')
+                            if (shortNinja.exists()) {
+                                arguments '-DCMAKE_MAKE_PROGRAM=' + shortNinja.absolutePath.replace('\\\\', '/')
+                            }
+                            arguments '-DCMAKE_OBJECT_PATH_MAX=1024'
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+`;
 
 const WINDOWS_CMAKE_BLOCK = `
         if (isWindows) {
@@ -28,6 +55,15 @@ const WINDOWS_CMAKE_BLOCK = `
  * @see https://kirillzyusko.github.io/react-native-keyboard-controller/docs/troubleshooting
  */
 function withAndroidWindowsLongPaths(config) {
+  config = withProjectBuildGradle(config, (config) => {
+    let root = config.modResults.contents;
+    if (!root.includes(ROOT_MARKER)) {
+      root += ROOT_SUBPROJECTS_BLOCK;
+      config.modResults.contents = root;
+    }
+    return config;
+  });
+
   return withAppBuildGradle(config, (config) => {
     let contents = config.modResults.contents;
 

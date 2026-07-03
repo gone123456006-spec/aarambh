@@ -16,6 +16,8 @@
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "android:setup-windows": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-android-windows.ps1",
+    "android:stop-gradle": "powershell -ExecutionPolicy Bypass -File ./scripts/android-stop-gradle.ps1",
+    "android:clean-native": "powershell -ExecutionPolicy Bypass -File ./scripts/android-clean-native.ps1",
     "android:release": "powershell -ExecutionPolicy Bypass -File ./scripts/android-assemble-release.ps1",
     "android:bundle": "powershell -ExecutionPolicy Bypass -File ./scripts/android-bundle-release.ps1",
     "build:aab": "eas build -p android --profile production",

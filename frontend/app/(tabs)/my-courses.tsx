@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Stack, useFocusEffect, useRouter } from 'expo-router';
@@ -66,11 +67,34 @@ const headerShadow = Platform.select({
 
 type ServerLessonMedia = {
   _id?: string;
+  lessonKey?: string;
   videoUrl?: string | null;
   videoAvailableIn?: number;
   pdfUrl?: string | null;
   pdfAvailableIn?: number;
 };
+
+type ServerLevelCourses = {
+  lessons: ServerLessonMedia[];
+  byKey: Record<string, ServerLessonMedia>;
+};
+
+function buildServerLevel(lessons: ServerLessonMedia[]): ServerLevelCourses {
+  const byKey: Record<string, ServerLessonMedia> = {};
+  for (const lesson of lessons) {
+    if (lesson.lessonKey) byKey[lesson.lessonKey] = lesson;
+  }
+  return { lessons, byKey };
+}
+
+function getServerLessonForLocal(
+  serverLevel: ServerLevelCourses | undefined,
+  lessonId: string,
+  lessonIndex: number,
+): ServerLessonMedia | undefined {
+  if (!serverLevel) return undefined;
+  return serverLevel.byKey[lessonId] ?? serverLevel.lessons[lessonIndex];
+}
 
 function isLessonUnlockedInRoadmap(
   lessons: Lesson[],
@@ -335,6 +359,8 @@ function CoursePlaylistView({
   onMarkComplete,
   renderPlayer,
   isFullscreen,
+  refreshing,
+  onRefresh,
 }: {
   level: (typeof COURSE_DATA)[0];
   levelUnlocked: boolean;
@@ -353,6 +379,8 @@ function CoursePlaylistView({
   onMarkComplete: (lessonId: string) => void;
   renderPlayer: (isFull: boolean) => React.ReactNode;
   isFullscreen: boolean;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 }) {
   const levelIcon = LEVEL_ICONS[level.id] ?? 'book-open-variant';
   const currentLesson = level.lessons[focusIndex] ?? level.lessons[0];
@@ -515,6 +543,11 @@ function CoursePlaylistView({
           renderItem={renderPlaylistItem}
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
+          refreshControl={
+            onRefresh ? (
+              <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} tintColor={UI.accent} />
+            ) : undefined
+          }
           ItemSeparatorComponent={() => <View style={styles.playlistRowDivider} />}
         />
       </View>
@@ -540,9 +573,10 @@ export default function MyCoursesScreen() {
   const [lastLessonId, setLastLessonId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [serverCoursesByLevel, setServerCoursesByLevel] = useState<
-    Partial<Record<LevelId, { lessons: ServerLessonMedia[] }>>
+    Partial<Record<LevelId, ServerLevelCourses>>
   >({});
   const [serverCoursesError, setServerCoursesError] = useState<string | null>(null);
+  const [refreshingCourses, setRefreshingCourses] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<LevelId>('beginner');
   const [roadmapFocusIndex, setRoadmapFocusIndex] = useState(0);
   const [lessonReviewId, setLessonReviewId] = useState<string | null>(null);
@@ -604,13 +638,13 @@ export default function MyCoursesScreen() {
       const res = await apiFetch<{ data: { level?: string; lessons?: ServerLessonMedia[] }[] }>(
         '/api/courses'
       );
-      const byLevel: Partial<Record<LevelId, { lessons: ServerLessonMedia[] }>> = {};
+      const byLevel: Partial<Record<LevelId, ServerLevelCourses>> = {};
 
       for (const c of res.data ?? []) {
         if (!c?.level) continue;
         const level = c.level as LevelId;
         if (level !== 'beginner' && level !== 'intermediate' && level !== 'advanced') continue;
-        byLevel[level] = { lessons: c.lessons ?? [] };
+        byLevel[level] = buildServerLevel(c.lessons ?? []);
       }
 
       setServerCoursesByLevel(byLevel);
@@ -625,6 +659,15 @@ export default function MyCoursesScreen() {
     }
   }, []);
 
+  const refreshCourses = useCallback(async () => {
+    setRefreshingCourses(true);
+    try {
+      await loadServerCourses();
+    } finally {
+      setRefreshingCourses(false);
+    }
+  }, [loadServerCourses]);
+
   useFocusEffect(
     useCallback(() => {
       loadCourseProgress().then(({ completedLessons: saved, lastLessonId: last }) => {
@@ -632,14 +675,14 @@ export default function MyCoursesScreen() {
         setLastLessonId(last);
       });
 
-      // Refresh server-driven lesson media frequently so add/delete updates reflect quickly.
+      // Refresh server-driven lesson media so admin uploads/deletes reflect quickly.
       loadServerCourses();
       const interval = setInterval(() => {
         void loadServerCourses();
-      }, 30000);
+      }, 5000);
 
       return () => clearInterval(interval);
-    }, [])
+    }, [loadServerCourses])
   );
 
   // Timer to hide controls
@@ -732,7 +775,7 @@ export default function MyCoursesScreen() {
 
     const lessonIndex = localLevel.lessons.findIndex((l) => l.id === lessonId);
     const serverLevel = localLevel.id ? serverCoursesByLevel[localLevel.id] : undefined;
-    const serverLesson = serverLevel?.lessons?.[lessonIndex];
+    const serverLesson = getServerLessonForLocal(serverLevel, lessonId, lessonIndex);
 
     // If the server has a matching lesson record but no videoUrl (yet or deleted),
     // hide the video instead of falling back to the bundled lecture.
@@ -813,7 +856,7 @@ export default function MyCoursesScreen() {
       const lessonIndex = localLevel?.lessons?.findIndex((x) => x.id === lesson.id) ?? -1;
       const serverLesson =
         localLevel?.id && lessonIndex >= 0
-          ? serverCoursesByLevel[localLevel.id]?.lessons?.[lessonIndex]
+          ? getServerLessonForLocal(serverCoursesByLevel[localLevel.id], lesson.id, lessonIndex)
           : undefined;
 
       const url =
@@ -1039,7 +1082,9 @@ export default function MyCoursesScreen() {
     const localLevel = COURSE_DATA.find((l) => l.lessons.some((lesson) => lesson.id === playingLessonId));
     const lessonIndex =
       localLevel?.lessons?.findIndex((l) => l.id === playingLessonId) ?? -1;
-    const serverLesson = localLevel?.id ? serverCoursesByLevel[localLevel.id]?.lessons?.[lessonIndex] : null;
+    const serverLesson = localLevel?.id
+      ? getServerLessonForLocal(serverCoursesByLevel[localLevel.id], playingLessonId, lessonIndex)
+      : null;
     const progressPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
     const showCenterControls = controlsVisible || !isVideoLoaded;
     const cinemaMode = isPaused && !controlsVisible && isVideoLoaded;
@@ -1245,6 +1290,8 @@ export default function MyCoursesScreen() {
             onMarkComplete={toggleCompletion}
             renderPlayer={renderPlayer}
             isFullscreen={isFullscreen}
+            refreshing={refreshingCourses}
+            onRefresh={refreshCourses}
           />
         </View>
       )}
