@@ -123,15 +123,19 @@ const createSession = async (user1Id, user2Id) => {
 };
 
 /**
- * Terminate an active chat session
+ * Terminate an active chat session (optional userId enforces participant ownership)
  */
-const endSession = async (sessionId) => {
+const endSession = async (sessionId, userId = null) => {
   const session = await ChatSession.findById(sessionId);
-  if (session && session.status === 'active') {
-    session.status = 'ended';
-    session.endedAt = new Date();
-    await session.save();
+  if (!session || session.status !== 'active') return session;
+
+  if (userId != null && !session.hasParticipant(userId)) {
+    return null;
   }
+
+  session.status = 'ended';
+  session.endedAt = new Date();
+  await session.save();
   return session;
 };
 

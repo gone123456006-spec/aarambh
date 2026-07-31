@@ -1,5 +1,19 @@
 const mongoose = require('mongoose');
 
+const NOTIFICATION_TYPES = [
+  'system',
+  'welcome',
+  'reward',
+  'course',
+  'game',
+  'points',
+  'leaderboard',
+  'subscription',
+  'chat',
+  'call',
+  'achievement',
+];
+
 const notificationSchema = new mongoose.Schema(
   {
     user: {
@@ -20,12 +34,24 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['system', 'chat', 'course', 'achievement'],
+      enum: NOTIFICATION_TYPES,
       default: 'system',
+      index: true,
+    },
+    /** Dedup key e.g. "daily-reward-2026-07-17" — unique per user when set */
+    key: {
+      type: String,
+      trim: true,
+    },
+    /** Optional deep-link / payload for the app */
+    data: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
     },
     read: {
       type: Boolean,
       default: false,
+      index: true,
     },
   },
   {
@@ -33,6 +59,11 @@ const notificationSchema = new mongoose.Schema(
   }
 );
 
+notificationSchema.index({ user: 1, createdAt: -1 });
+notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
+notificationSchema.index({ user: 1, key: 1 }, { unique: true, sparse: true });
+
 const Notification = mongoose.model('Notification', notificationSchema);
 
 module.exports = Notification;
+module.exports.NOTIFICATION_TYPES = NOTIFICATION_TYPES;

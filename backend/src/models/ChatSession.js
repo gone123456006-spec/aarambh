@@ -27,9 +27,12 @@ const chatSessionSchema = new mongoose.Schema(
   }
 );
 
+chatSessionSchema.index({ participants: 1, status: 1 });
+chatSessionSchema.index({ participants: 1, startedAt: -1 });
+
 // Helper to check if a user is in this session
 chatSessionSchema.methods.hasParticipant = function (userId) {
-  return this.participants.some(p => p.toString() === userId.toString());
+  return this.participants.some((p) => p.toString() === userId.toString());
 };
 
 const ChatSession = mongoose.model('ChatSession', chatSessionSchema);

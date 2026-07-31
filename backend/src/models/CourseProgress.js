@@ -7,6 +7,7 @@ const courseProgressSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
       unique: true,
+      index: true,
     },
     completedLessons: [
       {

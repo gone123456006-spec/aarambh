@@ -42,6 +42,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    totalPoints: {
+      type: Number,
+      default: 0,
+      min: 0,
+      index: true,
+    },
     role: {
       type: String,
       enum: ['user', 'admin'],
@@ -59,6 +65,17 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    /** Single-device login: only this device ID may hold an active session. */
+    activeDeviceId: {
+      type: String,
+      default: null,
+      index: true,
+      trim: true,
+    },
+    activeDeviceBoundAt: {
+      type: Date,
+      default: null,
+    },
     refreshTokens: [
       {
         type: String,
@@ -69,6 +86,13 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+/**
+ * Compound index matching the leaderboard sort: totalPoints DESC → _id ASC
+ * Must be defined BEFORE mongoose.model() to register on the schema.
+ * Run once in MongoDB:  db.users.createIndex({ totalPoints: -1, _id: 1 })
+ */
+userSchema.index({ totalPoints: -1, _id: 1 });
 
 const User = mongoose.model('User', userSchema);
 

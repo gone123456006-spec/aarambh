@@ -33,8 +33,8 @@ router.post(
   '/courses',
   [
     body('title').trim().notEmpty().withMessage('Course title is required'),
-    body('level').isIn(['beginner', 'intermediate', 'advanced']).withMessage('Invalid level designation'),
-    body('color').isArray().withMessage('Color must be an array of gradient hex strings'),
+    body('level').optional().trim().notEmpty().withMessage('Level cannot be empty'),
+    body('color').optional().isArray().withMessage('Color must be an array of gradient hex strings'),
     body('lessons').optional().isArray().withMessage('Lessons must be an array of lesson items'),
   ],
   validate,
@@ -54,21 +54,21 @@ router.put(
 
 router.post(
   '/courses/:id/lessons/upsert',
-  [
-    body('lessonKey').trim().notEmpty().withMessage('lessonKey is required'),
-    body('title').trim().notEmpty().withMessage('Lesson title is required'),
-    body('duration').notEmpty().withMessage('Duration is required'),
-  ],
+  [body('title').trim().notEmpty().withMessage('Lesson title is required')],
   validate,
   adminController.upsertLesson
 );
 
+router.put(
+  '/courses/:courseId/lessons/:lessonId',
+  [body('title').optional().trim().notEmpty().withMessage('Lesson title cannot be empty')],
+  validate,
+  adminController.updateLesson
+);
+
 router.post(
   '/courses/:id/lessons',
-  [
-    body('title').trim().notEmpty().withMessage('Lesson title is required'),
-    body('duration').notEmpty().withMessage('Duration is required'),
-  ],
+  [body('title').trim().notEmpty().withMessage('Lesson title is required')],
   validate,
   adminController.addLesson
 );

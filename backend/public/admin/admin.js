@@ -1,41 +1,13 @@
 const API = window.location.origin.replace(/\/$/, '');
-const AUTO_REFRESH_MS = 60 * 1000; // 1 minute
-
-/** Matches frontend constants/courseData.ts lesson ids */
-const CURRICULUM = {
-  beginner: [
-    { lessonKey: 'b1', title: 'Introduction to English', duration: '8:45', pdfTitle: 'Lesson 1 — Introduction Notes' },
-    { lessonKey: 'b2', title: 'Basic Grammar Rules', duration: '12:20', pdfTitle: 'Lesson 2 — Grammar Basics PDF' },
-    { lessonKey: 'b3', title: 'Common Greetings', duration: '10:15', pdfTitle: 'Lesson 3 — Greetings Worksheet' },
-    { lessonKey: 'b4', title: 'Numbers & Counting', duration: '15:30', pdfTitle: 'Lesson 4 — Numbers Practice PDF' },
-    { lessonKey: 'b5', title: 'Daily Objects', duration: '9:50', pdfTitle: 'Lesson 5 — Daily Objects PDF' },
-  ],
-  intermediate: [
-    { lessonKey: 'i1', title: 'Sentence Structures', duration: '20:10', pdfTitle: 'Lesson 1 — Sentence Structures PDF' },
-    { lessonKey: 'i2', title: 'Verbs & Tenses', duration: '18:45', pdfTitle: 'Lesson 2 — Verbs & Tenses PDF' },
-    { lessonKey: 'i3', title: 'Travel Vocabulary', duration: '22:30', pdfTitle: 'Lesson 3 — Travel English PDF' },
-    { lessonKey: 'i4', title: 'Expressing Opinions', duration: '19:15', pdfTitle: 'Lesson 4 — Opinions & Debate PDF' },
-    { lessonKey: 'i5', title: 'Listening Practice', duration: '25:00', pdfTitle: 'Lesson 5 — Listening Workbook' },
-  ],
-  advanced: [
-    { lessonKey: 'a1', title: 'Business English Basics', duration: '30:00', pdfTitle: 'Lesson 1 — Business English PDF' },
-    { lessonKey: 'a2', title: 'Public Speaking Tips', duration: '28:45', pdfTitle: 'Lesson 2 — Public Speaking PDF' },
-    { lessonKey: 'a3', title: 'Idioms & Phrasal Verbs', duration: '32:15', pdfTitle: 'Lesson 3 — Idioms Guide PDF' },
-    { lessonKey: 'a4', title: 'Academic Writing', duration: '35:20', pdfTitle: 'Lesson 4 — Academic Writing PDF' },
-    { lessonKey: 'a5', title: 'Advanced Pronunciation', duration: '25:45', pdfTitle: 'Lesson 5 — Pronunciation PDF' },
-    { lessonKey: 'a6', title: 'Debating Techniques', duration: '29:30', pdfTitle: 'Lesson 6 — Debating PDF' },
-    { lessonKey: 'a7', title: 'Understanding Accents', duration: '31:10', pdfTitle: 'Lesson 7 — Accents PDF' },
-    { lessonKey: 'a8', title: 'Creative Storytelling', duration: '27:50', pdfTitle: 'Lesson 8 — Storytelling PDF' },
-    { lessonKey: 'a9', title: 'Professional Interviews', duration: '33:40', pdfTitle: 'Lesson 9 — Interview Prep PDF' },
-    { lessonKey: 'a10', title: 'Final Graduation Project', duration: '45:00', pdfTitle: 'Lesson 10 — Graduation Project PDF' },
-  ],
-};
+const AUTO_REFRESH_MS = 60 * 1000;
 
 let token = sessionStorage.getItem('adminToken') || '';
 let usersPage = 1;
 let usersPagination = { pages: 1 };
 let autoRefreshTimer = null;
 let cachedCourses = [];
+/** courseId -> lessonId when editing */
+const editingLesson = {};
 
 const $ = (id) => document.getElementById(id);
 
@@ -98,11 +70,7 @@ function switchTab(name) {
   if (name === 'users') loadUsers();
   if (name === 'overview') loadStats();
   if (name === 'content') {
-    loadCourses().then(() => {
-      loadCourseList();
-      loadExistingLessons();
-      populateLessonSlots();
-    });
+    loadCourses().then(() => renderCategorySections());
   }
 }
 
@@ -127,7 +95,7 @@ function setLoggedIn(user) {
   $('userBadge').textContent = user?.username || user?.name || 'Admin';
   startAutoRefresh();
   const hint = $('autoRefreshHint');
-  if (hint) hint.textContent = 'Uploads go live in app in ~2 seconds';
+  if (hint) hint.textContent = 'Uploads go live in My Courses instantly';
   switchTab('content');
 }
 
@@ -290,11 +258,7 @@ function refreshAll(silent = false) {
   loadStats();
   if (!$('panel-users').classList.contains('hidden')) loadUsers();
   if (!$('panel-content').classList.contains('hidden')) {
-    loadCourses().then(() => {
-      loadCourseList();
-      loadExistingLessons();
-      populateLessonSlots();
-    });
+    loadCourses().then(() => renderCategorySections());
   }
   if (!silent) {
     const hint = $('autoRefreshHint');
@@ -304,9 +268,10 @@ function refreshAll(silent = false) {
 
 async function createCourse() {
   const title = $('newCourseTitle').value.trim();
-  const level = $('newCourseLevel').value;
+  const level = $('newCourseLevel').value.trim();
+  const subtitle = $('newCourseSubtitle').value.trim();
   if (!title) {
-    showStatus($('createCourseStatus'), 'Enter a course title', 'err');
+    showStatus($('createCourseStatus'), 'Enter a category title', 'err');
     return;
   }
   $('createCourseBtn').disabled = true;
@@ -315,21 +280,17 @@ async function createCourse() {
       method: 'POST',
       body: JSON.stringify({
         title,
-        subtitle: `${title} course`,
-        level,
-        color: ['#e60000', '#ff6b6b'],
+        subtitle: subtitle || `${title} lessons`,
+        level: level || undefined,
         lessons: [],
       }),
     });
-    showStatus($('createCourseStatus'), `Course "${title}" created — select it above to upload`, 'ok');
+    showStatus($('createCourseStatus'), `Category "${title}" created — add lessons below`, 'ok');
     $('newCourseTitle').value = '';
+    $('newCourseLevel').value = '';
+    $('newCourseSubtitle').value = '';
     await loadCourses();
-    loadCourseList();
-    const created = cachedCourses.find((c) => c.level === level);
-    if (created && $('uploadCourseId')) {
-      $('uploadCourseId').value = created._id;
-      populateLessonSlots();
-    }
+    renderCategorySections();
   } catch (e) {
     showStatus($('createCourseStatus'), e.message, 'err');
   } finally {
@@ -341,7 +302,6 @@ async function loadCourses() {
   try {
     const courses = await api('/api/admin/courses');
     cachedCourses = courses || [];
-    fillCourseSelects(cachedCourses);
     return cachedCourses;
   } catch {
     cachedCourses = [];
@@ -349,154 +309,140 @@ async function loadCourses() {
   }
 }
 
-function fillCourseSelects(courses) {
-  const selects = [$('courseId'), $('uploadCourseId')];
-  const noCourseHint = $('noCourseHint');
-
-  if (noCourseHint) {
-    noCourseHint.classList.toggle('hidden', courses.length > 0);
-  }
-
-  selects.forEach((select) => {
-    if (!select) return;
-    const prev = select.value;
-    select.innerHTML = '<option value="">Select course…</option>';
-    courses.forEach((c) => {
-      const opt = document.createElement('option');
-      opt.value = c._id;
-      opt.textContent = `${c.title} (${c.level}) — ${c.lessons?.length || 0} lessons`;
-      opt.dataset.level = c.level;
-      select.appendChild(opt);
-    });
-    if (prev && courses.some((c) => String(c._id) === String(prev))) {
-      select.value = prev;
-    } else if (select.id === 'uploadCourseId' && courses.length === 1) {
-      select.value = courses[0]._id;
-      populateLessonSlots();
-    }
-  });
+function esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
-function showAppLiveBanner(lessonTitle, seconds) {
-  const banner = $('appLiveBanner');
-  if (!banner) return;
-  banner.classList.remove('hidden');
-
-  let left = seconds;
-  const tick = () => {
-    if (left > 0) {
-      banner.textContent = `✓ "${lessonTitle}" publishing… live in app in ${left}s (pull down My Courses to refresh)`;
-      left -= 1;
-      setTimeout(tick, 1000);
-    } else {
-      banner.textContent = `✓ "${lessonTitle}" is now live in the app! Open My Courses and pull down to refresh.`;
-    }
-  };
-  tick();
+function lessonRowHtml(courseId, lesson) {
+  const hasVideo = !!lesson.videoUrl;
+  const hasPdf = !!lesson.pdfUrl;
+  return `
+    <div class="lesson-row" data-lesson-row="${lesson._id}">
+      <div class="lesson-title">
+        <strong>${esc(lesson.title)}</strong>
+        <span style="color:#636e72;font-size:0.82rem">${esc(lesson.duration || '')}</span>
+        ${lesson.description ? `<p class="lesson-about-preview">${esc(lesson.description.slice(0, 120))}${lesson.description.length > 120 ? '…' : ''}</p>` : ''}
+      </div>
+      <div class="lesson-status">
+        ${hasVideo ? '<span class="badge ok">Video ✓</span>' : '<span class="badge">No video</span>'}
+        ${hasPdf ? '<span class="badge ok">PDF ✓</span>' : '<span class="badge">No PDF</span>'}
+      </div>
+      <div class="lesson-actions">
+        <button type="button" class="ghost" data-edit-lesson="${lesson._id}" data-course-id="${courseId}">Edit</button>
+        <button type="button" class="danger" data-del-lesson="${lesson._id}" data-course-id="${courseId}">Delete</button>
+      </div>
+    </div>`;
 }
 
-async function loadCourseList() {
-  const container = $('courseList');
-  if (!container) return;
+function categorySectionHtml(course) {
+  const cid = course._id;
+  const lessons = course.lessons || [];
+  const color = course.color?.[0] || '#e60000';
+  const editing = editingLesson[cid];
 
-  try {
-    const courses = cachedCourses.length ? cachedCourses : await loadCourses();
+  return `
+    <section class="card category-section" data-course-id="${cid}" style="border-top: 4px solid ${esc(color)}">
+      <div class="category-header">
+        <div>
+          <h2>${esc(course.title)}</h2>
+          <p class="hint" style="margin:0">${esc(course.subtitle || course.level)} · ${lessons.length} lesson(s) · slug: ${esc(course.level)}</p>
+        </div>
+        <button type="button" class="danger" data-delete-course="${cid}" data-course-title="${esc(course.title)}">Delete category</button>
+      </div>
 
-    if (!courses.length) {
-      container.innerHTML =
-        '<p style="color:#636e72; margin:0">No courses yet. Create one below.</p>';
-      return;
-    }
-
-    container.innerHTML = courses
-      .map(
-        (c) => `
-        <div class="course-row">
-          <div class="course-row-meta">
-            <strong>${c.title}</strong>
-            <span>${c.level} · ${c.lessons?.length || 0} lesson(s) · ${c.views || 0} views</span>
-          </div>
-          <button type="button" class="danger" data-delete-course="${c._id}" data-course-title="${c.title}">
-            Delete course
-          </button>
-        </div>`
-      )
-      .join('');
-
-    container.querySelectorAll('[data-delete-course]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = btn.dataset.deleteCourse;
-        const title = btn.dataset.courseTitle || 'this course';
-        if (!confirm(`Delete "${title}" and all its videos/PDFs? This cannot be undone.`)) return;
-
-        btn.disabled = true;
-        try {
-          await api(`/api/admin/courses/${id}`, { method: 'DELETE' });
-          showStatus($('publishStatus'), 'Course deleted', 'ok');
-          await loadCourses();
-          loadCourseList();
-          loadExistingLessons();
-          populateLessonSlots();
-        } catch (e) {
-          showStatus($('publishStatus'), e.message, 'err');
-        } finally {
-          btn.disabled = false;
+      <div class="lessons-block">
+        <h3 class="subheading">Lessons in app</h3>
+        ${
+          lessons.length
+            ? lessons.map((l) => lessonRowHtml(cid, l)).join('')
+            : '<p class="hint">No lessons yet — add your first video below.</p>'
         }
-      });
-    });
-  } catch (e) {
-    container.innerHTML = `<p class="status err">${e.message}</p>`;
-  }
+      </div>
+
+      <div class="add-lesson-box">
+        <h3 class="subheading">${editing ? 'Edit lesson' : 'Add new lesson'}</h3>
+        <label>Lesson title (heading)</label>
+        <input type="text" class="fld-title" placeholder="Introduction to English" value="${editing ? esc(editing.title) : ''}" />
+        <div class="upload-row">
+          <div class="upload-field">
+            <label>Duration</label>
+            <input type="text" class="fld-duration" placeholder="12:30" value="${editing ? esc(editing.duration) : ''}" />
+          </div>
+          <div class="upload-field">
+            <label>PDF title</label>
+            <input type="text" class="fld-pdf-title" placeholder="Lesson notes PDF" value="${editing ? esc(editing.pdfTitle) : ''}" />
+          </div>
+        </div>
+        <label>About this lesson</label>
+        <textarea class="fld-about" rows="3" placeholder="What students will learn in this lesson…">${editing ? esc(editing.description) : ''}</textarea>
+
+        <div class="drop-row">
+          <div class="drop-zone dz-video" tabindex="0" data-course="${cid}">
+            <input type="file" class="inp-video" accept="video/*" hidden />
+            <p class="drop-icon">🎬</p>
+            <p class="drop-title">Video</p>
+            <p class="drop-sub">Tap or drag · max 100 MB</p>
+            <p class="drop-file hidden"></p>
+          </div>
+          <div class="drop-zone dz-pdf" tabindex="0" data-course="${cid}">
+            <input type="file" class="inp-pdf" accept="application/pdf" hidden />
+            <p class="drop-icon">📄</p>
+            <p class="drop-title">PDF notes</p>
+            <p class="drop-sub">Optional · max 20 MB</p>
+            <p class="drop-file hidden"></p>
+          </div>
+        </div>
+
+        <div class="progress-wrap hidden prog-wrap">
+          <div class="progress-bar"><div class="progress-fill prog-fill"></div></div>
+          <p class="progress-text prog-text">Uploading…</p>
+        </div>
+        <div class="live-banner hidden live-msg"></div>
+        <div class="row" style="gap:0.5rem;margin-top:0.5rem">
+          <button type="button" class="publish-btn" data-save-lesson="${cid}" style="flex:1">
+            ${editing ? 'Update lesson in app' : 'Add lesson to app'}
+          </button>
+          ${editing ? `<button type="button" class="secondary" data-cancel-edit="${cid}">Cancel edit</button>` : ''}
+        </div>
+        <div class="status hidden lesson-form-status"></div>
+      </div>
+    </section>`;
 }
 
-function populateLessonSlots() {
-  const courseSelect = $('uploadCourseId');
-  const slotSelect = $('lessonSlot');
-  if (!courseSelect || !slotSelect) return;
+async function renderCategorySections() {
+  const root = $('categorySections');
+  if (!root) return;
 
-  const selected = courseSelect.selectedOptions[0];
-  const level = selected?.dataset?.level;
-  slotSelect.innerHTML = '';
+  const courses = cachedCourses.length ? cachedCourses : await loadCourses();
 
-  if (!level || !CURRICULUM[level]) {
-    slotSelect.innerHTML = '<option value="">Select course first…</option>';
+  if (!courses.length) {
+    root.innerHTML =
+      '<section class="card"><p class="hint" style="margin:0">No categories yet. Create <strong>Beginner</strong>, <strong>Intermediate</strong>, and <strong>Advanced</strong> above, then add videos for each.</p></section>';
     return;
   }
 
-  slotSelect.innerHTML = '<option value="">Select lesson…</option>';
-  CURRICULUM[level].forEach((slot, i) => {
-    const opt = document.createElement('option');
-    opt.value = slot.lessonKey;
-    opt.textContent = `Lesson ${i + 1}: ${slot.title} (${slot.lessonKey})`;
-    slotSelect.appendChild(opt);
-  });
+  root.innerHTML = courses.map((c) => categorySectionHtml(c)).join('');
+  bindCategorySectionEvents();
 }
 
-function formatFileSize(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function setupDropZone(zoneId, inputId, nameId) {
-  const zone = $(zoneId);
-  const input = $(inputId);
-  const nameEl = $(nameId);
-  if (!zone || !input) return;
+function bindDropZone(zone) {
+  if (!zone || zone.dataset.bound) return;
+  zone.dataset.bound = '1';
+  const input = zone.querySelector('input[type=file]');
+  const nameEl = zone.querySelector('.drop-file');
+  if (!input) return;
 
   const showFile = (file) => {
-    if (!file) return;
+    if (!file || !nameEl) return;
     nameEl.textContent = `${file.name} (${formatFileSize(file.size)})`;
     nameEl.classList.remove('hidden');
   };
 
   zone.addEventListener('click', () => input.click());
-  zone.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      input.click();
-    }
-  });
   input.addEventListener('change', () => {
     if (input.files?.[0]) showFile(input.files[0]);
   });
@@ -517,20 +463,83 @@ function setupDropZone(zoneId, inputId, nameId) {
   });
 }
 
-function setUploadProgress(pct, text) {
-  const wrap = $('uploadProgressWrap');
-  const fill = $('uploadProgressFill');
-  const label = $('uploadProgressText');
+function bindCategorySectionEvents() {
+  document.querySelectorAll('.drop-zone').forEach(bindDropZone);
+
+  document.querySelectorAll('[data-delete-course]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.deleteCourse;
+      const title = btn.dataset.courseTitle || 'this category';
+      if (!confirm(`Delete "${title}" and ALL its videos/PDFs from the app?`)) return;
+      btn.disabled = true;
+      try {
+        await api(`/api/admin/courses/${id}`, { method: 'DELETE' });
+        delete editingLesson[id];
+        await loadCourses();
+        renderCategorySections();
+      } catch (e) {
+        alert(e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-del-lesson]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const lessonId = btn.dataset.delLesson;
+      const courseId = btn.dataset.courseId;
+      if (!confirm('Delete this lesson from the app?')) return;
+      try {
+        await api(`/api/admin/courses/${courseId}/lessons/${lessonId}`, { method: 'DELETE' });
+        if (editingLesson[courseId]?._id === lessonId) delete editingLesson[courseId];
+        await loadCourses();
+        renderCategorySections();
+      } catch (e) {
+        alert(e.message);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-edit-lesson]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const courseId = btn.dataset.courseId;
+      const lessonId = btn.dataset.editLesson;
+      const course = cachedCourses.find((c) => String(c._id) === String(courseId));
+      const lesson = course?.lessons?.find((l) => String(l._id) === String(lessonId));
+      if (!lesson) return;
+      editingLesson[courseId] = { ...lesson, _id: lesson._id };
+      renderCategorySections();
+      document.querySelector(`[data-course-id="${courseId}"]`)?.scrollIntoView({ behavior: 'smooth' });
+    });
+  });
+
+  document.querySelectorAll('[data-cancel-edit]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      delete editingLesson[btn.dataset.cancelEdit];
+      renderCategorySections();
+    });
+  });
+
+  document.querySelectorAll('[data-save-lesson]').forEach((btn) => {
+    btn.addEventListener('click', () => saveLessonToApp(btn.dataset.saveLesson));
+  });
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function setSectionProgress(section, pct, text) {
+  const wrap = section.querySelector('.prog-wrap');
+  const fill = section.querySelector('.prog-fill');
+  const label = section.querySelector('.prog-text');
   if (!wrap || !fill) return;
   wrap.classList.remove('hidden');
   fill.style.width = `${Math.round(pct * 100)}%`;
   if (label) label.textContent = text || `Uploading… ${Math.round(pct * 100)}%`;
-}
-
-function hideUploadProgress() {
-  $('uploadProgressWrap')?.classList.add('hidden');
-  const fill = $('uploadProgressFill');
-  if (fill) fill.style.width = '0%';
 }
 
 function uploadWithProgress(path, formData, onProgress) {
@@ -558,253 +567,99 @@ function uploadWithProgress(path, formData, onProgress) {
   });
 }
 
-async function publishLesson() {
-  const courseId = $('uploadCourseId')?.value;
-  const lessonKey = $('lessonSlot')?.value;
-  const videoInput = $('videoFile');
-  const pdfInput = $('pdfFile');
-  const statusEl = $('publishStatus');
-  const previewEl = $('videoPreview');
-  const btn = $('publishLessonBtn');
+async function saveLessonToApp(courseId) {
+  const section = document.querySelector(`[data-course-id="${courseId}"]`);
+  if (!section) return;
 
-  if (!courseId) {
-    showStatus(statusEl, 'Select a course', 'err');
-    return;
-  }
-  if (!lessonKey) {
-    showStatus(statusEl, 'Select a lesson slot', 'err');
-    return;
-  }
-  if (!videoInput?.files?.[0] && !pdfInput?.files?.[0]) {
-    showStatus(statusEl, 'Choose a video or PDF file', 'err');
+  const title = section.querySelector('.fld-title')?.value?.trim();
+  const duration = section.querySelector('.fld-duration')?.value?.trim() || '0:00';
+  const description = section.querySelector('.fld-about')?.value?.trim() || '';
+  const pdfTitle = section.querySelector('.fld-pdf-title')?.value?.trim() || `${title} notes`;
+  const videoInput = section.querySelector('.inp-video');
+  const pdfInput = section.querySelector('.inp-pdf');
+  const statusEl = section.querySelector('.lesson-form-status');
+  const liveEl = section.querySelector('.live-msg');
+  const btn = section.querySelector('[data-save-lesson]');
+  const editing = editingLesson[courseId];
+
+  if (!title) {
+    showStatus(statusEl, 'Lesson title is required', 'err');
     return;
   }
 
-  const course = cachedCourses.find((c) => String(c._id) === String(courseId));
-  const slotMeta = CURRICULUM[course?.level]?.find((s) => s.lessonKey === lessonKey);
-  if (!slotMeta) {
-    showStatus(statusEl, 'Invalid lesson slot', 'err');
+  const isNew = !editing?._id;
+  if (isNew && !videoInput?.files?.[0] && !pdfInput?.files?.[0]) {
+    showStatus(statusEl, 'Add a video or PDF file', 'err');
     return;
   }
 
   btn.disabled = true;
-  hideUploadProgress();
-  previewEl?.classList.add('hidden');
-
   try {
-    let videoUrl;
-    let videoAvailableAt;
-    let pdfUrl;
-    let pdfAvailableAt;
+    let videoUrl = editing?.videoUrl;
+    let videoAvailableAt = editing?.videoAvailableAt;
+    let pdfUrl = editing?.pdfUrl;
+    let pdfAvailableAt = editing?.pdfAvailableAt;
 
-    if (videoInput.files?.[0]) {
+    if (videoInput?.files?.[0]) {
       const fd = new FormData();
       fd.append('video', videoInput.files[0]);
-      setUploadProgress(0, 'Uploading video…');
+      setSectionProgress(section, 0.1, 'Uploading video…');
       const data = await uploadWithProgress('/api/admin/upload/video', fd, (p) =>
-        setUploadProgress(p * 0.7, `Uploading video… ${Math.round(p * 100)}%`)
+        setSectionProgress(section, 0.1 + p * 0.5, `Uploading video… ${Math.round(p * 100)}%`)
       );
       videoUrl = data.url || data.videoUrl;
       videoAvailableAt = data.videoAvailableAt || data.availableAt;
     }
 
-    if (pdfInput.files?.[0]) {
+    if (pdfInput?.files?.[0]) {
       const fd = new FormData();
       fd.append('pdf', pdfInput.files[0]);
-      setUploadProgress(0.7, 'Uploading PDF…');
+      setSectionProgress(section, 0.65, 'Uploading PDF…');
       const data = await uploadWithProgress('/api/admin/upload/pdf', fd, (p) =>
-        setUploadProgress(0.7 + p * 0.2, `Uploading PDF… ${Math.round(p * 100)}%`)
+        setSectionProgress(section, 0.65 + p * 0.25, `Uploading PDF… ${Math.round(p * 100)}%`)
       );
       pdfUrl = data.url || data.pdfUrl;
       pdfAvailableAt = data.pdfAvailableAt || data.availableAt;
     }
 
-    setUploadProgress(0.92, 'Publishing to app…');
+    setSectionProgress(section, 0.95, 'Saving to app…');
+
+    const body = {
+      title,
+      duration,
+      description,
+      pdfTitle,
+      type: 'video',
+      videoUrl,
+      pdfUrl,
+      videoAvailableAt,
+      pdfAvailableAt,
+    };
+
+    if (editing?._id) {
+      body.lessonId = editing._id;
+    }
+
     await api(`/api/admin/courses/${courseId}/lessons/upsert`, {
       method: 'POST',
-      body: JSON.stringify({
-        lessonKey,
-        title: slotMeta.title,
-        duration: slotMeta.duration,
-        pdfTitle: slotMeta.pdfTitle,
-        type: 'video',
-        videoUrl,
-        pdfUrl,
-        videoAvailableAt,
-        pdfAvailableAt,
-      }),
+      body: JSON.stringify(body),
     });
 
-    setUploadProgress(1, 'Done!');
-    showAppLiveBanner(slotMeta.title, 2);
-    showStatus(
-      statusEl,
-      `Published "${slotMeta.title}". Check My Courses in the app within 2 seconds.`,
-      'ok'
-    );
-
-    if (previewEl && videoUrl) {
-      previewEl.classList.remove('hidden');
-      previewEl.innerHTML = `
-        <strong>Video preview</strong><br>
-        <video src="${videoUrl}" controls style="max-width:100%;margin-top:0.5rem;border-radius:8px"></video>
-        <p style="margin:0.35rem 0 0;color:#636e72">Slot: ${lessonKey} · ${slotMeta.title}</p>`;
+    setSectionProgress(section, 1, 'Done!');
+    if (liveEl) {
+      liveEl.classList.remove('hidden');
+      liveEl.textContent = `✓ "${title}" is live in My Courses! Pull down to refresh in the app.`;
     }
+    showStatus(statusEl, `Saved "${title}" — visible in app now`, 'ok');
 
-    videoInput.value = '';
-    pdfInput.value = '';
-    $('videoFileName')?.classList.add('hidden');
-    $('pdfFileName')?.classList.add('hidden');
-
+    delete editingLesson[courseId];
     await loadCourses();
-    loadCourseList();
-    loadExistingLessons();
-
-    if ($('courseId')?.value === courseId) loadExistingLessons();
-    else if ($('courseId')) {
-      $('courseId').value = courseId;
-      loadExistingLessons();
-    }
+    renderCategorySections();
   } catch (e) {
     showStatus(statusEl, e.message, 'err');
   } finally {
     btn.disabled = false;
-    setTimeout(hideUploadProgress, 1500);
-  }
-}
-
-async function loadExistingLessons() {
-  const courseId = $('courseId')?.value;
-  const container = $('existingLessons');
-
-  if (!container) return;
-
-  if (!courseId) {
-    container.innerHTML = '<p style="color:#636e72; margin:0">Select a course to see lessons.</p>';
-    return;
-  }
-
-  container.innerHTML = '<p style="color:#636e72; margin:0">Loading…</p>';
-
-  try {
-    const courses = cachedCourses.length ? cachedCourses : await loadCourses();
-    const course = (courses || []).find((c) => String(c._id) === String(courseId));
-    const lessons = course?.lessons || [];
-
-    if (!lessons.length) {
-      container.innerHTML = '<p style="color:#636e72; margin:0">No lessons yet. Use Upload above.</p>';
-      return;
-    }
-
-    container.innerHTML = lessons
-      .map((lesson) => {
-        const videoStatus = lesson.videoUrl
-          ? '<span class="badge ok">Video ✓</span>'
-          : lesson.videoAvailableAt
-            ? '<span class="badge warn">Video pending</span>'
-            : '<span class="badge">No video</span>';
-
-        const pdfStatus = lesson.pdfUrl
-          ? '<span class="badge ok">PDF ✓</span>'
-          : lesson.pdfAvailableAt
-            ? '<span class="badge warn">PDF pending</span>'
-            : '<span class="badge">No PDF</span>';
-
-        const canDeleteVideo = !!lesson.videoUrl || !!lesson.videoAvailableAt;
-        const canDeletePdf = !!lesson.pdfUrl || !!lesson.pdfAvailableAt;
-        const keyLabel = lesson.lessonKey ? ` · ${lesson.lessonKey}` : '';
-
-        return `
-          <div class="lesson-row">
-            <div class="lesson-title">
-              <strong>${lesson.title || 'Untitled'}</strong>
-              <span style="color:#636e72; font-size:0.82rem; margin-left:0.4rem">${lesson.duration || ''}${keyLabel}</span>
-            </div>
-
-            <div class="lesson-status">
-              ${videoStatus} ${pdfStatus}
-            </div>
-
-            <div class="lesson-actions">
-              <button type="button"
-                class="danger"
-                data-del-course-id="${courseId}"
-                data-del-lesson-id="${lesson._id}"
-                data-del-kind="video"
-                ${canDeleteVideo ? '' : 'disabled'}
-              >
-                Delete video
-              </button>
-
-              <button type="button"
-                class="danger"
-                data-del-course-id="${courseId}"
-                data-del-lesson-id="${lesson._id}"
-                data-del-kind="pdf"
-                ${canDeletePdf ? '' : 'disabled'}
-              >
-                Delete PDF
-              </button>
-
-              <button type="button"
-                class="danger"
-                data-del-lesson-course="${courseId}"
-                data-del-lesson-id="${lesson._id}"
-              >
-                Delete lesson
-              </button>
-            </div>
-          </div>
-        `;
-      })
-      .join('');
-
-    container.querySelectorAll('[data-del-kind]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const lessonId = btn.dataset.delLessonId;
-        const kind = btn.dataset.delKind;
-        const cid = btn.dataset.delCourseId;
-        if (!lessonId || !kind || !cid) return;
-
-        const ok = confirm(`Delete ${kind} for this lesson?`);
-        if (!ok) return;
-
-        try {
-          await api(
-            `/api/admin/courses/${cid}/lessons/${lessonId}/media?kind=${encodeURIComponent(kind)}`,
-            { method: 'DELETE' }
-          );
-          showStatus($('lessonStatus'), 'Deleted successfully', 'ok');
-          await loadCourses();
-          loadCourseList();
-          loadExistingLessons();
-        } catch (e) {
-          showStatus($('lessonStatus'), e.message, 'err');
-        }
-      });
-    });
-
-    container.querySelectorAll('[data-del-lesson-course]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const lessonId = btn.dataset.delLessonId;
-        const cid = btn.dataset.delLessonCourse;
-        if (!lessonId || !cid) return;
-
-        if (!confirm('Delete this entire lesson from the app?')) return;
-
-        try {
-          await api(`/api/admin/courses/${cid}/lessons/${lessonId}`, { method: 'DELETE' });
-          showStatus($('lessonStatus'), 'Lesson deleted', 'ok');
-          await loadCourses();
-          loadCourseList();
-          loadExistingLessons();
-        } catch (e) {
-          showStatus($('lessonStatus'), e.message, 'err');
-        }
-      });
-    });
-  } catch (e) {
-    container.innerHTML = `<p class="status err">${e.message}</p>`;
+    setTimeout(() => section.querySelector('.prog-wrap')?.classList.add('hidden'), 1200);
   }
 }
 
@@ -833,13 +688,7 @@ $('closeModalBtn').addEventListener('click', closeUserModal);
 $('userModal').addEventListener('click', (e) => {
   if (e.target === $('userModal')) closeUserModal();
 });
-$('publishLessonBtn')?.addEventListener('click', publishLesson);
-$('uploadCourseId')?.addEventListener('change', populateLessonSlots);
 $('createCourseBtn').addEventListener('click', createCourse);
-$('courseId').addEventListener('change', () => loadExistingLessons());
-
-setupDropZone('videoDropZone', 'videoFile', 'videoFileName');
-setupDropZone('pdfDropZone', 'pdfFile', 'pdfFileName');
 
 $('userSearch').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadUsers(1);

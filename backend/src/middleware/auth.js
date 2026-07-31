@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
+const { assertDeviceMatches, normalizeDeviceId } = require('../services/tokenService');
 
 const protect = asyncHandler(async (req, res, next) => {
   let token;
@@ -27,9 +28,19 @@ const protect = asyncHandler(async (req, res, next) => {
       throw new ApiError(401, 'User not found with this token');
     }
 
+    // Single-device enforcement: reject if Device ID does not match the bound device.
+    // Admins / legacy sessions without activeDeviceId are not blocked.
+    if (user.activeDeviceId) {
+      const deviceId =
+        normalizeDeviceId(req.headers['x-device-id']) ||
+        normalizeDeviceId(req.body?.deviceId);
+      assertDeviceMatches(user, deviceId);
+    }
+
     req.user = user;
     next();
   } catch (error) {
+    if (error instanceof ApiError) throw error;
     if (error.name === 'TokenExpiredError') {
       throw new ApiError(401, 'Access token expired');
     }

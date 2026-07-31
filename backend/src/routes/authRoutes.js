@@ -31,9 +31,40 @@ router.post(
       .withMessage('OTP must be exactly 6 characters')
       .isNumeric()
       .withMessage('OTP must consist of numbers only'),
+    body('deviceId')
+      .isString()
+      .trim()
+      .isLength({ min: 8, max: 128 })
+      .withMessage('A valid device ID is required'),
   ],
   validate,
   authController.verifyOtp
+);
+
+router.post(
+  '/transfer-device',
+  [
+    body('deviceId')
+      .isString()
+      .trim()
+      .isLength({ min: 8, max: 128 })
+      .withMessage('A valid device ID is required'),
+    body('transferToken').optional().isString(),
+    body('email')
+      .optional()
+      .isEmail()
+      .withMessage('Must be a valid email address')
+      .matches(/^[^\s@]+@gmail\.com$/i)
+      .withMessage('Only Gmail accounts are supported'),
+    body('code')
+      .optional()
+      .isLength({ min: 6, max: 6 })
+      .withMessage('OTP must be exactly 6 characters')
+      .isNumeric()
+      .withMessage('OTP must consist of numbers only'),
+  ],
+  validate,
+  authController.transferDevice
 );
 
 router.post('/refresh-token', authController.refreshAccessToken);

@@ -38,6 +38,18 @@ router.put(
   userController.updateAvatar
 );
 
+router.post(
+  '/me/points',
+  protect,
+  [
+    body('points')
+      .custom((value) => Number.isFinite(Number(value)) && Number(value) >= 0)
+      .withMessage('Points must be a non-negative number'),
+  ],
+  validate,
+  userController.syncPoints
+);
+
 router.get('/me/stats', protect, userController.getStats);
 
 router.delete('/me', protect, userController.deleteMe);

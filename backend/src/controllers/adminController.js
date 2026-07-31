@@ -6,7 +6,7 @@ const CourseProgress = require('../models/CourseProgress');
 const GameProgress = require('../models/GameProgress');
 const uploadService = require('../services/uploadService');
 const tokenService = require('../services/tokenService');
-const { sortCourseLessons } = require('../constants/curriculum');
+const { sortCourseLessons, slugifyLevel, colorsForLevel } = require('../constants/curriculum');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
@@ -230,29 +230,39 @@ const getUserById = asyncHandler(async (req, res) => {
 });
 
 /**
- * Create a new course containing lessons
+ * Create a new category/course (Beginner, Intermediate, Advanced, or custom).
  */
 const createCourse = asyncHandler(async (req, res) => {
-  const { title, subtitle, level, color, videoSource, lessons } = req.body;
+  const { title, subtitle, color, videoSource, lessons } = req.body;
+  let level = slugifyLevel(req.body.level || title);
+
+  if (!level) {
+    throw new ApiError(400, 'Category name / level is required');
+  }
+  if (!title?.trim()) {
+    throw new ApiError(400, 'Course title is required');
+  }
 
   const existing = await Course.findOne({ level });
   if (existing) {
-    throw new ApiError(400, `A course already exists for the level: ${level}`);
+    throw new ApiError(400, `A category already exists for: ${level}`);
   }
 
+  const count = await Course.countDocuments({});
   const course = new Course({
-    title,
-    subtitle,
+    title: title.trim(),
+    subtitle: subtitle?.trim() || `${title.trim()} lessons`,
     level,
-    color,
+    color: Array.isArray(color) && color.length ? color : colorsForLevel(level, count),
     videoSource,
     lessons: lessons || [],
+    sortOrder: count,
     createdBy: req.user._id,
   });
 
   await course.save();
 
-  res.status(201).json(new ApiResponse(201, course, 'Course created successfully'));
+  res.status(201).json(new ApiResponse(201, course, 'Category created successfully'));
 });
 
 /**
@@ -260,7 +270,7 @@ const createCourse = asyncHandler(async (req, res) => {
  */
 const updateCourse = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { title, subtitle, color, videoSource, lessons } = req.body;
+  const { title, subtitle, color, videoSource, lessons, sortOrder } = req.body;
 
   const course = await Course.findById(id);
 
@@ -273,6 +283,7 @@ const updateCourse = asyncHandler(async (req, res) => {
   if (color !== undefined) course.color = color;
   if (videoSource !== undefined) course.videoSource = videoSource;
   if (lessons !== undefined) course.lessons = lessons;
+  if (sortOrder !== undefined) course.sortOrder = sortOrder;
 
   await course.save();
 
@@ -280,7 +291,7 @@ const updateCourse = asyncHandler(async (req, res) => {
 });
 
 /**
- * Add a new lesson to an existing course
+ * Add a new lesson (title, about, duration, video, PDF) to a category.
  */
 const addLesson = asyncHandler(async (req, res) => {
   const { id } = req.params;
@@ -296,24 +307,33 @@ const addLesson = asyncHandler(async (req, res) => {
     pdfAvailableAt,
   } = req.body;
 
+  if (!title?.trim()) {
+    throw new ApiError(400, 'Lesson title is required');
+  }
+
   const course = await Course.findById(id);
 
   if (!course) {
     throw new ApiError(404, 'Course not found');
   }
 
+  const order = course.lessons.length;
+  const lessonKey =
+    req.body.lessonKey?.trim() ||
+    `${course.level}-${order + 1}-${Date.now().toString(36)}`;
+
   const newLesson = {
-    title,
-    duration,
-    description,
+    title: title.trim(),
+    duration: duration?.trim() || '0:00',
+    description: description?.trim() || '',
     type: type || 'video',
-    pdfTitle,
+    pdfTitle: pdfTitle?.trim() || (title.trim() + ' notes'),
     videoUrl,
     pdfUrl,
     videoAvailableAt,
     pdfAvailableAt,
-    lessonKey: req.body.lessonKey?.trim() || undefined,
-    order: course.lessons.length,
+    lessonKey,
+    order,
   };
 
   course.lessons.push(newLesson);
@@ -327,16 +347,20 @@ const addLesson = asyncHandler(async (req, res) => {
  * List all courses for admin (includes pending media URLs).
  */
 const getAdminCourses = asyncHandler(async (req, res) => {
-  const courses = await Course.find({}).sort({ level: 1 }).lean();
+  const courses = await Course.find({}).sort({ sortOrder: 1, createdAt: 1 }).lean();
+  for (const c of courses) {
+    c.lessons = sortCourseLessons(c.lessons || []);
+  }
   res.status(200).json(new ApiResponse(200, courses, 'Courses retrieved successfully'));
 });
 
 /**
- * Create or update a lesson by lessonKey (stable app id like b1, i2).
+ * Create or update a lesson. Prefer lessonId for updates; lessonKey for upsert by key.
  */
 const upsertLesson = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const {
+    lessonId,
     lessonKey,
     title,
     duration,
@@ -349,11 +373,8 @@ const upsertLesson = asyncHandler(async (req, res) => {
     pdfAvailableAt,
   } = req.body;
 
-  if (!lessonKey?.trim()) {
-    throw new ApiError(400, 'lessonKey is required (e.g. b1, i2, a3)');
-  }
-  if (!title?.trim() || !duration) {
-    throw new ApiError(400, 'Title and duration are required');
+  if (!title?.trim()) {
+    throw new ApiError(400, 'Lesson title is required');
   }
 
   const course = await Course.findById(id);
@@ -361,8 +382,12 @@ const upsertLesson = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'Course not found');
   }
 
-  const key = lessonKey.trim();
-  let lesson = course.lessons.find((l) => l.lessonKey === key);
+  let lesson = null;
+  if (lessonId) {
+    lesson = course.lessons.id(lessonId);
+  } else if (lessonKey?.trim()) {
+    lesson = course.lessons.find((l) => l.lessonKey === lessonKey.trim());
+  }
 
   if (lesson) {
     if (videoUrl && lesson.videoUrl && lesson.videoUrl !== videoUrl) {
@@ -372,27 +397,30 @@ const upsertLesson = asyncHandler(async (req, res) => {
       uploadService.deleteLocalAsset(lesson.pdfUrl);
     }
     lesson.title = title.trim();
-    lesson.duration = duration;
-    lesson.description = description;
+    if (duration !== undefined) lesson.duration = duration?.trim() || '0:00';
+    if (description !== undefined) lesson.description = description?.trim() || '';
     lesson.type = type || 'video';
-    lesson.pdfTitle = pdfTitle;
+    if (pdfTitle !== undefined) lesson.pdfTitle = pdfTitle?.trim() || '';
     if (videoUrl !== undefined) lesson.videoUrl = videoUrl || undefined;
     if (pdfUrl !== undefined) lesson.pdfUrl = pdfUrl || undefined;
     if (videoAvailableAt !== undefined) lesson.videoAvailableAt = videoAvailableAt || undefined;
     if (pdfAvailableAt !== undefined) lesson.pdfAvailableAt = pdfAvailableAt || undefined;
   } else {
+    const order = course.lessons.length;
+    const key =
+      lessonKey?.trim() || `${course.level}-${order + 1}-${Date.now().toString(36)}`;
     course.lessons.push({
       lessonKey: key,
       title: title.trim(),
-      duration,
-      description,
+      duration: duration?.trim() || '0:00',
+      description: description?.trim() || '',
       type: type || 'video',
-      pdfTitle,
+      pdfTitle: pdfTitle?.trim() || `${title.trim()} notes`,
       videoUrl,
       pdfUrl,
       videoAvailableAt,
       pdfAvailableAt,
-      order: course.lessons.length,
+      order,
     });
   }
 
@@ -400,6 +428,52 @@ const upsertLesson = asyncHandler(async (req, res) => {
   await course.save();
 
   res.status(200).json(new ApiResponse(200, course, 'Lesson saved successfully'));
+});
+
+/**
+ * Update an existing lesson by Mongo id (title, about, duration, media).
+ */
+const updateLesson = asyncHandler(async (req, res) => {
+  const { courseId, lessonId } = req.params;
+  const {
+    title,
+    duration,
+    description,
+    pdfTitle,
+    videoUrl,
+    pdfUrl,
+    videoAvailableAt,
+    pdfAvailableAt,
+  } = req.body;
+
+  const course = await Course.findById(courseId);
+  if (!course) throw new ApiError(404, 'Course not found');
+
+  const lesson = course.lessons.id(lessonId);
+  if (!lesson) throw new ApiError(404, 'Lesson not found');
+
+  if (title !== undefined) lesson.title = title.trim();
+  if (duration !== undefined) lesson.duration = duration?.trim() || '0:00';
+  if (description !== undefined) lesson.description = description?.trim() || '';
+  if (pdfTitle !== undefined) lesson.pdfTitle = pdfTitle?.trim() || '';
+
+  if (videoUrl !== undefined) {
+    if (videoUrl && lesson.videoUrl && lesson.videoUrl !== videoUrl) {
+      uploadService.deleteLocalAsset(lesson.videoUrl);
+    }
+    lesson.videoUrl = videoUrl || undefined;
+    if (videoAvailableAt !== undefined) lesson.videoAvailableAt = videoAvailableAt || undefined;
+  }
+  if (pdfUrl !== undefined) {
+    if (pdfUrl && lesson.pdfUrl && lesson.pdfUrl !== pdfUrl) {
+      uploadService.deleteLocalAsset(lesson.pdfUrl);
+    }
+    lesson.pdfUrl = pdfUrl || undefined;
+    if (pdfAvailableAt !== undefined) lesson.pdfAvailableAt = pdfAvailableAt || undefined;
+  }
+
+  await course.save();
+  res.status(200).json(new ApiResponse(200, course, 'Lesson updated successfully'));
 });
 
 /**
@@ -565,6 +639,7 @@ module.exports = {
   updateCourse,
   addLesson,
   upsertLesson,
+  updateLesson,
   deleteLesson,
   deleteCourse,
   deleteLessonMedia,

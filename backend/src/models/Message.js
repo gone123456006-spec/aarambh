@@ -12,6 +12,7 @@ const messageSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
+      index: true,
     },
     text: {
       type: String,
@@ -27,6 +28,9 @@ const messageSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+messageSchema.index({ chatSession: 1, timestamp: 1 });
+messageSchema.index({ sender: 1, createdAt: -1 });
 
 const Message = mongoose.model('Message', messageSchema);
 

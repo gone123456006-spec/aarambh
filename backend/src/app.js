@@ -22,6 +22,8 @@ const leaderboardRoutes = require('./routes/leaderboardRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
+const subscriptionRoutes = require('./routes/subscriptionRoutes');
+const appRoutes = require('./routes/appRoutes');
 
 const app = express();
 
@@ -123,6 +125,8 @@ app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/chats', chatRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/subscription', subscriptionRoutes);
+app.use('/api/app', appRoutes);
 
 // Fallback 404 Route for Unrecognized Endpoints
 app.use('*', (req, res, next) => {

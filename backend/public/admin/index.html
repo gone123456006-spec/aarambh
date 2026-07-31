@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Aarambh Admin Dashboard</title>
-    <link rel="stylesheet" href="/admin/admin.css?v=6" />
+    <link rel="stylesheet" href="/admin/admin.css?v=7" />
   </head>
   <body>
     <header>
       <h1>Aarambh Admin Dashboard</h1>
-      <p>Users, stats, and lesson uploads</p>
+      <p>Users, categories, and live lesson uploads</p>
     </header>
 
     <main>
@@ -47,11 +47,11 @@
           <div class="sidebar-user">
             <p class="sidebar-label">Signed in as</p>
             <p class="sidebar-username" id="userBadge"></p>
-            <p id="autoRefreshHint" class="sidebar-hint">Auto-refresh every 1 minute</p>
+            <p id="autoRefreshHint" class="sidebar-hint">Uploads go live in the app instantly</p>
           </div>
 
           <nav class="sidebar-nav" role="tablist">
-            <button type="button" class="tab active" data-tab="content">Upload video / PDF</button>
+            <button type="button" class="tab active" data-tab="content">Courses &amp; videos</button>
             <button type="button" class="tab" data-tab="overview">Overview</button>
             <button type="button" class="tab" data-tab="users">Users</button>
           </nav>
@@ -63,160 +63,95 @@
         </aside>
 
         <div class="dashboard-main">
-        <!-- CONTENT UPLOAD (default tab) -->
-        <div id="panel-content" class="tab-panel">
-          <section class="card upload-hero">
-            <h2>Upload lesson to app</h2>
-            <p class="hint">
-              Choose course + lesson, add video (and optional PDF), then publish.
-              <strong>Visible in My Courses within ~2 seconds.</strong>
-            </p>
+          <!-- COURSES / VIDEOS (default) -->
+          <div id="panel-content" class="tab-panel">
+            <section class="card">
+              <h2>Create category</h2>
+              <p class="hint">
+                Create <strong>Beginner</strong>, <strong>Intermediate</strong>, <strong>Advanced</strong>,
+                or any new category. Each category gets its own video section in My Courses.
+              </p>
+              <div class="upload-row">
+                <div class="upload-field">
+                  <label for="newCourseTitle">Category title</label>
+                  <input id="newCourseTitle" type="text" placeholder="e.g. Beginner" />
+                </div>
+                <div class="upload-field">
+                  <label for="newCourseLevel">Slug (optional)</label>
+                  <input id="newCourseLevel" type="text" placeholder="auto from title, e.g. beginner" />
+                </div>
+              </div>
+              <label for="newCourseSubtitle">Subtitle</label>
+              <input id="newCourseSubtitle" type="text" placeholder="Foundation &amp; Basics" />
+              <button type="button" id="createCourseBtn">Create category</button>
+              <div id="createCourseStatus" class="status hidden"></div>
+            </section>
 
-            <div class="upload-steps">
-              <span class="step">1. Course &amp; lesson</span>
-              <span class="step">2. Video / PDF</span>
-              <span class="step">3. Publish</span>
+            <div id="categorySections">
+              <p style="color: #636e72">Loading categories…</p>
             </div>
+          </div>
 
-            <div class="upload-row">
-              <div class="upload-field">
-                <label for="uploadCourseId">Course</label>
-                <select id="uploadCourseId">
-                  <option value="">Select course…</option>
+          <!-- OVERVIEW -->
+          <div id="panel-overview" class="tab-panel hidden">
+            <section class="card">
+              <h2>User statistics</h2>
+              <div id="statsGrid" class="stats-grid">
+                <p style="color: #636e72">Loading…</p>
+              </div>
+              <p id="statsUpdated" style="font-size: 0.8rem; color: #636e72; margin: 0.5rem 0 0"></p>
+            </section>
+            <section class="card">
+              <h2>Quick legend</h2>
+              <ul style="font-size: 0.88rem; color: #636e72; margin: 0; padding-left: 1.2rem">
+                <li><strong>Total users</strong> — registered app users</li>
+                <li><strong>Online now</strong> — connected via chat socket</li>
+                <li><strong>Logged in</strong> — has an active refresh session</li>
+                <li><strong>Active (24h)</strong> — seen in the last 24 hours</li>
+              </ul>
+            </section>
+          </div>
+
+          <!-- USERS -->
+          <div id="panel-users" class="tab-panel hidden">
+            <section class="card">
+              <h2>All users</h2>
+              <div class="toolbar">
+                <input id="userSearch" type="search" placeholder="Search email, name, phone…" />
+                <select id="userFilter">
+                  <option value="all">All users</option>
+                  <option value="online">Online now</option>
+                  <option value="logged_in">Logged in (session)</option>
+                  <option value="profile_complete">Profile complete</option>
                 </select>
+                <button type="button" id="searchUsersBtn">Search</button>
               </div>
-              <div class="upload-field">
-                <label for="lessonSlot">Lesson</label>
-                <select id="lessonSlot">
-                  <option value="">Select course first…</option>
-                </select>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Level</th>
+                      <th>Status</th>
+                      <th>Last seen</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="usersTableBody">
+                    <tr><td colspan="6">Loading…</td></tr>
+                  </tbody>
+                </table>
               </div>
-            </div>
-
-            <p id="noCourseHint" class="status info hidden">
-              No course yet? Create one below (one per level: beginner, intermediate, advanced).
-            </p>
-
-            <div class="drop-row">
-              <div id="videoDropZone" class="drop-zone" tabindex="0">
-                <input id="videoFile" type="file" accept="video/*" hidden />
-                <p class="drop-icon">🎬</p>
-                <p class="drop-title">Video</p>
-                <p class="drop-sub">Tap or drag · max 100 MB</p>
-                <p id="videoFileName" class="drop-file hidden"></p>
+              <div class="pagination">
+                <span id="usersPageInfo">Page 1</span>
+                <div class="row">
+                  <button type="button" id="prevPageBtn" class="secondary" disabled>Previous</button>
+                  <button type="button" id="nextPageBtn" class="secondary">Next</button>
+                </div>
               </div>
-
-              <div id="pdfDropZone" class="drop-zone" tabindex="0">
-                <input id="pdfFile" type="file" accept="application/pdf" hidden />
-                <p class="drop-icon">📄</p>
-                <p class="drop-title">PDF notes</p>
-                <p class="drop-sub">Optional · max 20 MB</p>
-                <p id="pdfFileName" class="drop-file hidden"></p>
-              </div>
-            </div>
-
-            <div id="uploadProgressWrap" class="progress-wrap hidden">
-              <div class="progress-bar"><div id="uploadProgressFill" class="progress-fill"></div></div>
-              <p id="uploadProgressText" class="progress-text">Uploading…</p>
-            </div>
-
-            <div id="videoPreview" class="preview hidden"></div>
-            <div id="appLiveBanner" class="live-banner hidden"></div>
-
-            <button type="button" id="publishLessonBtn" class="publish-btn">Upload &amp; publish to app</button>
-            <div id="publishStatus" class="status hidden"></div>
-          </section>
-
-          <details class="card details-block">
-            <summary>Create course (first time only)</summary>
-            <label for="newCourseTitle">Title</label>
-            <input id="newCourseTitle" type="text" placeholder="Beginner English" />
-            <label for="newCourseLevel">Level</label>
-            <select id="newCourseLevel">
-              <option value="beginner">beginner</option>
-              <option value="intermediate">intermediate</option>
-              <option value="advanced">advanced</option>
-            </select>
-            <button type="button" id="createCourseBtn">Create course</button>
-            <div id="createCourseStatus" class="status hidden"></div>
-          </details>
-
-          <details class="card details-block">
-            <summary>Manage courses &amp; delete</summary>
-            <div id="courseList" class="course-list">
-              <p style="color: #636e72; margin: 0">Loading…</p>
-            </div>
-          </details>
-
-          <details class="card details-block" open>
-            <summary>Existing lessons in app</summary>
-            <label for="courseId">Course</label>
-            <select id="courseId"></select>
-            <div id="existingLessons" class="preview"></div>
-            <div id="lessonStatus" class="status hidden"></div>
-          </details>
-        </div>
-
-        <!-- OVERVIEW -->
-        <div id="panel-overview" class="tab-panel hidden">
-          <section class="card">
-            <h2>User statistics</h2>
-            <div id="statsGrid" class="stats-grid">
-              <p style="color: #636e72">Loading…</p>
-            </div>
-            <p id="statsUpdated" style="font-size: 0.8rem; color: #636e72; margin: 0.5rem 0 0"></p>
-          </section>
-          <section class="card">
-            <h2>Quick legend</h2>
-            <ul style="font-size: 0.88rem; color: #636e72; margin: 0; padding-left: 1.2rem">
-              <li><strong>Total users</strong> — registered app users</li>
-              <li><strong>Online now</strong> — connected via chat socket</li>
-              <li><strong>Logged in</strong> — has an active refresh session</li>
-              <li><strong>Active (24h)</strong> — seen in the last 24 hours</li>
-            </ul>
-          </section>
-        </div>
-
-        <!-- USERS -->
-        <div id="panel-users" class="tab-panel hidden">
-          <section class="card">
-            <h2>All users</h2>
-            <div class="toolbar">
-              <input id="userSearch" type="search" placeholder="Search email, name, phone…" />
-              <select id="userFilter">
-                <option value="all">All users</option>
-                <option value="online">Online now</option>
-                <option value="logged_in">Logged in (session)</option>
-                <option value="profile_complete">Profile complete</option>
-              </select>
-              <button type="button" id="searchUsersBtn">Search</button>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Level</th>
-                    <th>Status</th>
-                    <th>Last seen</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="usersTableBody">
-                  <tr><td colspan="6">Loading…</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="pagination">
-              <span id="usersPageInfo">Page 1</span>
-              <div class="row">
-                <button type="button" id="prevPageBtn" class="secondary" disabled>Previous</button>
-                <button type="button" id="nextPageBtn" class="secondary">Next</button>
-              </div>
-            </div>
-          </section>
-        </div>
+            </section>
+          </div>
         </div>
       </div>
     </main>
@@ -233,6 +168,6 @@
     <script>
       document.getElementById('apiHost').textContent = window.location.origin;
     </script>
-    <script src="/admin/admin.js?v=6"></script>
+    <script src="/admin/admin.js?v=7"></script>
   </body>
 </html>

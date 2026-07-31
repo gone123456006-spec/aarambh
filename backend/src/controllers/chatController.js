@@ -3,6 +3,7 @@ const Message = require('../models/Message');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
+const { isParticipant } = require('../utils/ownership');
 
 /**
  * Get message history for a specific chat session
@@ -16,8 +17,7 @@ const getHistory = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'Chat session not found');
   }
 
-  // Ensure user is participant in this session
-  if (!session.hasParticipant(userId)) {
+  if (!isParticipant(session.participants, userId)) {
     throw new ApiError(403, 'You are not authorized to view this session history');
   }
 

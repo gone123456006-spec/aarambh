@@ -70,6 +70,41 @@ const updateAvatar = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Sync lifetime app points (games + rewards). Keeps the higher of client and server values.
+ */
+const syncPoints = asyncHandler(async (req, res) => {
+  const raw = req.body?.points;
+  const points = typeof raw === 'number' ? raw : parseInt(raw, 10);
+
+  if (!Number.isFinite(points) || points < 0) {
+    throw new ApiError(400, 'Valid points value is required');
+  }
+
+  const user = await User.findById(req.user._id);
+  if (!user) {
+    throw new ApiError(404, 'User not found');
+  }
+
+  const prevPoints = user.totalPoints || 0;
+  const next = Math.max(prevPoints, Math.floor(points));
+  if (next !== user.totalPoints) {
+    user.totalPoints = next;
+    await user.save();
+
+    try {
+      const notificationService = require('../services/notificationService');
+      await notificationService.notifyPointsMilestones(req.user._id, prevPoints, next);
+    } catch (err) {
+      console.error('Points notification failed:', err.message || err);
+    }
+  }
+
+  res.status(200).json(
+    new ApiResponse(200, { totalPoints: user.totalPoints }, 'Points synced successfully')
+  );
+});
+
+/**
  * Get detailed stats / performance metrics for dashboard dashboard
  */
 const getStats = asyncHandler(async (req, res) => {
@@ -157,6 +192,7 @@ module.exports = {
   getMe,
   updateProfile,
   updateAvatar,
+  syncPoints,
   getStats,
   deleteMe,
 };

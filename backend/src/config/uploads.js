@@ -13,7 +13,8 @@ const UPLOAD_DIRS = {
 /** Time before uploaded video/PDF URLs are exposed to the app
  *  (keep this short for admin workflow + quick reflection in the app)
  */
-const MEDIA_AVAILABLE_DELAY_MS = 2 * 1000;
+/** Immediate availability — admin uploads show in the app right away */
+const MEDIA_AVAILABLE_DELAY_MS = 0;
 
 function ensureUploadDirs() {
   Object.values(UPLOAD_DIRS).forEach((dir) => {

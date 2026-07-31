@@ -1,36 +1,53 @@
-/** Lesson order keys — must match frontend constants/courseData.ts */
-const LESSON_ORDER = {
-  b1: 0,
-  b2: 1,
-  b3: 2,
-  b4: 3,
-  b5: 4,
-  i1: 5,
-  i2: 6,
-  i3: 7,
-  i4: 8,
-  i5: 9,
-  a1: 10,
-  a2: 11,
-  a3: 12,
-  a4: 13,
-  a5: 14,
-  a6: 15,
-  a7: 16,
-  a8: 17,
-  a9: 18,
-  a10: 19,
+/** Sort lessons by order, then lessonKey. */
+function sortCourseLessons(lessons) {
+  return [...(lessons || [])].sort((a, b) => {
+    const ao = a.order ?? 0;
+    const bo = b.order ?? 0;
+    if (ao !== bo) return ao - bo;
+    return String(a.lessonKey || a.title || '').localeCompare(String(b.lessonKey || b.title || ''));
+  });
+}
+
+function slugifyLevel(input) {
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+}
+
+const DEFAULT_CATEGORY_COLORS = {
+  beginner: ['#00b894', '#55efc4'],
+  intermediate: ['#0984e3', '#74b9ff'],
+  advanced: ['#6c5ce7', '#a29bfe'],
 };
 
-function lessonSortIndex(lesson) {
-  if (lesson.lessonKey && LESSON_ORDER[lesson.lessonKey] !== undefined) {
-    return LESSON_ORDER[lesson.lessonKey];
-  }
-  return lesson.order ?? 999;
+const FALLBACK_COLORS = [
+  ['#e60000', '#ff6b6b'],
+  ['#e17055', '#fab1a0'],
+  ['#00cec9', '#81ecec'],
+  ['#fd79a8', '#fdcb6e'],
+];
+
+function colorsForLevel(level, index = 0) {
+  if (DEFAULT_CATEGORY_COLORS[level]) return DEFAULT_CATEGORY_COLORS[level];
+  return FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
 
-function sortCourseLessons(lessons) {
-  return [...lessons].sort((a, b) => lessonSortIndex(a) - lessonSortIndex(b));
+/** Levels that are always free. Everything else requires a Pro subscription. */
+const FREE_LEVELS = ['beginner'];
+
+/** True when a course level (e.g. intermediate/advanced/custom) needs Pro access. */
+function isProLevel(level) {
+  return !FREE_LEVELS.includes(slugifyLevel(level));
 }
 
-module.exports = { LESSON_ORDER, lessonSortIndex, sortCourseLessons };
+module.exports = {
+  sortCourseLessons,
+  slugifyLevel,
+  colorsForLevel,
+  DEFAULT_CATEGORY_COLORS,
+  FREE_LEVELS,
+  isProLevel,
+};

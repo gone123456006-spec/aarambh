@@ -13,6 +13,52 @@ const {
 // Regular expression to restrict signup/login to Gmail accounts
 const GMAIL_REGEX = /^[^\s@]+@gmail\.com$/i;
 
+function cookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: tokenService.getRefreshCookieMaxAgeMs(),
+  };
+}
+
+function buildAuthPayload(user, tokens, { isNewUser = false } = {}) {
+  return {
+    user: {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      phone: user.phone,
+      gender: user.gender,
+      region: user.region,
+      level: user.level,
+      avatar: user.avatar,
+      role: user.role,
+      profileCompleted: user.profileCompleted,
+    },
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    isNewUser,
+    isProfileComplete: isUserProfileComplete(user),
+  };
+}
+
+async function sendLoginNotifications(user, isNewUser) {
+  try {
+    const notificationService = require('../services/notificationService');
+    if (isNewUser) {
+      await notificationService.notifyWelcome(user._id, {
+        isNewUser: true,
+        name: user.name || user.email,
+      });
+    } else {
+      await notificationService.bootstrapUserNotifications(user._id, { isLogin: true });
+    }
+  } catch (err) {
+    console.error('Welcome notification failed:', err.message || err);
+  }
+}
+
 /**
  * Send OTP Verification code to Gmail account
  */
@@ -51,13 +97,20 @@ const sendOtp = asyncHandler(async (req, res) => {
 });
 
 /**
- * Verify OTP, complete user registration or signin
+ * Verify OTP, complete user registration or signin (single-device).
+ * If another device holds the session, login is blocked and a short-lived
+ * transferToken is returned so the user can move the session after confirming.
  */
 const verifyOtp = asyncHandler(async (req, res) => {
-  const { email, code } = req.body;
+  const { email, code, deviceId } = req.body;
 
   if (!email || !code) {
     throw new ApiError(400, 'Email and OTP code are required');
+  }
+
+  const normalizedDeviceId = tokenService.normalizeDeviceId(deviceId);
+  if (!normalizedDeviceId || normalizedDeviceId.length < 8) {
+    throw new ApiError(400, 'A valid device ID is required to sign in');
   }
 
   const trimmedEmail = email.trim().toLowerCase();
@@ -77,48 +130,87 @@ const verifyOtp = asyncHandler(async (req, res) => {
     user = await ensureProfileCompletedFlag(user);
   }
 
-  // Issue access and refresh tokens
-  const accessToken = tokenService.generateAccessToken(user._id);
-  const refreshToken = tokenService.generateRefreshToken(user._id);
+  // Block login when another device already holds this account
+  const activeDeviceId = user.activeDeviceId ? String(user.activeDeviceId) : '';
+  if (activeDeviceId && activeDeviceId !== normalizedDeviceId) {
+    const transferToken = tokenService.generateTransferToken(user._id);
+    throw new ApiError(
+      403,
+      tokenService.DEVICE_ALREADY_ACTIVE_MESSAGE,
+      [],
+      '',
+      'DEVICE_ALREADY_ACTIVE',
+      {
+        canTransfer: true,
+        transferToken,
+      }
+    );
+  }
 
-  // Save refresh token to user profile (hashed)
-  await tokenService.saveRefreshToken(user._id, refreshToken);
-
-  // Store refresh token inside HTTP-only secure cookie
-  const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days matching JWT expiration
-  };
-
-  const isProfileComplete = isUserProfileComplete(user);
+  const tokens = await tokenService.bindDeviceAndIssueTokens(user._id, normalizedDeviceId);
+  await sendLoginNotifications(user, isNewUser);
 
   res
     .status(200)
-    .cookie('refreshToken', refreshToken, cookieOptions)
+    .cookie('refreshToken', tokens.refreshToken, cookieOptions())
     .json(
       new ApiResponse(
         200,
-        {
-          user: {
-            id: user._id,
-            email: user.email,
-            name: user.name,
-            phone: user.phone,
-            gender: user.gender,
-            region: user.region,
-            level: user.level,
-            avatar: user.avatar,
-            role: user.role,
-            profileCompleted: user.profileCompleted,
-          },
-          accessToken,
-          refreshToken,
-          isNewUser,
-          isProfileComplete,
-        },
+        buildAuthPayload(user, tokens, { isNewUser }),
         'Authentication successful'
+      )
+    );
+});
+
+/**
+ * Transfer session to this device after identity verification.
+ * Accepts either a short-lived transferToken (from blocked login) or a fresh email+OTP.
+ */
+const transferDevice = asyncHandler(async (req, res) => {
+  const { transferToken, email, code, deviceId } = req.body;
+  const normalizedDeviceId = tokenService.normalizeDeviceId(deviceId);
+
+  if (!normalizedDeviceId || normalizedDeviceId.length < 8) {
+    throw new ApiError(400, 'A valid device ID is required');
+  }
+
+  let user;
+
+  if (transferToken) {
+    const decoded = tokenService.verifyTransferToken(transferToken);
+    user = await User.findById(decoded.id);
+    if (!user) {
+      throw new ApiError(404, 'User not found');
+    }
+  } else if (email && code) {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!GMAIL_REGEX.test(trimmedEmail)) {
+      throw new ApiError(400, 'Only Gmail (@gmail.com) accounts are allowed');
+    }
+    await otpService.verifyOtp(trimmedEmail, code);
+    user = await User.findOne({ email: trimmedEmail });
+    if (!user) {
+      throw new ApiError(404, 'No account found for this email');
+    }
+  } else {
+    throw new ApiError(
+      400,
+      'Provide a transfer token, or email and OTP, to move this account to a new device'
+    );
+  }
+
+  user = await ensureProfileCompletedFlag(user);
+  const tokens = await tokenService.bindDeviceAndIssueTokens(user._id, normalizedDeviceId);
+  await sendLoginNotifications(user, false);
+
+  res
+    .status(200)
+    .cookie('refreshToken', tokens.refreshToken, cookieOptions())
+    .json(
+      new ApiResponse(
+        200,
+        buildAuthPayload(user, tokens, { isNewUser: false }),
+        'Device transferred successfully. Other devices have been logged out.'
       )
     );
 });
@@ -128,25 +220,20 @@ const verifyOtp = asyncHandler(async (req, res) => {
  */
 const refreshAccessToken = asyncHandler(async (req, res) => {
   const oldRefreshToken = req.cookies.refreshToken || req.body.refreshToken;
+  const deviceId =
+    tokenService.normalizeDeviceId(req.headers['x-device-id']) ||
+    tokenService.normalizeDeviceId(req.body?.deviceId);
 
   if (!oldRefreshToken) {
     throw new ApiError(401, 'Refresh token not found');
   }
 
-  // Rotate tokens
-  const tokens = await tokenService.rotateTokens(oldRefreshToken);
-
-  // Set new refresh token in cookie
-  const cookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  };
+  // Rotate tokens (also validates device binding)
+  const tokens = await tokenService.rotateTokens(oldRefreshToken, deviceId);
 
   res
     .status(200)
-    .cookie('refreshToken', tokens.refreshToken, cookieOptions)
+    .cookie('refreshToken', tokens.refreshToken, cookieOptions())
     .json(
       new ApiResponse(
         200,
@@ -160,24 +247,36 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
 });
 
 /**
- * Revoke session and log out the user
+ * Revoke session, clear device binding, and log out the user
  */
 const logout = asyncHandler(async (req, res) => {
   const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
+  const deviceId =
+    tokenService.normalizeDeviceId(req.headers['x-device-id']) ||
+    tokenService.normalizeDeviceId(req.body?.deviceId);
 
   if (refreshToken) {
-    // Revoke the refresh token from DB for security
     try {
       const decoded = jwt.decode(refreshToken);
       if (decoded && decoded.id) {
-        await tokenService.revokeRefreshToken(decoded.id, refreshToken);
+        const user = await User.findById(decoded.id).select('activeDeviceId');
+        // Only the bound device (or unknown legacy session) may clear the lock.
+        if (
+          !user?.activeDeviceId ||
+          !deviceId ||
+          String(user.activeDeviceId) === deviceId
+        ) {
+          await tokenService.clearDeviceSession(decoded.id);
+        } else {
+          // Wrong device trying to logout — just revoke this refresh token if present
+          await tokenService.revokeRefreshToken(decoded.id, refreshToken);
+        }
       }
     } catch (err) {
       // Decode/Revocation error can be ignored on logout
     }
   }
 
-  // Clear HTTP-only cookie
   res
     .status(200)
     .clearCookie('refreshToken', {
@@ -191,6 +290,7 @@ const logout = asyncHandler(async (req, res) => {
 module.exports = {
   sendOtp,
   verifyOtp,
+  transferDevice,
   refreshAccessToken,
   logout,
 };

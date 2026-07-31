@@ -8,19 +8,23 @@ const lessonSchema = new mongoose.Schema({
   },
   duration: {
     type: String,
-    required: true,
+    default: '0:00',
+    trim: true,
   },
   type: {
     type: String,
     default: 'video',
   },
+  /** "About this lesson" shown in the app */
   description: {
     type: String,
     trim: true,
+    default: '',
   },
   pdfTitle: {
     type: String,
     trim: true,
+    default: '',
   },
   videoUrl: {
     type: String,
@@ -40,7 +44,7 @@ const lessonSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  /** Stable id matching app curriculum (e.g. b1, i2, a3) */
+  /** Stable key for progress (auto-generated if omitted) */
   lessonKey: {
     type: String,
     trim: true,
@@ -57,20 +61,27 @@ const courseSchema = new mongoose.Schema(
     subtitle: {
       type: String,
       trim: true,
+      default: '',
     },
+    /** Category slug: beginner, intermediate, advanced, or custom (e.g. business) */
     level: {
       type: String,
-      enum: ['beginner', 'intermediate', 'advanced'],
       required: true,
-      unique: true, // One course per level (beginner/intermediate/advanced) containing lessons
+      unique: true,
+      trim: true,
+      lowercase: true,
     },
     color: [
       {
         type: String,
       },
     ],
+    sortOrder: {
+      type: Number,
+      default: 0,
+    },
     videoSource: {
-      type: String, // fallback URL
+      type: String,
       default: '',
     },
     lessons: [lessonSchema],

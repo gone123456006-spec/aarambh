@@ -43,6 +43,28 @@ const emitMatchPair = async (socket, peerSocket, sessionId, userId, peerUserId) 
 
   socket.emit('match:found', { sessionId, peer: peerForSocket });
   peerSocket.emit('match:found', { sessionId, peer: peerForPeerSocket });
+
+  try {
+    await Promise.all([
+      createNotification(
+        userId,
+        'Chat partner found! 💬',
+        `You’re connected with ${peerForSocket.name || 'a learner'}. Practice English together!`,
+        'chat',
+        { key: `chat-match-${sessionId}-${userId}`, data: { route: '/random-chat' } }
+      ),
+      createNotification(
+        peerUserId,
+        'Chat partner found! 💬',
+        `You’re connected with ${peerForPeerSocket.name || 'a learner'}. Practice English together!`,
+        'chat',
+        { key: `chat-match-${sessionId}-${peerUserId}`, data: { route: '/random-chat' } }
+      ),
+    ]);
+  } catch (err) {
+    console.error('Match notification failed:', err.message || err);
+  }
+
   return true;
 };
 
@@ -59,10 +81,21 @@ const configureChatSocket = (io) => {
       }
 
       const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-      const user = await User.findById(decoded.id).select('_id name role region avatar');
+      const user = await User.findById(decoded.id).select(
+        '_id name role region avatar activeDeviceId'
+      );
 
       if (!user) {
         return next(new Error('Authentication failed: User not found'));
+      }
+
+      if (user.activeDeviceId) {
+        const deviceId =
+          socket.handshake.auth?.deviceId ||
+          socket.handshake.headers?.['x-device-id'];
+        if (!deviceId || String(deviceId) !== String(user.activeDeviceId)) {
+          return next(new Error('Authentication failed: Session active on another device'));
+        }
       }
 
       socket.user = user;
@@ -127,9 +160,17 @@ const configureChatSocket = (io) => {
       }
     });
 
-    // 3. Send message
+    // 3. Send message — only session participants may write
     socket.on('message:send', async ({ sessionId, text, clientId }) => {
       if (!sessionId || !text) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) {
+        socket.emit('message:rejected', {
+          clientId: clientId || null,
+          reason: 'forbidden',
+          message: 'You are not part of this conversation.',
+        });
+        return;
+      }
 
       const trimmed = String(text).trim();
       const validation = validateChatMessage(trimmed);
@@ -172,8 +213,9 @@ const configureChatSocket = (io) => {
     });
 
     // Read receipts — peer opened/saw messages
-    socket.on('message:seen', ({ sessionId, messageIds }) => {
+    socket.on('message:seen', async ({ sessionId, messageIds }) => {
       if (!sessionId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
 
       socket.to(`room:${sessionId}`).emit('message:seen', {
         messageIds,
@@ -182,21 +224,26 @@ const configureChatSocket = (io) => {
     });
 
     // 4. Typing indicators
-    socket.on('typing:start', ({ sessionId }) => {
+    socket.on('typing:start', async ({ sessionId }) => {
+      if (!sessionId) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
       socket.to(`room:${sessionId}`).emit('peer:typing', { isTyping: true });
     });
 
-    socket.on('typing:stop', ({ sessionId }) => {
+    socket.on('typing:stop', async ({ sessionId }) => {
+      if (!sessionId) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
       socket.to(`room:${sessionId}`).emit('peer:typing', { isTyping: false });
     });
 
     // 5. Skip current chat partner / disconnect from session
     socket.on('chat:skip', async ({ sessionId }) => {
       if (!sessionId) return;
+      if (!(await assertSessionParticipant(sessionId, userId))) return;
       console.log(`User ${userId} requested skip for session ${sessionId}`);
 
       try {
-        await chatService.endSession(sessionId);
+        await chatService.endSession(sessionId, userId);
         setCallState(sessionId, 'idle');
 
         // Notify peer they were skipped
@@ -271,6 +318,28 @@ const configureChatSocket = (io) => {
 
       setCallState(sessionId, 'idle');
       socket.to(`room:${sessionId}`).emit('video:call-rejected', { rejectorId: userId });
+
+      try {
+        const session = await ChatSession.findById(sessionId).select('participants');
+        const peerId = (session?.participants || [])
+          .map((p) => String(p))
+          .find((id) => id !== String(userId));
+        if (peerId) {
+          const rejectorName = socket.user?.name || 'a learner';
+          await createNotification(
+            peerId,
+            'Missed Call in English',
+            `${rejectorName} couldn’t take your call. Try Call in English again when they’re free.`,
+            'call',
+            {
+              key: `missed-call-${sessionId}-${Date.now()}`,
+              data: { route: '/random-chat?intent=call' },
+            }
+          );
+        }
+      } catch (err) {
+        console.error('Missed-call notification failed:', err.message || err);
+      }
     });
 
     socket.on('video:call-end', async ({ sessionId }) => {
@@ -343,7 +412,7 @@ const configureChatSocket = (io) => {
         if (activeSession) {
           const sessionId = activeSession._id.toString();
           setCallState(sessionId, 'idle');
-          await chatService.endSession(sessionId);
+          await chatService.endSession(sessionId, userId);
 
           // Inform peer user they disconnected
           socket.to(`room:${sessionId}`).emit('peer:disconnected');
