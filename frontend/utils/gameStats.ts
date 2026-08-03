@@ -63,7 +63,7 @@ export async function recordGameAnswer(gameId: GameId, correct: boolean): Promis
       });
     }
   } catch {
-    // Stats remain on device if the server is unreachable.
+    // Stats remain on device if the server is unreachable / user not signed in.
   }
 }
 
@@ -78,8 +78,35 @@ export async function getTotalGameScore(): Promise<number> {
 }
 
 export async function setTotalGameScore(score: number): Promise<void> {
-  const key = await userScopedKey('totalGameScore');
-  await AsyncStorage.setItem(key, String(score));
+  try {
+    const key = await userScopedKey('totalGameScore');
+    await AsyncStorage.setItem(key, String(score));
+    schedulePointsSync(score);
+  } catch {
+    // No signed-in user — refuse unscoped writes.
+  }
+}
+
+let pointsSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+function schedulePointsSync(score: number) {
+  if (pointsSyncTimer) clearTimeout(pointsSyncTimer);
+  pointsSyncTimer = setTimeout(() => {
+    void syncPointsToServer(score);
+  }, 600);
+}
+
+async function syncPointsToServer(score: number) {
+  const token = await getAccessToken();
+  if (!token) return;
+  try {
+    await apiFetch('/api/users/me/points', {
+      method: 'POST',
+      body: JSON.stringify({ points: score }),
+    });
+  } catch {
+    // Local score remains; server sync retries on next update or leaderboard open.
+  }
 }
 
 export function getTotals(stats: Record<GameId, GameStats>) {

@@ -23,7 +23,8 @@ import {
   FLASHCARD_LEVEL_COUNT,
   POINTS_PER_CORRECT_LEVEL,
 } from '@/constants/gameData';
-import { COURSE_DATA, LevelId } from '@/constants/courseData';
+import { AppCategory, mapApiCoursesToApp, iconForLevel } from '@/utils/liveCourses';
+import { apiFetch, ensureValidSession } from '@/utils/api';
 import { CourseProgressCard } from '@/components/CourseProgressCard';
 import { GameId, loadAllGameProgress } from '@/utils/gameProgress';
 import { loadAllGameStats, getTotals, GameStats } from '@/utils/gameStats';
@@ -68,7 +69,7 @@ const cardShadow = Platform.select({
   default: {},
 });
 
-const LEVEL_3D_ICONS: Record<LevelId, number> = {
+const LEVEL_3D_ICONS: Record<string, number> = {
   beginner: Icons3D.seedling,
   intermediate: Icons3D.graduationCap,
   advanced: Icons3D.medal,
@@ -302,14 +303,14 @@ function CourseLevelListItem({
   unlocked,
   isLast,
 }: {
-  level: (typeof COURSE_DATA)[0];
+  level: AppCategory;
   completedCount: number;
   progress: number;
   unlocked: boolean;
   isLast: boolean;
 }) {
   const percent = Math.round(progress * 100);
-  const levelIcon = LEVEL_3D_ICONS[level.id];
+  const levelIcon = LEVEL_3D_ICONS[level.id] ?? Icons3D.graduationCap;
 
   return (
     <>
@@ -366,6 +367,7 @@ export default function PerformanceScreen() {
   const [levels, setLevels] = useState<Record<GameId, number> | null>(null);
   const [completedLessons, setCompletedLessons] = useState<string[]>([]);
   const [lastLessonId, setLastLessonId] = useState<string | null>(null);
+  const [categories, setCategories] = useState<AppCategory[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -384,6 +386,12 @@ export default function PerformanceScreen() {
       });
       setCompletedLessons(courseProgress.completedLessons);
       setLastLessonId(courseProgress.lastLessonId);
+
+      const sessionOk = await ensureValidSession();
+      if (sessionOk) {
+        const res = await apiFetch<{ data: Parameters<typeof mapApiCoursesToApp>[0] }>('/api/courses');
+        setCategories(mapApiCoursesToApp(res.data ?? []));
+      }
     } finally {
       setLoading(false);
     }
@@ -398,8 +406,9 @@ export default function PerformanceScreen() {
   const totals = stats ? getTotals(stats) : { correct: 0, incorrect: 0, points: 0 };
   const totalAnswered = totals.correct + totals.incorrect;
   const accuracy = totalAnswered > 0 ? Math.round((totals.correct / totalAnswered) * 100) : 0;
-  const overallCourseProgress = getOverallProgress(completedLessons);
-  const lastLessonTitle = getLastLessonTitle(lastLessonId);
+  const overallCourseProgress = getOverallProgress(completedLessons, categories);
+  const lastLessonTitle = getLastLessonTitle(lastLessonId, categories);
+  const courseLessonTotal = categories.reduce((n, c) => n + c.lessons.length, 0);
 
   const pageSubtitle =
     category === 'games'
@@ -477,6 +486,7 @@ export default function PerformanceScreen() {
               <CourseProgressCard
                 overallProgress={overallCourseProgress}
                 completedCount={completedLessons.length}
+                totalLessons={courseLessonTotal}
                 lastLessonTitle={lastLessonTitle}
                 onContinue={() => router.push('/(tabs)/my-courses')}
               />
@@ -506,16 +516,16 @@ export default function PerformanceScreen() {
                 </View>
               )}
 
-              <SectionLabel title="By level" action={`${COURSE_DATA.length} levels`} />
+              <SectionLabel title="By level" action={`${categories.length} levels`} />
               <View style={styles.listGroup}>
-                {COURSE_DATA.map((level, index) => (
+                {categories.map((level, index) => (
                   <CourseLevelListItem
                     key={level.id}
                     level={level}
-                    completedCount={getLevelCompletedCount(level.id as LevelId, completedLessons)}
-                    progress={getLevelProgressRatio(level.id as LevelId, completedLessons)}
-                    unlocked={isLevelUnlocked(level.id as LevelId, completedLessons)}
-                    isLast={index === COURSE_DATA.length - 1}
+                    completedCount={getLevelCompletedCount(level.id, completedLessons, categories)}
+                    progress={getLevelProgressRatio(level.id, completedLessons, categories)}
+                    unlocked={isLevelUnlocked(level.id, completedLessons, categories)}
+                    isLast={index === categories.length - 1}
                   />
                 ))}
               </View>

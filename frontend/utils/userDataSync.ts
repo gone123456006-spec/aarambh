@@ -7,6 +7,7 @@ import {
   LAST_LESSON_KEY,
 } from '@/utils/courseProgress';
 import type { GameId } from '@/utils/gameProgress';
+import { syncMyPointsToServer } from '@/utils/leaderboardApi';
 
 type ApiUser = {
   _id?: string;
@@ -17,6 +18,7 @@ type ApiUser = {
   gender?: string;
   region?: string;
   level?: string;
+  avatar?: string;
 };
 
 type CourseProgressDoc = {
@@ -57,6 +59,7 @@ export async function syncUserDataFromServer(): Promise<void> {
   const profileEntries: [string, string][] = [
     [AUTH_KEYS.userEmail, user.email ?? ''],
     [AUTH_KEYS.userName, user.name ?? ''],
+    [AUTH_KEYS.userAvatar, user.avatar ?? ''],
     [AUTH_KEYS.userPhone, user.phone ?? ''],
     [AUTH_KEYS.gender, user.gender ?? ''],
     [AUTH_KEYS.userRegion, user.region ?? ''],
@@ -103,4 +106,6 @@ export async function syncUserDataFromServer(): Promise<void> {
     [gameStatsKey, JSON.stringify(gameStats)],
     [totalScoreKey, String(finalTotalScore)],
   ]);
+
+  await syncMyPointsToServer(finalTotalScore);
 }

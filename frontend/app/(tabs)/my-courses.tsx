@@ -23,13 +23,13 @@ import { Video, ResizeMode, Audio } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as WebBrowser from 'expo-web-browser';
 import {
-  COURSE_DATA,
-  LECTURE_VIDEO,
-  LEVEL_ICONS,
-  LevelId,
-  Lesson,
-  SAMPLE_PDF_URL,
-} from '@/constants/courseData';
+  AppCategory,
+  AppLesson,
+  ApiCourse,
+  mapApiCoursesToApp,
+  iconForLevel,
+  totalLessonCount,
+} from '@/utils/liveCourses';
 import {
   isLevelUnlocked,
   loadCourseProgress,
@@ -37,8 +37,10 @@ import {
   syncLessonToServer,
 } from '@/utils/courseProgress';
 import { apiFetch, ensureValidSession } from '@/utils/api';
+import { purchaseWithRazorpay, PRO_PRICE_LABEL, fetchSubscription } from '@/utils/subscriptionApi';
 import { Icons3D } from '@/constants/homeIcons';
 import { useGameTabBar } from '@/contexts/game-tab-bar-context';
+
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PLAYLIST_PLAYER_HEIGHT = SCREEN_WIDTH * (9 / 16);
 
@@ -54,6 +56,25 @@ const UI = {
   shadow: '#000000',
 };
 
+/** Beginner is free; Intermediate / Advanced / custom require Pro. */
+function isProCategory(levelId: string, isProFlag?: boolean) {
+  if (levelId === 'beginner') return false;
+  if (typeof isProFlag === 'boolean') return isProFlag;
+  return true;
+}
+
+function formatDurationLabel(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '0:00';
+  const s = Math.floor(totalSeconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
 const headerShadow = Platform.select({
   ios: {
     shadowColor: UI.shadow,
@@ -65,39 +86,8 @@ const headerShadow = Platform.select({
   default: {},
 });
 
-type ServerLessonMedia = {
-  _id?: string;
-  lessonKey?: string;
-  videoUrl?: string | null;
-  videoAvailableIn?: number;
-  pdfUrl?: string | null;
-  pdfAvailableIn?: number;
-};
-
-type ServerLevelCourses = {
-  lessons: ServerLessonMedia[];
-  byKey: Record<string, ServerLessonMedia>;
-};
-
-function buildServerLevel(lessons: ServerLessonMedia[]): ServerLevelCourses {
-  const byKey: Record<string, ServerLessonMedia> = {};
-  for (const lesson of lessons) {
-    if (lesson.lessonKey) byKey[lesson.lessonKey] = lesson;
-  }
-  return { lessons, byKey };
-}
-
-function getServerLessonForLocal(
-  serverLevel: ServerLevelCourses | undefined,
-  lessonId: string,
-  lessonIndex: number,
-): ServerLessonMedia | undefined {
-  if (!serverLevel) return undefined;
-  return serverLevel.byKey[lessonId] ?? serverLevel.lessons[lessonIndex];
-}
-
 function isLessonUnlockedInRoadmap(
-  lessons: Lesson[],
+  lessons: AppLesson[],
   index: number,
   completedLessons: string[],
 ) {
@@ -115,20 +105,22 @@ function SectionHeading({ title, inset }: { title: string; inset?: boolean }) {
 }
 
 function CategoryTabs({
+  categories,
   selected,
   onSelect,
   isLevelUnlocked,
 }: {
-  selected: LevelId;
-  onSelect: (id: LevelId) => void;
-  isLevelUnlocked: (id: LevelId) => boolean;
+  categories: AppCategory[];
+  selected: string;
+  onSelect: (id: string) => void;
+  isLevelUnlocked: (id: string) => boolean;
 }) {
   return (
     <View style={styles.categorySection}>
       <View style={styles.categoryRow}>
-        {COURSE_DATA.map((level) => {
+        {categories.map((level) => {
           const active = selected === level.id;
-          const unlocked = isLevelUnlocked(level.id);
+          const unlocked = isLevelUnlocked(level.id) && !level.locked;
 
           return (
             <TouchableOpacity
@@ -170,8 +162,8 @@ function CategoryTabs({
   );
 }
 
-function lessonStatsLine(lesson: Lesson, index: number, isDone: boolean) {
-  const parts = [`Lesson ${index + 1}`, lesson.duration];
+function lessonStatsLine(lesson: AppLesson, index: number, isDone: boolean, durationLabel?: string) {
+  const parts = [`Lesson ${index + 1}`, durationLabel || lesson.duration || '0:00'];
   if (isDone) parts.push('Completed');
   return parts.join(' · ');
 }
@@ -181,10 +173,12 @@ function PlaylistLessonRow({
   lessonIndex,
   level,
   unlocked,
+  proLocked,
   isDone,
   isActive,
   isPlaying,
   showReview,
+  durationLabel,
   onPlay,
   onMenu,
   onDownloadPdf,
@@ -192,14 +186,16 @@ function PlaylistLessonRow({
   onContinueToReview,
   onMarkComplete,
 }: {
-  lesson: Lesson;
+  lesson: AppLesson;
   lessonIndex: number;
-  level: (typeof COURSE_DATA)[0];
+  level: AppCategory;
   unlocked: boolean;
+  proLocked: boolean;
   isDone: boolean;
   isActive: boolean;
   isPlaying: boolean;
   showReview: boolean;
+  durationLabel?: string;
   onPlay: () => void;
   onMenu: () => void;
   onDownloadPdf: () => void;
@@ -208,13 +204,13 @@ function PlaylistLessonRow({
   onMarkComplete: () => void;
 }) {
   const showNowPlayingIcon = isActive && isPlaying;
+  const displayDuration = durationLabel || lesson.duration || '0:00';
 
   return (
     <View style={[styles.playlistRowWrap, isActive && styles.playlistRowWrapActive]}>
       <View style={[styles.playlistRow, !unlocked && styles.playlistRowLocked]}>
         <TouchableOpacity
           style={styles.playlistRowMain}
-          disabled={!unlocked}
           activeOpacity={0.7}
           onPress={onPlay}
         >
@@ -245,7 +241,12 @@ function PlaylistLessonRow({
             )}
             {unlocked && !showNowPlayingIcon && !isDone && (
               <View style={styles.playlistThumbDuration}>
-                <Text style={styles.durationText}>{lesson.duration}</Text>
+                <Text style={styles.durationText}>{displayDuration}</Text>
+              </View>
+            )}
+            {!unlocked && (
+              <View style={styles.playlistThumbDuration}>
+                <Text style={styles.durationText}>{displayDuration}</Text>
               </View>
             )}
           </View>
@@ -259,8 +260,10 @@ function PlaylistLessonRow({
             </Text>
             <Text style={styles.playlistRowMeta} numberOfLines={1}>
               {unlocked
-                ? lessonStatsLine(lesson, lessonIndex, isDone)
-                : 'Complete previous lesson to unlock'}
+                ? lessonStatsLine(lesson, lessonIndex, isDone, displayDuration)
+                : proLocked
+                  ? `Unlock with Pro – ${PRO_PRICE_LABEL} to play`
+                  : 'Complete previous lesson to unlock'}
             </Text>
 
             {isActive && unlocked && (showReview || isDone) && (
@@ -341,9 +344,49 @@ function PlaylistLessonRow({
   );
 }
 
+function ProLockBanner({
+  level,
+  onBuyPro,
+  purchasingPro,
+}: {
+  level: AppCategory;
+  onBuyPro: () => void;
+  purchasingPro: boolean;
+}) {
+  return (
+    <View style={styles.proLockBanner}>
+      <View style={styles.proLockBannerIcon}>
+        <Feather name="lock" size={18} color="#7b4dff" />
+      </View>
+      <View style={styles.proLockBannerTextWrap}>
+        <Text style={styles.proLockBannerTitle}>{level.title} videos are locked</Text>
+        <Text style={styles.proLockBannerSub}>
+          Unlock with Pro Subscription – {PRO_PRICE_LABEL} to play
+        </Text>
+      </View>
+      <TouchableOpacity
+        style={[styles.proLockBannerBtn, purchasingPro && { opacity: 0.7 }]}
+        onPress={onBuyPro}
+        disabled={purchasingPro}
+        activeOpacity={0.9}
+      >
+        {purchasingPro ? (
+          <ActivityIndicator color="#fff" size="small" />
+        ) : (
+          <Text style={styles.proLockBannerBtnText}>Unlock</Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 function CoursePlaylistView({
+  categories,
   level,
   levelUnlocked,
+  proLocked,
+  onBuyPro,
+  purchasingPro,
   completedLessons,
   focusIndex,
   playingLessonId,
@@ -351,6 +394,7 @@ function CoursePlaylistView({
   selectedLevel,
   onSelectLevel,
   isLevelUnlocked,
+  detectedDurations,
   onPlay,
   onClosePlayer,
   onDownloadPdf,
@@ -362,18 +406,23 @@ function CoursePlaylistView({
   refreshing,
   onRefresh,
 }: {
-  level: (typeof COURSE_DATA)[0];
+  categories: AppCategory[];
+  level: AppCategory;
   levelUnlocked: boolean;
+  proLocked: boolean;
+  onBuyPro: () => void;
+  purchasingPro: boolean;
   completedLessons: string[];
   focusIndex: number;
   playingLessonId: string | null;
   lessonReviewId: string | null;
-  selectedLevel: LevelId;
-  onSelectLevel: (id: LevelId) => void;
-  isLevelUnlocked: (id: LevelId) => boolean;
+  selectedLevel: string;
+  onSelectLevel: (id: string) => void;
+  isLevelUnlocked: (id: string) => boolean;
+  detectedDurations: Record<string, string>;
   onPlay: (lessonId: string) => void;
   onClosePlayer: () => void;
-  onDownloadPdf: (lesson: Lesson) => void;
+  onDownloadPdf: (lesson: AppLesson) => void;
   onNextLesson: (lessonId: string) => void;
   onContinueToReview: (lessonId: string) => void;
   onMarkComplete: (lessonId: string) => void;
@@ -382,15 +431,20 @@ function CoursePlaylistView({
   refreshing?: boolean;
   onRefresh?: () => void;
 }) {
-  const levelIcon = LEVEL_ICONS[level.id] ?? 'book-open-variant';
+  const levelIcon = iconForLevel(level.id);
   const currentLesson = level.lessons[focusIndex] ?? level.lessons[0];
   const currentId = playingLessonId ?? currentLesson?.id;
   const currentIndex = level.lessons.findIndex((l) => l.id === currentId);
   const activeLesson = level.lessons[currentIndex >= 0 ? currentIndex : 0];
   const isPlaying = playingLessonId === activeLesson?.id && !isFullscreen;
+  const canPlayInLevel = levelUnlocked && !proLocked;
 
-  const openLessonMenu = (lesson: Lesson, index: number) => {
-    const unlocked = levelUnlocked && isLessonUnlockedInRoadmap(level.lessons, index, completedLessons);
+  const openLessonMenu = (lesson: AppLesson, index: number) => {
+    if (proLocked) {
+      onBuyPro();
+      return;
+    }
+    const unlocked = canPlayInLevel && isLessonUnlockedInRoadmap(level.lessons, index, completedLessons);
     if (!unlocked) return;
     const done = completedLessons.includes(lesson.id);
     Alert.alert(lesson.title, undefined, [
@@ -404,7 +458,7 @@ function CoursePlaylistView({
     ]);
   };
 
-  const inPlayerMode = !!playingLessonId;
+  const inPlayerMode = !!playingLessonId && !proLocked;
 
   const playlistItems = useMemo(() => {
     const items = level.lessons.map((lesson, index) => ({ lesson, index }));
@@ -421,37 +475,46 @@ function CoursePlaylistView({
     item,
     index: displayIndex,
   }: {
-    item: { lesson: Lesson; index: number };
+    item: { lesson: AppLesson; index: number };
     index: number;
   }) => {
     const { lesson, index } = item;
-    const unlocked =
-      levelUnlocked && isLessonUnlockedInRoadmap(level.lessons, index, completedLessons);
+    const roadmapOk = isLessonUnlockedInRoadmap(level.lessons, index, completedLessons);
+    const unlocked = canPlayInLevel && roadmapOk;
     const isDone = completedLessons.includes(lesson.id);
-    const isActive = !!playingLessonId && lesson.id === playingLessonId;
-    const showReview = lessonReviewId === lesson.id;
+    const isActive = !!playingLessonId && lesson.id === playingLessonId && !proLocked;
+    const showReview = lessonReviewId === lesson.id && !proLocked;
+    const durationLabel = detectedDurations[lesson.id];
 
     return (
       <View>
-        {displayIndex === 1 && playingLessonId ? (
+        {displayIndex === 1 && playingLessonId && !proLocked ? (
           <Text style={styles.playlistUpNextLabel}>Up next</Text>
         ) : null}
-      <PlaylistLessonRow
-        lesson={lesson}
-        lessonIndex={index}
-        level={level}
-        unlocked={unlocked}
-        isDone={isDone}
-        isActive={isActive}
-        isPlaying={isPlaying && isActive}
-        showReview={showReview}
-        onPlay={() => onPlay(lesson.id)}
-        onMenu={() => openLessonMenu(lesson, index)}
-        onDownloadPdf={() => onDownloadPdf(lesson)}
-        onNextLesson={() => onNextLesson(lesson.id)}
-        onContinueToReview={() => onContinueToReview(lesson.id)}
-        onMarkComplete={() => onMarkComplete(lesson.id)}
-      />
+        <PlaylistLessonRow
+          lesson={lesson}
+          lessonIndex={index}
+          level={level}
+          unlocked={unlocked}
+          proLocked={proLocked}
+          isDone={isDone}
+          isActive={isActive}
+          isPlaying={isPlaying && isActive}
+          showReview={showReview}
+          durationLabel={durationLabel}
+          onPlay={() => {
+            if (proLocked) {
+              onBuyPro();
+              return;
+            }
+            onPlay(lesson.id);
+          }}
+          onMenu={() => openLessonMenu(lesson, index)}
+          onDownloadPdf={() => onDownloadPdf(lesson)}
+          onNextLesson={() => onNextLesson(lesson.id)}
+          onContinueToReview={() => onContinueToReview(lesson.id)}
+          onMarkComplete={() => onMarkComplete(lesson.id)}
+        />
       </View>
     );
   };
@@ -461,7 +524,7 @@ function CoursePlaylistView({
       style={[
         styles.playlistLayout,
         !inPlayerMode && styles.playlistLayoutList,
-        !levelUnlocked && styles.lessonsLocked,
+        (!levelUnlocked || proLocked) && styles.lessonsLocked,
       ]}
     >
       {inPlayerMode && (
@@ -472,8 +535,8 @@ function CoursePlaylistView({
             <TouchableOpacity
               style={styles.playlistPlayerPlaceholder}
               activeOpacity={0.9}
-              onPress={() => activeLesson && levelUnlocked && onPlay(activeLesson.id)}
-              disabled={!levelUnlocked}
+              onPress={() => activeLesson && canPlayInLevel && onPlay(activeLesson.id)}
+              disabled={!canPlayInLevel}
             >
               {activeLesson && (
                 <>
@@ -486,7 +549,9 @@ function CoursePlaylistView({
                     <Ionicons name="play" size={36} color="#1F1F1F" />
                   </View>
                   <View style={styles.durationBadge}>
-                    <Text style={styles.durationText}>{activeLesson.duration}</Text>
+                    <Text style={styles.durationText}>
+                      {detectedDurations[activeLesson.id] || activeLesson.duration}
+                    </Text>
                   </View>
                 </>
               )}
@@ -504,6 +569,7 @@ function CoursePlaylistView({
         {!inPlayerMode ? (
           <View style={styles.levelTabsInSheet}>
             <CategoryTabs
+              categories={categories}
               selected={selectedLevel}
               onSelect={onSelectLevel}
               isLevelUnlocked={isLevelUnlocked}
@@ -520,9 +586,11 @@ function CoursePlaylistView({
               {inPlayerMode ? `${level.title} — Now playing` : `${level.title} lessons`}
             </Text>
             <Text style={styles.playlistSheetSub} numberOfLines={2}>
-              {inPlayerMode
-                ? `${level.subtitle}. Tap X to return to the lesson list.`
-                : `${level.subtitle}. Tap a lesson to watch.`}
+              {proLocked
+                ? `Videos locked. Unlock with Pro – ${PRO_PRICE_LABEL} to play.`
+                : inPlayerMode
+                  ? `${level.subtitle}. Tap X to return to the lesson list.`
+                  : `${level.subtitle}. Tap a lesson to watch.`}
             </Text>
           </View>
           {inPlayerMode ? (
@@ -535,6 +603,10 @@ function CoursePlaylistView({
             </TouchableOpacity>
           ) : null}
         </View>
+
+        {proLocked ? (
+          <ProLockBanner level={level} onBuyPro={onBuyPro} purchasingPro={purchasingPro} />
+        ) : null}
 
         <FlatList
           style={styles.playlistScroll}
@@ -572,14 +644,15 @@ export default function MyCoursesScreen() {
   const [completedLessons, setCompletedLessons] = useState<string[]>([]);
   const [lastLessonId, setLastLessonId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [serverCoursesByLevel, setServerCoursesByLevel] = useState<
-    Partial<Record<LevelId, ServerLevelCourses>>
-  >({});
-  const [serverCoursesError, setServerCoursesError] = useState<string | null>(null);
+  const [categories, setCategories] = useState<AppCategory[]>([]);
+  const [coursesError, setCoursesError] = useState<string | null>(null);
   const [refreshingCourses, setRefreshingCourses] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<LevelId>('beginner');
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [roadmapFocusIndex, setRoadmapFocusIndex] = useState(0);
   const [lessonReviewId, setLessonReviewId] = useState<string | null>(null);
+  const [purchasingPro, setPurchasingPro] = useState(false);
+  const [hasProSubscription, setHasProSubscription] = useState(false);
+  const [detectedDurations, setDetectedDurations] = useState<Record<string, string>>({});
 
   const [playingLessonId, setPlayingLessonId] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState(false);
@@ -626,38 +699,71 @@ export default function MyCoursesScreen() {
     init();
   }, []);
 
+  const findLesson = useCallback(
+    (lessonId: string | null): AppLesson | null => {
+      if (!lessonId) return null;
+      for (const cat of categories) {
+        const lesson = cat.lessons.find((l) => l.id === lessonId);
+        if (lesson) return lesson;
+      }
+      return null;
+    },
+    [categories],
+  );
+
+  const applySubscriptionLocks = useCallback(
+    (mapped: AppCategory[], hasPro: boolean): AppCategory[] =>
+      mapped.map((c) => {
+        const pro = isProCategory(c.id, c.isPro);
+        const locked = pro && !hasPro;
+        return {
+          ...c,
+          isPro: pro,
+          locked,
+          lessons: c.lessons.map((l) => ({
+            ...l,
+            // Strip playable media on Pro-locked levels (client-side safety)
+            videoUrl: locked ? null : l.videoUrl,
+            pdfUrl: locked ? null : l.pdfUrl,
+            locked,
+          })),
+        };
+      }),
+    []
+  );
+
   const loadServerCourses = useCallback(async () => {
     try {
       const sessionOk = await ensureValidSession();
       if (!sessionOk) {
-        setServerCoursesError('Session expired. Please sign in again.');
+        setCoursesError('Unable to refresh session. Check your connection and try again.');
         return;
       }
 
-      setServerCoursesError(null);
-      const res = await apiFetch<{ data: { level?: string; lessons?: ServerLessonMedia[] }[] }>(
-        '/api/courses'
-      );
-      const byLevel: Partial<Record<LevelId, ServerLevelCourses>> = {};
+      setCoursesError(null);
+      const [res, sub] = await Promise.all([
+        apiFetch<{ data: ApiCourse[] }>('/api/courses'),
+        fetchSubscription().catch(() => null),
+      ]);
+      const hasPro = Boolean(sub?.active);
+      setHasProSubscription(hasPro);
 
-      for (const c of res.data ?? []) {
-        if (!c?.level) continue;
-        const level = c.level as LevelId;
-        if (level !== 'beginner' && level !== 'intermediate' && level !== 'advanced') continue;
-        byLevel[level] = buildServerLevel(c.lessons ?? []);
-      }
-
-      setServerCoursesByLevel(byLevel);
+      const mapped = applySubscriptionLocks(mapApiCoursesToApp(res.data ?? []), hasPro);
+      setCategories(mapped);
+      setSelectedCategory((prev) => {
+        if (prev && mapped.some((c) => c.id === prev)) return prev;
+        return mapped[0]?.id ?? '';
+      });
     } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to load server courses';
-      if (/session expired|sign in again/i.test(message)) {
-        setServerCoursesError(message);
+      const message = e instanceof Error ? e.message : 'Failed to load courses';
+      if (/unable to refresh session|please sign in|session revoked|sign in again/i.test(message)) {
+        setCoursesError(message);
         return;
       }
-      console.warn('Failed to load server courses', e);
-      setServerCoursesError(message);
+      console.warn('Failed to load courses', e);
+      setCoursesError(message);
     }
-  }, []);
+  }, [applySubscriptionLocks]);
 
   const refreshCourses = useCallback(async () => {
     setRefreshingCourses(true);
@@ -667,6 +773,35 @@ export default function MyCoursesScreen() {
       setRefreshingCourses(false);
     }
   }, [loadServerCourses]);
+
+  const runProPurchase = useCallback(async () => {
+    setPurchasingPro(true);
+    try {
+      await purchaseWithRazorpay();
+      setHasProSubscription(true);
+      await loadServerCourses();
+      Alert.alert('Pro activated 🎉', 'Intermediate and Advanced courses are now unlocked.');
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Please try again.';
+      if (/payment cancelled/i.test(message)) {
+        return;
+      }
+      Alert.alert('Payment failed', message);
+    } finally {
+      setPurchasingPro(false);
+    }
+  }, [loadServerCourses]);
+
+  const handleBuyPro = useCallback(() => {
+    Alert.alert(
+      'Unlock Pro courses',
+      `Pro plan • ${PRO_PRICE_LABEL}\n\nPay securely with Razorpay to unlock Intermediate and Advanced courses for 30 days.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: `Pay ${PRO_PRICE_LABEL.split('/')[0]}`, onPress: () => void runProPurchase() },
+      ]
+    );
+  }, [runProPurchase]);
 
   useFocusEffect(
     useCallback(() => {
@@ -757,41 +892,45 @@ export default function MyCoursesScreen() {
     [completedLessons]
   );
 
-  const isLevelUnlockedForUser = (levelId: LevelId) =>
-    isLevelUnlocked(levelId, completedLessons);
+  const isLevelUnlockedForUser = (levelId: string) => {
+    const cat = categories.find((c) => c.id === levelId);
+    if (cat?.locked || (isProCategory(levelId, cat?.isPro) && !hasProSubscription)) {
+      return false;
+    }
+    return isLevelUnlocked(levelId, completedLessons, categories);
+  };
 
-  const getLessonLevelId = (lessonId: string): LevelId | null => {
-    for (const level of COURSE_DATA) {
+  const isCategoryProLocked = useCallback(
+    (levelId: string) => {
+      const cat = categories.find((c) => c.id === levelId);
+      if (cat?.locked) return true;
+      return isProCategory(levelId, cat?.isPro) && !hasProSubscription;
+    },
+    [categories, hasProSubscription]
+  );
+
+  const getLessonLevelId = (lessonId: string): string | null => {
+    for (const level of categories) {
       if (level.lessons.some((l) => l.id === lessonId)) return level.id;
     }
     return null;
   };
 
   const getVideoSourceForLesson = (lessonId: string | null) => {
-    if (!lessonId) return LECTURE_VIDEO;
-
-    const localLevel = COURSE_DATA.find((l) => l.lessons.some((lesson) => lesson.id === lessonId));
-    if (!localLevel) return LECTURE_VIDEO;
-
-    const lessonIndex = localLevel.lessons.findIndex((l) => l.id === lessonId);
-    const serverLevel = localLevel.id ? serverCoursesByLevel[localLevel.id] : undefined;
-    const serverLesson = getServerLessonForLocal(serverLevel, lessonId, lessonIndex);
-
-    // If the server has a matching lesson record but no videoUrl (yet or deleted),
-    // hide the video instead of falling back to the bundled lecture.
-    if (serverLesson) {
-      return serverLesson.videoUrl ? { uri: serverLesson.videoUrl } : null;
-    }
-
-    return localLevel.videoSource ?? LECTURE_VIDEO;
+    const lesson = findLesson(lessonId);
+    if (!lesson || lesson.locked) return null;
+    const levelId = getLessonLevelId(lessonId || '');
+    if (levelId && isCategoryProLocked(levelId)) return null;
+    if (lesson.videoUrl) return { uri: lesson.videoUrl };
+    return null;
   };
 
   const pauseVideo = useCallback(() => {
-    videoRef.current?.pauseAsync().catch(() => {});
+    videoRef.current?.pauseAsync().catch(() => { });
   }, []);
 
   const playVideo = useCallback(() => {
-    videoRef.current?.playAsync().catch(() => {});
+    videoRef.current?.playAsync().catch(() => { });
   }, []);
 
   const lockPortraitOrientation = useCallback(async () => {
@@ -827,18 +966,18 @@ export default function MyCoursesScreen() {
     lockPortraitOrientation();
   }, [pauseVideo, lockPortraitOrientation]);
 
-  const syncRoadmapFocus = useCallback((levelId: LevelId, completed: string[]) => {
-    const level = COURSE_DATA.find((l) => l.id === levelId);
+  const syncRoadmapFocus = useCallback((levelId: string, completed: string[]) => {
+    const level = categories.find((l) => l.id === levelId);
     if (!level) return;
     const firstIncomplete = level.lessons.findIndex((l) => !completed.includes(l.id));
     setRoadmapFocusIndex(firstIncomplete >= 0 ? firstIncomplete : level.lessons.length - 1);
-  }, []);
+  }, [categories]);
 
   useEffect(() => {
-    if (!loading) syncRoadmapFocus(selectedCategory, completedLessons);
+    if (!loading && selectedCategory) syncRoadmapFocus(selectedCategory, completedLessons);
   }, [loading, selectedCategory, completedLessons, syncRoadmapFocus]);
 
-  const handleSelectCategory = useCallback((id: LevelId) => {
+  const handleSelectCategory = useCallback((id: string) => {
     setSelectedCategory(id);
     setLessonReviewId(null);
     syncRoadmapFocus(id, completedLessons);
@@ -848,24 +987,26 @@ export default function MyCoursesScreen() {
     setIsPaused(true);
     setIsVideoLoaded(false);
     setControlsVisible(true);
+    setCurrentTime(0);
+    setDuration(0);
   }, [pauseVideo, completedLessons, syncRoadmapFocus]);
 
-  const handleDownloadPdf = useCallback(async (lesson: Lesson) => {
+  const handleDownloadPdf = useCallback(async (lesson: AppLesson) => {
+    const level = categories.find((l) => l.lessons.some((x) => x.id === lesson.id));
+    if (level && isCategoryProLocked(level.id)) {
+      handleBuyPro();
+      return;
+    }
     try {
-      const localLevel = COURSE_DATA.find((l) => l.lessons.some((x) => x.id === lesson.id));
-      const lessonIndex = localLevel?.lessons?.findIndex((x) => x.id === lesson.id) ?? -1;
-      const serverLesson =
-        localLevel?.id && lessonIndex >= 0
-          ? getServerLessonForLocal(serverCoursesByLevel[localLevel.id], lesson.id, lessonIndex)
-          : undefined;
-
-      const url =
-        serverLesson?.pdfUrl || SAMPLE_PDF_URL;
-      await WebBrowser.openBrowserAsync(url);
+      if (!lesson.pdfUrl) {
+        alert('PDF not available for this lesson yet.');
+        return;
+      }
+      await WebBrowser.openBrowserAsync(lesson.pdfUrl);
     } catch {
       alert(`Could not open PDF for ${lesson.pdfTitle}`);
     }
-  }, [serverCoursesByLevel]);
+  }, [categories, isCategoryProLocked, handleBuyPro]);
 
   const handleContinueToReview = useCallback((lessonId: string) => {
     pauseVideo();
@@ -874,14 +1015,14 @@ export default function MyCoursesScreen() {
     setControlsVisible(true);
   }, [pauseVideo]);
 
-  const activeLevel = COURSE_DATA.find((l) => l.id === selectedCategory)!;
-  const totalLessons = COURSE_DATA.reduce((count, level) => count + level.lessons.length, 0);
+  const activeLevel = categories.find((l) => l.id === selectedCategory) ?? categories[0];
+  const totalLessons = totalLessonCount(categories);
 
   const renderHeader = () => (
     <View style={[styles.screenHeader, { paddingTop: insets.top }]}>
       <View style={styles.screenHeaderRow}>
         <TouchableOpacity
-          onPress={() => router.navigate('/(tabs)/')}
+          onPress={() => router.navigate('/(tabs)')}
           style={styles.screenBackBtn}
           activeOpacity={0.6}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -900,11 +1041,41 @@ export default function MyCoursesScreen() {
         ) : (
           <View style={styles.screenHeaderSpacer} />
         )}
+        {!loading && !hasProSubscription ? (
+          <TouchableOpacity
+            style={styles.premiumHeaderBtn}
+            onPress={handleBuyPro}
+            activeOpacity={0.8}
+          >
+            <Feather name="zap" size={14} color="#fff" />
+            <Text style={styles.premiumHeaderBtnText}>Upgrade</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </View>
   );
 
   const handlePlay = (lessonId: string) => {
+    const lessonLevel = categories.find((l) => l.lessons.some((x) => x.id === lessonId));
+    if (!lessonLevel) return;
+
+    if (isCategoryProLocked(lessonLevel.id) || lessonLevel.locked) {
+      closePlayer();
+      handleBuyPro();
+      return;
+    }
+
+    const lesson = lessonLevel.lessons.find((l) => l.id === lessonId);
+    if (!lesson?.videoUrl) {
+      Alert.alert(
+        'Video unavailable',
+        lessonLevel.locked
+          ? `Unlock with Pro Subscription – ${PRO_PRICE_LABEL} to play this video.`
+          : 'Video not available yet. Ask admin to upload from the dashboard.'
+      );
+      return;
+    }
+
     saveCourseProgress(completedLessons, lessonId);
     setLastLessonId(lessonId);
 
@@ -917,7 +1088,7 @@ export default function MyCoursesScreen() {
     if (levelId) setSelectedCategory(levelId);
 
     setLessonReviewId(null);
-    const idx = activeLevel.lessons.findIndex((l) => l.id === lessonId);
+    const idx = lessonLevel.lessons.findIndex((l) => l.id === lessonId);
     if (idx >= 0) setRoadmapFocusIndex(idx);
 
     setPlayingLessonId(lessonId);
@@ -930,8 +1101,14 @@ export default function MyCoursesScreen() {
   };
 
   const handleNextLesson = useCallback(async (lessonId: string) => {
-    const level = COURSE_DATA.find((l) => l.lessons.some((lesson) => lesson.id === lessonId));
+    const level = categories.find((l) => l.lessons.some((lesson) => lesson.id === lessonId));
     if (!level) return;
+
+    if (isCategoryProLocked(level.id)) {
+      closePlayer();
+      handleBuyPro();
+      return;
+    }
 
     await markLessonComplete(lessonId);
     setLessonReviewId(null);
@@ -939,6 +1116,10 @@ export default function MyCoursesScreen() {
     const currentIndex = level.lessons.findIndex((l) => l.id === lessonId);
     if (currentIndex < level.lessons.length - 1) {
       const nextLesson = level.lessons[currentIndex + 1];
+      if (!nextLesson.videoUrl) {
+        closePlayer();
+        return;
+      }
       setRoadmapFocusIndex(currentIndex + 1);
       const newList = completedLessons.includes(lessonId)
         ? completedLessons
@@ -955,7 +1136,7 @@ export default function MyCoursesScreen() {
     } else {
       closePlayer();
     }
-  }, [markLessonComplete, closePlayer]);
+  }, [markLessonComplete, closePlayer, categories, completedLessons, isCategoryProLocked, handleBuyPro]);
 
   const togglePlayPause = () => {
     if (!playingLessonId) return;
@@ -980,17 +1161,28 @@ export default function MyCoursesScreen() {
 
     if (needsSeekOnLoadRef.current) {
       needsSeekOnLoadRef.current = false;
-      videoRef.current?.setPositionAsync(savedPositionRef.current).catch(() => {});
+      videoRef.current?.setPositionAsync(savedPositionRef.current).catch(() => { });
       if (!isPaused) playVideo();
     }
 
     setIsBuffering((prev) => (prev === status.isBuffering ? prev : status.isBuffering));
 
+    if (status.durationMillis) {
+      const totalSec = status.durationMillis / 1000;
+      setDuration(totalSec);
+      const lessonId = playingLessonIdRef.current;
+      if (lessonId) {
+        const label = formatDurationLabel(totalSec);
+        setDetectedDurations((prev) =>
+          prev[lessonId] === label ? prev : { ...prev, [lessonId]: label }
+        );
+      }
+    }
+
     const now = Date.now();
     if (now - lastUiTickRef.current >= 450) {
       lastUiTickRef.current = now;
       setCurrentTime(status.positionMillis / 1000);
-      if (status.durationMillis) setDuration(status.durationMillis / 1000);
     }
 
     if (status.didJustFinish && playingLessonIdRef.current) {
@@ -1002,7 +1194,7 @@ export default function MyCoursesScreen() {
   }, [isVideoLoaded, isPaused, pauseVideo, playVideo]);
 
   const openFullscreen = useCallback(() => {
-    ScreenOrientation.unlockAsync().catch(() => {});
+    ScreenOrientation.unlockAsync().catch(() => { });
     videoRef.current?.getStatusAsync().then((s) => {
       if (s.isLoaded && 'positionMillis' in s) {
         savedPositionRef.current = s.positionMillis;
@@ -1029,7 +1221,7 @@ export default function MyCoursesScreen() {
   const seekTo = useCallback((seconds: number) => {
     const clamped = Math.max(0, Math.min(duration || 0, seconds));
     setCurrentTime(clamped);
-    videoRef.current?.setPositionAsync(clamped * 1000).catch(() => {});
+    videoRef.current?.setPositionAsync(clamped * 1000).catch(() => { });
     startHideTimer();
   }, [duration]);
 
@@ -1044,11 +1236,7 @@ export default function MyCoursesScreen() {
     seekTo(ratio * duration);
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
+  const formatTime = (seconds: number) => formatDurationLabel(seconds);
 
   const toggleRotation = useCallback(async () => {
     try {
@@ -1075,30 +1263,36 @@ export default function MyCoursesScreen() {
   }, [lockPortraitOrientation]);
 
   const renderPlayer = (isFull: boolean = false) => {
-    const lesson = COURSE_DATA.flatMap(l => l.lessons).find(l => l.id === playingLessonId);
+    const lesson = findLesson(playingLessonId);
     if (!lesson) return null;
 
     const videoSource = getVideoSourceForLesson(playingLessonId);
-    const localLevel = COURSE_DATA.find((l) => l.lessons.some((lesson) => lesson.id === playingLessonId));
-    const lessonIndex =
-      localLevel?.lessons?.findIndex((l) => l.id === playingLessonId) ?? -1;
-    const serverLesson = localLevel?.id
-      ? getServerLessonForLocal(serverCoursesByLevel[localLevel.id], playingLessonId, lessonIndex)
-      : null;
     const progressPct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
     const showCenterControls = controlsVisible || !isVideoLoaded;
     const cinemaMode = isPaused && !controlsVisible && isVideoLoaded;
 
     if (!videoSource) {
-      const msg =
-        serverLesson?.videoAvailableIn && serverLesson.videoAvailableIn > 0
-          ? `Video will be available soon (~${serverLesson.videoAvailableIn}s)`
-          : 'Video not available';
+      const levelId = playingLessonId ? getLessonLevelId(playingLessonId) : null;
+      const locked = (levelId && isCategoryProLocked(levelId)) || lesson.locked;
+      const msg = locked
+        ? `Unlock with Pro Subscription – ${PRO_PRICE_LABEL} to play this video.`
+        : lesson.videoAvailableIn && lesson.videoAvailableIn > 0
+          ? `Video will be available soon (~${lesson.videoAvailableIn}s)`
+          : 'Video not available yet. Ask admin to upload from the dashboard.';
 
       return (
         <View style={isFull ? styles.fullPlayerContainer : styles.playlistPlayerVideoWrap}>
           <View style={styles.playerLoading}>
+            <Feather name={locked ? 'lock' : 'video-off'} size={28} color="#fff" style={{ marginBottom: 10 }} />
             <Text style={styles.playerLoadingText}>{msg}</Text>
+            {locked ? (
+              <TouchableOpacity
+                style={{ marginTop: 14, backgroundColor: '#7b4dff', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 12 }}
+                onPress={handleBuyPro}
+              >
+                <Text style={{ color: '#fff', fontWeight: '800' }}>Unlock Pro</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       );
@@ -1270,11 +1464,21 @@ export default function MyCoursesScreen() {
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#1A73E8" />
         </View>
+      ) : !activeLevel ? (
+        <View style={styles.loadingBox}>
+          <Text style={{ color: UI.textSecondary, textAlign: 'center', paddingHorizontal: 24 }}>
+            {coursesError || 'No courses yet. Add categories and lessons from the admin dashboard.'}
+          </Text>
+        </View>
       ) : (
         <View style={[styles.mainColumn, { paddingBottom: insets.bottom }]}>
           <CoursePlaylistView
+            categories={categories}
             level={activeLevel}
             levelUnlocked={isLevelUnlockedForUser(activeLevel.id)}
+            proLocked={isCategoryProLocked(activeLevel.id)}
+            onBuyPro={handleBuyPro}
+            purchasingPro={purchasingPro}
             completedLessons={completedLessons}
             focusIndex={roadmapFocusIndex}
             playingLessonId={playingLessonId}
@@ -1282,6 +1486,7 @@ export default function MyCoursesScreen() {
             selectedLevel={selectedCategory}
             onSelectLevel={handleSelectCategory}
             isLevelUnlocked={isLevelUnlockedForUser}
+            detectedDurations={detectedDurations}
             onPlay={handlePlay}
             onClosePlayer={closePlayer}
             onDownloadPdf={handleDownloadPdf}
@@ -1365,6 +1570,26 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: UI.accent,
+  },
+  premiumHeaderBtn: {
+    flexDirection: 'row',
+    gap: 6,
+    backgroundColor: '#7b4dff',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#7b4dff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  premiumHeaderBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
   },
   loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: UI.bg },
   scrollBody: { flex: 1 },
@@ -1755,6 +1980,54 @@ const styles = StyleSheet.create({
   roadmapPlayTap: {
     width: '100%',
     aspectRatio: 16 / 9,
+  },
+  proLockBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 12,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#F5F0FF',
+    borderWidth: 1,
+    borderColor: 'rgba(123, 77, 255, 0.25)',
+  },
+  proLockBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  proLockBannerTextWrap: {
+    flex: 1,
+  },
+  proLockBannerTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: UI.text,
+  },
+  proLockBannerSub: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#7b4dff',
+    marginTop: 2,
+  },
+  proLockBannerBtn: {
+    backgroundColor: '#7b4dff',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    minWidth: 72,
+    alignItems: 'center',
+  },
+  proLockBannerBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '800',
   },
   roadmapPrimaryBtn: {
     flexDirection: 'row',

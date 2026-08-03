@@ -14,11 +14,11 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
   },
   {
     title: '3. Information we do not collect',
-    body: `${APP_INFO.appName} does not collect or require access to: your contact list, precise or approximate location, photos or videos from your gallery, SMS, call logs, advertising ID, or health or financial data. We do not use contacts or location permissions on Android or iOS.`,
+    body: `${APP_INFO.appName} does not collect or require access to: your contact list, precise or approximate location, SMS, call logs, advertising ID, or health or financial data. We do not use contacts or location permissions on Android or iOS. Optional profile photos use your device’s system photo picker — we only receive the single image you choose, not your full gallery.`,
   },
   {
     title: '4. Camera and microphone',
-    body: `If you use video or voice practice, ${APP_INFO.appName} requests camera and/or microphone permission only when you tap to start that feature. Live audio and video are sent directly between matched learners (peer-to-peer) for practice and are not recorded or stored on our servers. We do not access camera or microphone in the background. We do not browse your photo library. Do not share inappropriate content. User content must follow Google Play policies and our Terms & Conditions.`,
+    body: `If you use video or voice practice, ${APP_INFO.appName} requests camera and/or microphone permission only when you tap to start that feature. Live audio and video are sent directly between matched learners (peer-to-peer) for practice and are not recorded or stored on our servers. We do not access camera or microphone in the background. Profile pictures are optional and chosen via the system photo picker (gallery only — we never open the camera for profile photos). Do not share inappropriate content. User content must follow Google Play policies and our Terms & Conditions.`,
   },
   {
     title: '5. Random chat and user content',

@@ -43,12 +43,30 @@ function getFallbackDevHost(): string {
 }
 
 /**
- * Dev priority (two phones / Expo tunnel):
- * 1. EXPO_PUBLIC_REMOTE_API_URL — HTTPS backend any phone can reach (Render, etc.)
- * 2. Expo LAN IP from debuggerHost — each phone on same Wi‑Fi with `expo start --lan`
- * 3. EXPO_PUBLIC_API_URL in .env — your PC LAN IP
+ * Dev priority:
+ * 1. EXPO_PUBLIC_USE_LOCAL_API=1 → LAN / local backend (for new features like notifications)
+ * 2. EXPO_PUBLIC_REMOTE_API_URL — HTTPS backend any phone can reach (Render, etc.)
+ * 3. Expo LAN IP from debuggerHost — each phone on same Wi‑Fi with `expo start --lan`
+ * 4. EXPO_PUBLIC_API_URL in .env — your PC LAN IP
  */
 function resolveApiBaseUrl(): string {
+  const useLocal =
+    __DEV__ &&
+    /^(1|true|yes)$/i.test(String(process.env.EXPO_PUBLIC_USE_LOCAL_API || '').trim());
+
+  if (useLocal) {
+    const lanFromExpo = getExpoLanHost();
+    if (lanFromExpo) {
+      return `http://${lanFromExpo}:${API_PORT}`;
+    }
+    const envUrl = process.env.EXPO_PUBLIC_API_URL?.trim();
+    if (envUrl && !envUrl.includes('onrender.com')) {
+      return envUrl.replace(/\/$/, '');
+    }
+    const host = getFallbackDevHost();
+    return `http://${host}:${API_PORT}`;
+  }
+
   const remoteFromEnv = process.env.EXPO_PUBLIC_REMOTE_API_URL?.trim();
   if (remoteFromEnv) {
     return remoteFromEnv.replace(/\/$/, '');

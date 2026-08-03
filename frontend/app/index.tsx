@@ -17,11 +17,19 @@ export default function Index() {
 
     (async () => {
       warmApiServer();
-      await bootstrapSession();
       const loggedIn = await isLoggedInLocally();
       if (cancelled) return;
+
+      if (loggedIn) {
+        // Refresh tokens in background — never block navigation for logged-in users.
+        void bootstrapSession();
+        await SplashScreen.hideAsync();
+        setHref('/(tabs)');
+        return;
+      }
+
       await SplashScreen.hideAsync();
-      setHref(loggedIn ? '/(tabs)' : '/intro');
+      setHref('/intro');
     })();
 
     return () => {

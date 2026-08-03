@@ -21,6 +21,7 @@ import { performLogout } from '@/utils/session';
 import { appVersionLabel } from '@/constants/appInfo';
 import { AppUI } from '@/constants/theme';
 import { getNavBarTopPadding } from '@/utils/safeAreaInsets';
+import UserAvatar from '@/components/UserAvatar';
 
 const { width } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(width * 0.82, 320);
@@ -68,6 +69,7 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
   const insets = useSafeAreaInsets();
   const navTopPadding = getNavBarTopPadding(insets);
   const [userName, setUserName] = useState('User');
+  const [userAvatar, setUserAvatar] = useState('');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [mounted, setMounted] = useState(false);
   const slideX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
@@ -117,8 +119,12 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
 
   useEffect(() => {
     const loadUser = async () => {
-      const name = await AsyncStorage.getItem(AUTH_KEYS.userName);
+      const [name, avatar] = await Promise.all([
+        AsyncStorage.getItem(AUTH_KEYS.userName),
+        AsyncStorage.getItem(AUTH_KEYS.userAvatar),
+      ]);
       setUserName(name?.trim() || 'User');
+      setUserAvatar(avatar || '');
     };
     if (visible) loadUser();
   }, [visible]);
@@ -143,6 +149,7 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
       console.error('Logout failed', e);
     } finally {
       setUserName('User');
+      setUserAvatar('');
       router.replace('/intro');
       setIsLoggingOut(false);
     }
@@ -183,7 +190,7 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
 
             <View style={styles.profileSection}>
               <View style={styles.avatarContainer}>
-                <Ionicons name="person" size={40} color={AppUI.textTertiary} />
+                <UserAvatar name={userName} avatar={userAvatar} size={72} />
               </View>
               <View style={styles.nameHeader}>
                 <Text style={styles.username} numberOfLines={1}>
@@ -288,12 +295,10 @@ const styles = StyleSheet.create({
     borderBottomColor: AppUI.divider,
   },
   avatarContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: AppUI.surfaceMuted,
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    overflow: 'hidden',
     marginBottom: 12,
   },
   nameHeader: {

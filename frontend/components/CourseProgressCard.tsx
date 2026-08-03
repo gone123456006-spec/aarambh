@@ -2,7 +2,6 @@ import React from 'react';
 import { StyleSheet, View, Text, Pressable, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { TOTAL_LESSONS } from '@/constants/courseData';
 
 const UI = {
   text: '#101010',
@@ -29,11 +28,13 @@ const cardShadow = Platform.select({
 export function CourseProgressCard({
   overallProgress,
   completedCount,
+  totalLessons,
   lastLessonTitle,
   onContinue,
 }: {
   overallProgress: number;
   completedCount: number;
+  totalLessons: number;
   lastLessonTitle: string | null;
   onContinue: () => void;
 }) {
@@ -69,7 +70,7 @@ export function CourseProgressCard({
         </View>
 
         <Text style={styles.meta}>
-          {completedCount} of {TOTAL_LESSONS} lessons completed
+          {completedCount} of {totalLessons} lessons completed
         </Text>
         {lastLessonTitle ? (
           <Text style={styles.last} numberOfLines={1}>

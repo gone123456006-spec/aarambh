@@ -3,7 +3,6 @@ import React, { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { isLoggedInLocally } from '@/utils/authStorage';
 import { ensureValidSession } from '@/utils/api';
 import { getTabBarBottomInset } from '@/utils/safeAreaInsets';
 
@@ -33,11 +32,10 @@ function TabNavigator() {
       let active = true;
       const timer = setTimeout(() => {
         (async () => {
-          const loggedIn = await isLoggedInLocally();
-          if (active && !loggedIn) {
-            router.replace('/intro');
-            return;
-          }
+          // Always attempt to keep the session alive on tab focus.
+          // Never redirect to /intro here — only explicit logout should do that.
+          // If tokens are temporarily unreadable (slow storage, race condition),
+          // the user stays on the tabs screen rather than being forced to re-login.
           if (active) {
             await ensureValidSession();
           }
@@ -48,7 +46,7 @@ function TabNavigator() {
         active = false;
         clearTimeout(timer);
       };
-    }, [router])
+    }, [])
   );
 
   return (

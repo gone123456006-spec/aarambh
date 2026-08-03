@@ -18,6 +18,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AUTH_KEYS } from '@/utils/authStorage';
 import Sidebar from '@/components/Sidebar';
+import UserAvatar from '@/components/UserAvatar';
+import AppTourOverlay, { shouldShowAppTour } from '@/components/AppTourOverlay';
 import { HomeMenuIcon } from '@/components/HomeHeaderIcons';
 import DailyWordHomeTeaser from '@/components/DailyWordHomeTeaser';
 import AppFeatureCards from '@/components/AppFeatureCards';
@@ -27,11 +29,12 @@ import { getAndroidHeaderCompactStyle } from '@/utils/safeAreaInsets';
 import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { APP_INFO, phoneTelUri } from '@/constants/appInfo';
 import { AppUI, cardShadow } from '@/constants/theme';
+import { fetchUnreadCount } from '@/utils/notificationApi';
 
 import { Icons3D } from '@/constants/homeIcons';
 
 const BANNER_33_IMAGE = require('../../assets/images/banner iamge 33.png');
-const BANNER_HERO_2_2_IMAGE = require('../../assets/images/banner iamge hero 2 2.png');
+const BANNER_HERO_2_2_IMAGE = require('../../assets/images/Hero banner iamge 2 .png');
 const BANNER_44_IMAGE = require('../../assets/images/iagme banner 44 .png');
 const BANNER_RANDOM_CHAT_IMAGE = require('../../assets/images/Banner Iamge 1 .jpeg');
 
@@ -73,13 +76,15 @@ const LEARNING_ACTIONS = [
     image: Icons3D.speechBubble,
     bg: '#F3F0FF',
     desc: 'Chat with real learners live',
+    route: '/random-chat' as const,
   },
   {
     id: 2,
     title: 'Call in English',
     image: Icons3D.phone,
     bg: '#EBFBEE',
-    desc: 'Build confidence with voice calls',
+    desc: 'Call a random learner and practice speaking',
+    route: '/random-chat?intent=call' as const,
   },
   {
     id: 3,
@@ -87,6 +92,7 @@ const LEARNING_ACTIONS = [
     image: Icons3D.conferenceCall,
     bg: '#E1F5FE',
     desc: 'Practice speaking in small groups',
+    route: null,
   },
 ];
 
@@ -117,6 +123,10 @@ export default function HomeScreen() {
   const [activeBannerIndex, setActiveBannerIndex] = useState(0);
   const [userName, setUserName] = useState('User');
   const [userLevel, setUserLevel] = useState('Beginner');
+  const [userAvatar, setUserAvatar] = useState('');
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [showAppTour, setShowAppTour] = useState(false);
+  const tourCheckedRef = useRef(false);
   const router = useRouter();
   const scrollViewRef = useRef<ScrollView>(null);
 
@@ -138,9 +148,10 @@ export default function HomeScreen() {
 
   const loadUserHeader = useCallback(async () => {
     try {
-      const [storedName, storedLevel] = await Promise.all([
+      const [storedName, storedLevel, storedAvatar] = await Promise.all([
         AsyncStorage.getItem(AUTH_KEYS.userName),
         AsyncStorage.getItem(AUTH_KEYS.level),
+        AsyncStorage.getItem(AUTH_KEYS.userAvatar),
       ]);
       if (storedName?.trim()) {
         setUserName(storedName.trim().split(' ')[0]);
@@ -148,8 +159,19 @@ export default function HomeScreen() {
         setUserName('User');
       }
       setUserLevel(storedLevel?.trim() || 'Beginner');
+      setUserAvatar(storedAvatar || '');
     } catch (e) {
       console.error('Failed to load user header', e);
+    }
+  }, []);
+
+  const refreshNotificationBadge = useCallback(async () => {
+    try {
+      // Lightweight count only — full list + bootstrap happens on the Notifications screen
+      const count = await fetchUnreadCount();
+      setUnreadNotifications(count);
+    } catch {
+      /* keep previous badge */
     }
   }, []);
 
@@ -160,7 +182,18 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadUserHeader();
-    }, [loadUserHeader])
+      void refreshNotificationBadge();
+
+      // First-login app overview — checked once per session, shown once per user.
+      if (!tourCheckedRef.current) {
+        tourCheckedRef.current = true;
+        void shouldShowAppTour().then((show) => {
+          if (show) {
+            setTimeout(() => setShowAppTour(true), 600);
+          }
+        });
+      }
+    }, [loadUserHeader, refreshNotificationBadge])
   );
 
   const headerPillLabel = /^\d+$/.test(userLevel)
@@ -203,7 +236,7 @@ export default function HomeScreen() {
           accessibilityLabel="Open profile"
         >
           <View style={styles.pillAvatar}>
-            <Feather name="user" size={13} color={AppUI.textTertiary} />
+            <UserAvatar name={userName} avatar={userAvatar} size={26} />
           </View>
           <Text style={styles.pillLabel} numberOfLines={1}>
             {headerPillLabel}
@@ -213,12 +246,19 @@ export default function HomeScreen() {
 
         <View style={styles.headerActions}>
           <TouchableOpacity
-            onPress={() => router.navigate('/(tabs)/ved')}
+            onPress={() => router.push('/notifications')}
             activeOpacity={0.88}
             style={styles.headerIconBtn}
-            accessibilityLabel="Open support"
+            accessibilityLabel="Open notifications"
           >
-            <Feather name="search" size={22} color={AppUI.text} />
+            <Feather name="bell" size={22} color={AppUI.text} />
+            {unreadNotifications > 0 ? (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>
+                  {unreadNotifications > 99 ? '99+' : String(unreadNotifications)}
+                </Text>
+              </View>
+            ) : null}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -429,9 +469,17 @@ export default function HomeScreen() {
               <TouchableOpacity 
                 key={item.id} 
                 style={styles.learningCard}
+                activeOpacity={item.route ? 0.75 : 1}
                 onPress={() => {
-                  if (item.title === 'Chat in English') {
-                    router.push('/random-chat');
+                  if (item.route) {
+                    router.push(item.route);
+                    return;
+                  }
+                  if (item.title === 'Group Discussion') {
+                    Alert.alert(
+                      'Coming soon',
+                      'Group Discussion is coming soon. Try Call in English or Chat in English to practice with learners now.'
+                    );
                   }
                 }}
               >
@@ -519,6 +567,8 @@ export default function HomeScreen() {
         visible={isSidebarVisible}
         onClose={() => setSidebarVisible(false)}
       />
+
+      <AppTourOverlay visible={showAppTour} onClose={() => setShowAppTour(false)} />
       </SafeAreaView>
     </View>
   );
@@ -589,10 +639,10 @@ const styles = StyleSheet.create({
     minHeight: 36,
   },
   pillAvatar: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: AppUI.surfaceMuted,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -614,6 +664,27 @@ const styles = StyleSheet.create({
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  notifBadge: {
+    position: 'absolute',
+    top: 0,
+    right: -2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: AppUI.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  notifBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+    lineHeight: 11,
   },
   scrollContent: {
     flexGrow: 1,

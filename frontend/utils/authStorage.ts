@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { clearAllLocalUserData } from '@/utils/userStorage';
+import { clearAllLocalUserData, clearUserScopedCache } from '@/utils/userStorage';
 
 export const AUTH_KEYS = {
   accessToken: 'accessToken',
@@ -7,6 +7,7 @@ export const AUTH_KEYS = {
   userId: 'userId',
   userEmail: 'userEmail',
   userName: 'userName',
+  userAvatar: 'userAvatar',
   userRegion: 'userRegion',
   gender: 'gender',
   level: 'level',
@@ -24,16 +25,17 @@ export async function saveAuthSession(payload: {
     gender?: string;
     region?: string;
     level?: string;
+    avatar?: string;
   };
 }) {
-  await clearAllLocalUserData();
-
+  // Write auth tokens first so a crash mid-save never leaves the user logged out.
   const entries: [string, string][] = [
     [AUTH_KEYS.accessToken, payload.accessToken],
     [AUTH_KEYS.refreshToken, payload.refreshToken],
     [AUTH_KEYS.userId, payload.user.id],
     [AUTH_KEYS.userEmail, payload.user.email],
     [AUTH_KEYS.userName, payload.user.name ?? ''],
+    [AUTH_KEYS.userAvatar, payload.user.avatar ?? ''],
     [AUTH_KEYS.userPhone, payload.user.phone ?? ''],
     [AUTH_KEYS.gender, payload.user.gender ?? ''],
     [AUTH_KEYS.userRegion, payload.user.region ?? ''],
@@ -41,6 +43,7 @@ export async function saveAuthSession(payload: {
   ];
 
   await AsyncStorage.multiSet(entries);
+  await clearUserScopedCache();
 }
 
 export async function getAccessToken() {
@@ -51,7 +54,7 @@ export async function getRefreshToken() {
   return AsyncStorage.getItem(AUTH_KEYS.refreshToken);
 }
 
-/** True while access or refresh token is stored — only cleared by explicit logout. */
+/** True while access or refresh token is stored — only cleared by explicit Logout. */
 export async function isLoggedInLocally(): Promise<boolean> {
   const [accessToken, refreshToken] = await Promise.all([
     getAccessToken(),
@@ -60,7 +63,11 @@ export async function isLoggedInLocally(): Promise<boolean> {
   return !!(accessToken || refreshToken);
 }
 
-/** Persist rotated tokens after /api/auth/refresh-token */
+export async function updateAuthUserAvatar(avatar: string) {
+  await AsyncStorage.setItem(AUTH_KEYS.userAvatar, avatar);
+}
+
+/** Persist tokens after login or /api/auth/refresh-token. Never clears the session. */
 export async function updateAuthTokens(accessToken: string, refreshToken?: string) {
   const pairs: [string, string][] = [[AUTH_KEYS.accessToken, accessToken]];
   if (refreshToken) {
@@ -69,6 +76,7 @@ export async function updateAuthTokens(accessToken: string, refreshToken?: strin
   await AsyncStorage.multiSet(pairs);
 }
 
+/** Clear tokens and local user cache. Call only from manual Logout / account deletion. */
 export async function clearAuthSession() {
   await clearAllLocalUserData();
 }

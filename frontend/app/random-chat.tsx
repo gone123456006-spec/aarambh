@@ -17,11 +17,11 @@ import {
   Modal,
 } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import * as SystemUI from 'expo-system-ui';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardStickyView, useKeyboardHandler } from 'react-native-keyboard-controller';
-import { runOnJS } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, runOnJS } from 'react-native-reanimated';
 import {
   connectChatSocket,
   disconnectChatSocket,
@@ -40,11 +40,12 @@ import {
   type ChatPeer,
 } from '@/utils/chatSocket';
 import type { Socket } from 'socket.io-client';
-import { AUTH_KEYS, isLoggedInLocally } from '@/utils/authStorage';
+import { AUTH_KEYS } from '@/utils/authStorage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ensureValidSession } from '@/utils/api';
 import { MatchmakingScene } from '@/components/MatchmakingScene';
 import { ChatTypingBubble } from '@/components/ChatTypingBubble';
+import UserAvatar from '@/components/UserAvatar';
 import { AppUI, cardShadow } from '@/constants/theme';
 import { APP_INFO } from '@/constants/appInfo';
 import { validateChatMessage, isChatMessageBlocked } from '@/utils/chatMessageValidation';
@@ -95,34 +96,15 @@ interface Message {
 }
 
 function PeerAvatar({ peer, size = 40 }: { peer: ChatPeer; size?: number }) {
-  const radius = size / 2;
-  if (peer.avatar) {
-    return (
-      <Image
-        source={{ uri: peer.avatar }}
-        style={{ width: size, height: size, borderRadius: radius, backgroundColor: UI.surfaceMuted }}
-      />
-    );
-  }
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: radius,
-        backgroundColor: UI.accent,
-        justifyContent: 'center',
-        alignItems: 'center',
-      }}
-    >
-      <Ionicons name="person" size={Math.round(size * 0.55)} color="#fff" />
-    </View>
-  );
+  return <UserAvatar name={peer.name} avatar={peer.avatar} size={size} />;
 }
 
 export default function RandomChatScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ intent?: string | string[] }>();
+  const intentRaw = Array.isArray(params.intent) ? params.intent[0] : params.intent;
+  const callIntent = intentRaw === 'call' || intentRaw === 'voice';
   const [status, setStatus] = useState<'connecting' | 'searching' | 'chat' | 'error'>('connecting');
   const [errorMsg, setErrorMsg] = useState('');
   const [peer, setPeer] = useState<ChatPeer | null>(null);
@@ -147,12 +129,16 @@ export default function RandomChatScreen() {
   const [showEncryptionNotice, setShowEncryptionNotice] = useState(false);
   const [showChatOptions, setShowChatOptions] = useState(false);
   const [incomingCall, setIncomingCall] = useState<CallMode | null>(null);
-  const [needsSignIn, setNeedsSignIn] = useState(false);
   const mountedRef = useRef(true);
   const myUserIdRef = useRef('');
   const callPhaseRef = useRef<CallPhase>('idle');
   const outgoingCallTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onConnectionFailedRef = useRef<() => void>(() => {});
+  const onConnectionFailedRef = useRef<() => void>(() => { });
+  const autoCallStartedForSessionRef = useRef<string | null>(null);
+  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attachChatHandlersRef = useRef<(sock: Socket) => void>(() => { });
+  const callIntentRef = useRef(callIntent);
+  callIntentRef.current = callIntent;
 
   const clearOutgoingCallTimeout = useCallback(() => {
     if (outgoingCallTimeoutRef.current) {
@@ -205,6 +191,31 @@ export default function RandomChatScreen() {
     setIsCameraOff(false);
     webrtcRef.current.endCall();
   }, [clearOutgoingCallTimeout]);
+
+  /** End the active call. Chat mode returns to the thread; Call in English stays on call UI. */
+  const endCallAndReturnToChat = useCallback(() => {
+    const sock = getChatSocket();
+    const sid = sessionIdRef.current;
+    if (sock && sid) endVideoCall(sock, sid);
+    resetCallState();
+  }, [resetCallState]);
+
+  const isInCallUi = isVideoCallActive || outgoingCallPending;
+
+  useEffect(() => {
+    if (!isInCallUi) return;
+    Keyboard.dismiss();
+  }, [isInCallUi]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (isInCallUi) {
+      void SystemUI.setBackgroundColorAsync('#000000');
+      return () => {
+        void SystemUI.setBackgroundColorAsync(WA.header);
+      };
+    }
+  }, [isInCallUi]);
 
   useEffect(() => {
     onConnectionFailedRef.current = () => {
@@ -338,14 +349,14 @@ export default function RandomChatScreen() {
   );
 
   useEffect(() => {
-    if (status !== 'chat' || !peer) {
+    if (callIntent || status !== 'chat' || !peer) {
       setShowEncryptionNotice(false);
       return;
     }
     setShowEncryptionNotice(true);
     const timer = setTimeout(() => setShowEncryptionNotice(false), ENCRYPTION_NOTICE_MS);
     return () => clearTimeout(timer);
-  }, [peer?.id, sessionId, status]);
+  }, [callIntent, peer?.id, sessionId, status]);
 
   const attachChatHandlers = useCallback(
     (sock: Socket) => {
@@ -485,16 +496,23 @@ export default function RandomChatScreen() {
 
       sock.on('video:call-rejected', () => {
         resetCallState();
+        if (callIntentRef.current) {
+          Alert.alert('Call declined', 'Your partner declined. You can call again or find another learner.');
+          return;
+        }
         Alert.alert('Call declined', 'Your partner declined the call.');
       });
 
       sock.on('video:call-ended', () => {
         resetCallState();
+        if (callIntentRef.current) return;
         Alert.alert('Call ended', 'Your partner ended the call.');
       });
 
       sock.on('video:call-busy', () => {
+        // Another learner already started the call (common when both used Call in English).
         resetCallState();
+        if (callIntentRef.current) return;
         Alert.alert('Line busy', 'Your partner is already on a call.');
       });
 
@@ -573,9 +591,7 @@ export default function RandomChatScreen() {
       callPhaseRef.current = 'ringing-out';
       setCallMode(mode);
       setOutgoingCallPending(true);
-      if (mode === 'video') {
-        await webrtcRef.current.prepareLocalMedia(mode);
-      }
+      await webrtcRef.current.prepareLocalMedia(mode);
       startVideoCall(sock, sid, mode);
 
       clearOutgoingCallTimeout();
@@ -592,23 +608,57 @@ export default function RandomChatScreen() {
     [outgoingCallPending, isVideoCallActive, incomingCall, clearOutgoingCallTimeout, resetCallState]
   );
 
-  const connectAndStartChat = useCallback(async () => {
-    try {
-      setStatus('connecting');
-      setErrorMsg('');
-      setNeedsSignIn(false);
+  // Call in English: after matching, start a voice call automatically (same conversation screen).
+  useEffect(() => {
+    if (!callIntent) return;
+    if (status !== 'chat' || !peer?.id || !sessionId || !myUserId) return;
+    if (autoCallStartedForSessionRef.current === sessionId) return;
+    if (outgoingCallPending || isVideoCallActive || incomingCall) return;
+    if (callPhaseRef.current !== 'idle') return;
 
-      const loggedIn = await isLoggedInLocally();
-      if (!loggedIn) {
-        setNeedsSignIn(true);
-        setErrorMsg('Please sign in to chat with real learners.');
-        setStatus('error');
-        return;
+    autoCallStartedForSessionRef.current = sessionId;
+
+    // Stagger so two Call-in-English users don't dial each other at the same instant.
+    const delayMs = String(myUserId) <= String(peer.id) ? 700 : 1600;
+    const timer = setTimeout(() => {
+      if (!mountedRef.current) return;
+      if (callPhaseRef.current !== 'idle') return;
+      if (incomingCall || isVideoCallActive || outgoingCallPending) return;
+      void initiateCall('voice');
+    }, delayMs);
+
+    return () => clearTimeout(timer);
+  }, [
+    callIntent,
+    status,
+    peer?.id,
+    sessionId,
+    myUserId,
+    outgoingCallPending,
+    isVideoCallActive,
+    incomingCall,
+    initiateCall,
+  ]);
+
+  useEffect(() => {
+    if (status === 'searching') {
+      autoCallStartedForSessionRef.current = null;
+    }
+  }, [status]);
+
+  const connectAndStartChat = useCallback(async (opts?: { forceReconnect?: boolean }) => {
+    try {
+      if (disconnectTimerRef.current) {
+        clearTimeout(disconnectTimerRef.current);
+        disconnectTimerRef.current = null;
       }
 
-      await ensureValidSession();
+      setStatus('connecting');
+      setErrorMsg('');
 
-      disconnectChatSocket();
+      // Always attempt to proceed — ensureValidSession refreshes tokens silently.
+      // Never gate on isLoggedInLocally here; only explicit logout should require re-sign-in.
+      await ensureValidSession();
 
       const uid = await AsyncStorage.getItem(AUTH_KEYS.userId);
       if (uid) {
@@ -616,10 +666,19 @@ export default function RandomChatScreen() {
         setMyUserId(uid);
       }
 
-      const sock = await connectChatSocket();
+      // Only tear down an existing socket when retrying — avoids canceling matchmaking
+      // on React Strict Mode remount / dependency churn.
+      let sock = getChatSocket();
+      if (opts?.forceReconnect || (sock && !sock.connected)) {
+        disconnectChatSocket();
+        sock = null;
+      }
+      if (!sock?.connected) {
+        sock = await connectChatSocket();
+      }
       if (!mountedRef.current) return;
 
-      attachChatHandlers(sock);
+      attachChatHandlersRef.current(sock);
       setStatus('searching');
       startMatchmaking(sock);
     } catch (e) {
@@ -627,25 +686,41 @@ export default function RandomChatScreen() {
       setErrorMsg(e instanceof Error ? e.message : 'Could not connect to chat server.');
       setStatus('error');
     }
+  }, []);
+
+  // Keep latest handlers without re-running the mount connection effect.
+  useEffect(() => {
+    attachChatHandlersRef.current = attachChatHandlers;
   }, [attachChatHandlers]);
 
   useEffect(() => {
     mountedRef.current = true;
-    connectAndStartChat();
+    void connectAndStartChat();
+
     return () => {
       mountedRef.current = false;
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       clearOutgoingCallTimeout();
       resetCallState();
-      disconnectChatSocket();
+
+      // Defer disconnect so React Strict Mode remount can reuse the same socket
+      // instead of cancel → reconnect loops that break matchmaking.
+      if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = setTimeout(() => {
+        if (!mountedRef.current) {
+          disconnectChatSocket();
+        }
+        disconnectTimerRef.current = null;
+      }, 450);
     };
-  }, [connectAndStartChat, clearOutgoingCallTimeout, resetCallState]);
+    // Mount once — reconnect via retryChatConnection / beginSearch only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const retryChatConnection = useCallback(() => {
     mountedRef.current = true;
-    connectAndStartChat();
+    void connectAndStartChat({ forceReconnect: true });
   }, [connectAndStartChat]);
-
   const handleSend = () => {
     const text = inputText.trim();
     const sock = getChatSocket();
@@ -977,103 +1052,103 @@ export default function RandomChatScreen() {
     }
 
     return (
-    <View style={[styles.navBar, { paddingTop: navBarTopPadding }]}>
-      <Pressable
-        onPress={handleBack}
-        style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
-        hitSlop={12}
-        accessibilityLabel="Go back"
-      >
-        <Feather name="arrow-left" size={24} color={UI.text} />
-      </Pressable>
+      <View style={[styles.navBar, { paddingTop: navBarTopPadding }]}>
+        <Pressable
+          onPress={handleBack}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+          hitSlop={12}
+          accessibilityLabel="Go back"
+        >
+          <Feather name="arrow-left" size={24} color={UI.text} />
+        </Pressable>
 
-      {options?.peer ? (
-        <View style={styles.headerAvatarWrap}>
-          <PeerAvatar peer={options.peer} size={44} />
-          <View style={styles.onlineBadge} />
-        </View>
-      ) : options?.hideIcon ? null : (
-        <View style={styles.headerIconBadge}>
-          <Ionicons name="chatbubbles" size={20} color="#fff" />
-        </View>
-      )}
+        {options?.peer ? (
+          <View style={styles.headerAvatarWrap}>
+            <PeerAvatar peer={options.peer} size={44} />
+            <View style={styles.onlineBadge} />
+          </View>
+        ) : options?.hideIcon ? null : (
+          <View style={styles.headerIconBadge}>
+            <Ionicons name="chatbubbles" size={20} color="#fff" />
+          </View>
+        )}
 
-      <View style={styles.headerText}>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {title}
-        </Text>
-        {subtitle ? (
-          <Text
-            style={[styles.headerSubtitle, options?.subtitleAccent && styles.headerSubtitleAccent]}
-            numberOfLines={1}
-          >
-            {subtitle}
+        <View style={styles.headerText}>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {title}
           </Text>
+          {subtitle ? (
+            <Text
+              style={[styles.headerSubtitle, options?.subtitleAccent && styles.headerSubtitleAccent]}
+              numberOfLines={1}
+            >
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+
+        {options?.onReport ? (
+          <Pressable
+            onPress={options.onReport}
+            style={({ pressed }) => [styles.reportBtn, pressed && styles.backBtnPressed]}
+            hitSlop={8}
+            accessibilityLabel="Report user"
+          >
+            <Feather name="flag" size={18} color={UI.textSecondary} />
+          </Pressable>
         ) : null}
+
+        {options?.onVoiceCall ? (
+          <Pressable
+            onPress={options.onVoiceCall}
+            style={({ pressed }) => [
+              styles.videoCallBtn,
+              !isWebRTCAvailable() && styles.videoCallBtnDisabled,
+              pressed && styles.backBtnPressed,
+            ]}
+            hitSlop={8}
+            accessibilityLabel="Start voice call"
+          >
+            <Feather
+              name="phone"
+              size={18}
+              color={isWebRTCAvailable() ? UI.accent : UI.textSecondary}
+            />
+          </Pressable>
+        ) : null}
+
+        {options?.onVideoCall ? (
+          <Pressable
+            onPress={options.onVideoCall}
+            style={({ pressed }) => [
+              styles.videoCallBtn,
+              !isWebRTCAvailable() && styles.videoCallBtnDisabled,
+              pressed && styles.backBtnPressed,
+            ]}
+            hitSlop={8}
+            accessibilityLabel="Start video call"
+          >
+            <Feather
+              name="video"
+              size={18}
+              color={isWebRTCAvailable() ? UI.accent : UI.textSecondary}
+            />
+          </Pressable>
+        ) : null}
+
+        {options?.onSkip ? (
+          <Pressable
+            onPress={options.onSkip}
+            style={({ pressed }) => [styles.skipBtn, pressed && styles.backBtnPressed]}
+            hitSlop={8}
+            accessibilityLabel="Find another partner"
+          >
+            <Feather name="refresh-cw" size={18} color={UI.accent} />
+          </Pressable>
+        ) : (
+          <View style={styles.headerActionSpacer} />
+        )}
       </View>
-
-      {options?.onReport ? (
-        <Pressable
-          onPress={options.onReport}
-          style={({ pressed }) => [styles.reportBtn, pressed && styles.backBtnPressed]}
-          hitSlop={8}
-          accessibilityLabel="Report user"
-        >
-          <Feather name="flag" size={18} color={UI.textSecondary} />
-        </Pressable>
-      ) : null}
-
-      {options?.onVoiceCall ? (
-        <Pressable
-          onPress={options.onVoiceCall}
-          style={({ pressed }) => [
-            styles.videoCallBtn,
-            !isWebRTCAvailable() && styles.videoCallBtnDisabled,
-            pressed && styles.backBtnPressed,
-          ]}
-          hitSlop={8}
-          accessibilityLabel="Start voice call"
-        >
-          <Feather
-            name="phone"
-            size={18}
-            color={isWebRTCAvailable() ? UI.accent : UI.textSecondary}
-          />
-        </Pressable>
-      ) : null}
-
-      {options?.onVideoCall ? (
-        <Pressable
-          onPress={options.onVideoCall}
-          style={({ pressed }) => [
-            styles.videoCallBtn,
-            !isWebRTCAvailable() && styles.videoCallBtnDisabled,
-            pressed && styles.backBtnPressed,
-          ]}
-          hitSlop={8}
-          accessibilityLabel="Start video call"
-        >
-          <Feather
-            name="video"
-            size={18}
-            color={isWebRTCAvailable() ? UI.accent : UI.textSecondary}
-          />
-        </Pressable>
-      ) : null}
-
-      {options?.onSkip ? (
-        <Pressable
-          onPress={options.onSkip}
-          style={({ pressed }) => [styles.skipBtn, pressed && styles.backBtnPressed]}
-          hitSlop={8}
-          accessibilityLabel="Find another partner"
-        >
-          <Feather name="refresh-cw" size={18} color={UI.accent} />
-        </Pressable>
-      ) : (
-        <View style={styles.headerActionSpacer} />
-      )}
-    </View>
     );
   };
 
@@ -1086,28 +1161,28 @@ export default function RandomChatScreen() {
           backgroundColor={AppUI.bg}
           translucent={Platform.OS === 'android'}
         />
-        {renderNavHeader('Chat in English', 'Connection issue')}
+        {renderNavHeader(
+          callIntent ? 'Call in English' : 'Chat in English',
+          'Connection issue'
+        )}
         <View style={styles.centeredBody}>
           <Feather name="wifi-off" size={48} color="#e60000" />
           <Text style={styles.centeredTitle}>{errorMsg}</Text>
           <TouchableOpacity style={styles.retryBtn} onPress={retryChatConnection}>
             <Text style={styles.retryBtnText}>Try again</Text>
           </TouchableOpacity>
-          {needsSignIn ? (
-            <TouchableOpacity
-              style={styles.secondaryRetryBtn}
-              onPress={() => router.replace('/login')}
-            >
-              <Text style={styles.secondaryRetryBtnText}>Sign in</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
       </View>
     );
   }
 
   if (status === 'connecting' || status === 'searching') {
-    const headerTitle = status === 'connecting' ? 'Connecting…' : 'Finding learner';
+    const headerTitle =
+      status === 'connecting'
+        ? 'Connecting…'
+        : callIntent
+          ? 'Finding a speaking partner'
+          : 'Finding learner';
 
     return (
       <View style={styles.waChatContainer}>
@@ -1120,6 +1195,11 @@ export default function RandomChatScreen() {
         {renderNavHeader(headerTitle, '', { backOnly: true })}
         <View style={styles.matchmakingBody}>
           <MatchmakingScene />
+          {callIntent ? (
+            <Text style={styles.callIntentHint}>
+              Connecting you with a random learner for an English voice call
+            </Text>
+          ) : null}
         </View>
       </View>
     );
@@ -1127,225 +1207,337 @@ export default function RandomChatScreen() {
 
   if (!peer) return null;
 
+  const renderCallControls = () => (
+    <View
+      style={[
+        styles.videoControls,
+        { paddingBottom: Math.max(insets.bottom, 16) + 8 },
+      ]}
+    >
+      <TouchableOpacity
+        style={[styles.controlBtn, isMicMuted && styles.controlBtnMuted]}
+        onPress={() => {
+          const newMute = !isMicMuted;
+          setIsMicMuted(newMute);
+          toggleMic(newMute);
+        }}
+        accessibilityLabel={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+      >
+        <Feather name={isMicMuted ? 'mic-off' : 'mic'} size={22} color="white" />
+      </TouchableOpacity>
 
+      {callMode === 'video' ? (
+        <TouchableOpacity
+          style={[styles.controlBtn, isCameraOff && styles.controlBtnMuted]}
+          onPress={() => {
+            const next = !isCameraOff;
+            setIsCameraOff(next);
+            toggleCamera(next);
+          }}
+          accessibilityLabel={isCameraOff ? 'Turn camera on' : 'Turn camera off'}
+        >
+          <Feather name={isCameraOff ? 'video-off' : 'video'} size={22} color="white" />
+        </TouchableOpacity>
+      ) : null}
+
+      <TouchableOpacity
+        style={[styles.controlBtn, styles.controlBtnEnd]}
+        onPress={endCallAndReturnToChat}
+        accessibilityLabel="End call"
+      >
+        <Feather name="phone-off" size={22} color="white" />
+      </TouchableOpacity>
+
+      {outgoingCallPending ? (
+        <TouchableOpacity
+          style={styles.controlBtn}
+          onPress={endCallAndReturnToChat}
+          accessibilityLabel="Cancel call"
+        >
+          <Feather name="x" size={22} color="white" />
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+
+  const renderActiveCallStage = () => (
+    <>
+      <View style={[styles.callTopBar, { paddingTop: Math.max(insets.top, 12) }]}>
+        <View style={styles.callTopInfo}>
+          <PeerAvatar peer={peer} size={40} />
+          <View style={styles.callTopText}>
+            <Text style={styles.callPeerName} numberOfLines={1}>
+              {peer.name}
+            </Text>
+            <Text style={styles.callStatusText}>
+              {outgoingCallPending
+                ? 'Calling…'
+                : callMode === 'voice'
+                  ? 'Voice call'
+                  : remoteStream
+                    ? 'Video call'
+                    : 'Connecting…'}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.callStage}>
+        {outgoingCallPending ? (
+          <View style={styles.callPlaceholder}>
+            <PeerAvatar peer={peer} size={96} />
+            <Text style={styles.callingText}>Calling {peer.name}…</Text>
+            <Text style={styles.callHintText}>
+              {callIntent
+                ? 'Practice speaking English when they answer'
+                : 'Stay on this chat — the conversation will return when you end the call'}
+            </Text>
+          </View>
+        ) : callMode === 'voice' ? (
+          <View style={styles.voiceCallBody}>
+            <PeerAvatar peer={peer} size={96} />
+            <Text style={styles.voiceCallTitle}>Voice practice</Text>
+            <Text style={styles.voiceCallSubtitle}>{peer.name}</Text>
+          </View>
+        ) : remoteStream ? (
+          <WebRTCVideo
+            streamURL={remoteStream.toURL()}
+            style={styles.remoteVideo}
+            objectFit="cover"
+          />
+        ) : (
+          <View style={styles.callPlaceholder}>
+            <PeerAvatar peer={peer} size={96} />
+            <Text style={styles.callingText}>Connecting to {peer.name}…</Text>
+          </View>
+        )}
+
+        {callMode === 'video' && localStream ? (
+          <WebRTCVideo
+            streamURL={localStream.toURL()}
+            style={[styles.localVideo, { bottom: 110 + Math.max(insets.bottom, 8) }]}
+            objectFit="cover"
+            mirror
+          />
+        ) : null}
+      </View>
+
+      {renderCallControls()}
+    </>
+  );
+
+  const renderIncomingCallModal = () => (
+    <Modal
+      visible={incomingCall !== null}
+      transparent
+      animationType="fade"
+      onRequestClose={declineIncomingCall}
+    >
+      <Pressable style={styles.chatOptionsBackdrop} onPress={declineIncomingCall}>
+        <View style={styles.incomingCallCard} onStartShouldSetResponder={() => true}>
+          <View style={styles.incomingCallIconWrap}>
+            <Ionicons
+              name={incomingCall === 'voice' ? 'call' : 'videocam'}
+              size={28}
+              color={WA.header}
+            />
+          </View>
+          <Text style={styles.incomingCallTitle}>
+            Incoming {incomingCall === 'voice' ? 'voice' : 'video'} call
+          </Text>
+          <Text style={styles.incomingCallSubtitle}>
+            {callIntent
+              ? `${peer.name} wants a voice call to practice English with you.`
+              : `${peer.name} wants to practice English with you.`}
+          </Text>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.incomingCallAcceptBtn,
+              pressed && styles.chatOptionsBtnPressed,
+            ]}
+            onPress={() => void acceptIncomingCall()}
+          >
+            <Text style={styles.incomingCallAcceptText}>Accept</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.chatOptionsBtn,
+              styles.chatOptionsBtnLast,
+              pressed && styles.chatOptionsBtnPressed,
+            ]}
+            onPress={declineIncomingCall}
+          >
+            <Text style={styles.chatOptionsBtnTextDanger}>Decline</Text>
+          </Pressable>
+        </View>
+      </Pressable>
+    </Modal>
+  );
+
+  // ── Call in English: call-only UI (no chat) ───────────────────────────────
+  if (callIntent) {
+    return (
+      <View style={styles.waChatContainer}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="#000000"
+          translucent={Platform.OS === 'android'}
+        />
+
+        <View style={styles.callOnlyScreen}>
+          {isInCallUi ? (
+            renderActiveCallStage()
+          ) : (
+            <>
+              <View style={[styles.callOnlyHeader, { paddingTop: Math.max(insets.top, 12) }]}>
+                <Pressable
+                  onPress={handleBack}
+                  style={({ pressed }) => [styles.waIconBtn, pressed && styles.waIconBtnPressed]}
+                  hitSlop={12}
+                  accessibilityLabel="Go back"
+                >
+                  <Feather name="arrow-left" size={24} color="#fff" />
+                </Pressable>
+                <Text style={styles.callOnlyHeaderTitle}>Call in English</Text>
+                <View style={styles.waHeaderSideSpacer} />
+              </View>
+
+              <View style={styles.callOnlyLobby}>
+                <PeerAvatar peer={peer} size={110} />
+                <Text style={styles.callOnlyPeerName}>{peer.name}</Text>
+                <Text style={styles.callOnlyStatus}>
+                  {incomingCall
+                    ? 'Incoming call…'
+                    : 'Connected — tap Call to practice speaking English'}
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.callOnlyPrimaryBtn}
+                  onPress={() => void initiateCall('voice')}
+                  activeOpacity={0.88}
+                  disabled={!!incomingCall}
+                >
+                  <Ionicons name="call" size={22} color="#fff" />
+                  <Text style={styles.callOnlyPrimaryBtnText}>Start voice call</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.callOnlySecondaryBtn}
+                  onPress={handleSkip}
+                  activeOpacity={0.88}
+                >
+                  <Feather name="refresh-cw" size={18} color="#fff" />
+                  <Text style={styles.callOnlySecondaryBtnText}>Find another learner</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+
+        {renderIncomingCallModal()}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.waChatContainer}>
       <Stack.Screen options={{ headerShown: false }} />
       <StatusBar
         barStyle="light-content"
-        backgroundColor={WA.header}
+        backgroundColor={isInCallUi ? '#000000' : WA.header}
         translucent={Platform.OS === 'android'}
       />
 
-      {renderNavHeader(
-        peer.name,
-        'tap here for learner info',
-        {
-          peer,
-          whatsapp: true,
-          onVoiceCall: () => void initiateCall('voice'),
-          onVideoCall: () => void initiateCall('video'),
-          onSkip: handleSkip,
-          onReport: handleReport,
-          subtitleAccent: isTyping || outgoingCallPending,
-        }
-      )}
-
-      {(isVideoCallActive || outgoingCallPending) && (
-        <View style={styles.splitVideoContainer}>
-          {outgoingCallPending ? (
-            <Text style={styles.callingText}>
-              Calling {peer.name}…
-            </Text>
-          ) : callMode === 'voice' ? (
-            <View style={styles.voiceCallBody}>
-              <PeerAvatar peer={peer} size={72} />
-              <Text style={styles.voiceCallTitle}>Voice practice</Text>
-              <Text style={styles.voiceCallSubtitle}>{peer.name}</Text>
-            </View>
-          ) : remoteStream ? (
-            <WebRTCVideo streamURL={remoteStream.toURL()} style={styles.remoteVideo} objectFit="cover" />
-          ) : (
-            <Text style={styles.callingText}>Connecting to {peer.name}…</Text>
-          )}
-
-          {callMode === 'video' && localStream ? (
-            <WebRTCVideo
-              streamURL={localStream.toURL()}
-              style={styles.localVideo}
-              objectFit="cover"
-              mirror
-            />
-          ) : null}
-
-          <View style={styles.videoControls}>
-            <TouchableOpacity
-              style={[styles.controlBtn, isMicMuted && styles.controlBtnMuted]}
-              onPress={() => {
-                const newMute = !isMicMuted;
-                setIsMicMuted(newMute);
-                toggleMic(newMute);
-              }}
-            >
-              <Feather name={isMicMuted ? 'mic-off' : 'mic'} size={20} color="white" />
-            </TouchableOpacity>
-
-            {callMode === 'video' ? (
-              <TouchableOpacity
-                style={[styles.controlBtn, isCameraOff && styles.controlBtnMuted]}
-                onPress={() => {
-                  const next = !isCameraOff;
-                  setIsCameraOff(next);
-                  toggleCamera(next);
-                }}
-              >
-                <Feather name={isCameraOff ? 'video-off' : 'video'} size={20} color="white" />
-              </TouchableOpacity>
-            ) : null}
-
-            <TouchableOpacity
-              style={[styles.controlBtn, styles.controlBtnEnd]}
-              onPress={() => {
-                const sock = getChatSocket();
-                const sid = sessionIdRef.current;
-                if (sock && sid) endVideoCall(sock, sid);
-                resetCallState();
-              }}
-            >
-              <Feather name="phone-off" size={20} color="white" />
-            </TouchableOpacity>
-
-            {outgoingCallPending ? (
-              <TouchableOpacity
-                style={styles.controlBtn}
-                onPress={() => {
-                  const sock = getChatSocket();
-                  const sid = sessionIdRef.current;
-                  if (sock && sid) endVideoCall(sock, sid);
-                  resetCallState();
-                }}
-              >
-                <Feather name="x" size={20} color="white" />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.controlBtn}
-                onPress={() => {
-                  const sock = getChatSocket();
-                  const sid = sessionIdRef.current;
-                  if (sock && sid) endVideoCall(sock, sid);
-                  resetCallState();
-                  handleSkip();
-                }}
-              >
-                <Feather name="skip-forward" size={20} color="white" />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
-
-      {showEncryptionNotice ? (
-        <Pressable onPress={dismissKeyboard} style={styles.encryptionBanner}>
-          <Feather name="lock" size={12} color={UI.accent} />
-          <Text style={styles.encryptionText} numberOfLines={1} ellipsizeMode="tail">
-            Messages are private between you and {peer.name}.
-          </Text>
-        </Pressable>
-      ) : null}
-
-      <View style={styles.chatKeyboardRoot}>
-        <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-          <View style={styles.messagesArea}>
-            <FlatList
-              ref={flatListRef}
-              data={messages}
-              keyExtractor={(item) => item.id}
-              renderItem={renderMessage}
-              style={styles.messageList}
-              contentContainerStyle={styles.chatContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              decelerationRate="normal"
-              scrollEventThrottle={16}
-              overScrollMode="never"
-              removeClippedSubviews={Platform.OS === 'android'}
-              ListEmptyComponent={
-                <Pressable onPress={dismissKeyboard} style={styles.emptyChatPress}>
-                  <Text style={styles.emptyChat}>Say hello to {peer.name}!</Text>
-                </Pressable>
-              }
-              ListFooterComponent={listFooter}
-            />
-          </View>
-        </TouchableWithoutFeedback>
-
-        <KeyboardStickyView
-          offset={{ closed: 0, opened: 0 }}
-          style={styles.inputStickyWrap}
-        >
-          <View
-            onLayout={(e) => {
-              const h = Math.ceil(e.nativeEvent.layout.height);
-              if (h > 0 && h !== inputDockHeight) setInputDockHeight(h);
-            }}
-            style={[
-              styles.inputFooter,
-              { paddingBottom: keyboardHeight > 0 ? 6 : bottomInset },
-            ]}
-          >
-            {renderChatInputBar()}
-          </View>
-        </KeyboardStickyView>
-      </View>
-
-      <Modal
-        visible={incomingCall !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={declineIncomingCall}
+      {/* Chat stays mounted under the call so ending a call restores it instantly */}
+      <View
+        style={[styles.chatLayer, isInCallUi && styles.chatLayerHidden]}
+        pointerEvents={isInCallUi ? 'none' : 'auto'}
       >
-        <Pressable style={styles.chatOptionsBackdrop} onPress={declineIncomingCall}>
-          <View style={styles.incomingCallCard} onStartShouldSetResponder={() => true}>
-            <View style={styles.incomingCallIconWrap}>
-              <Ionicons
-                name={incomingCall === 'voice' ? 'call' : 'videocam'}
-                size={28}
-                color={WA.header}
+        {renderNavHeader(
+          peer.name,
+          'tap here for learner info',
+          {
+            peer,
+            whatsapp: true,
+            onVoiceCall: () => void initiateCall('voice'),
+            onVideoCall: () => void initiateCall('video'),
+            onSkip: handleSkip,
+            onReport: handleReport,
+            subtitleAccent: isTyping || outgoingCallPending,
+          }
+        )}
+
+        {showEncryptionNotice ? (
+          <Pressable onPress={dismissKeyboard} style={styles.encryptionBanner}>
+            <Feather name="lock" size={12} color={UI.accent} />
+            <Text style={styles.encryptionText} numberOfLines={1} ellipsizeMode="tail">
+              Messages are private between you and {peer.name}.
+            </Text>
+          </Pressable>
+        ) : null}
+
+        <View style={styles.chatKeyboardRoot}>
+          <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+            <View style={styles.messagesArea}>
+              <FlatList
+                ref={flatListRef}
+                data={messages}
+                keyExtractor={(item) => item.id}
+                renderItem={renderMessage}
+                style={styles.messageList}
+                contentContainerStyle={styles.chatContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                decelerationRate="normal"
+                scrollEventThrottle={16}
+                overScrollMode="never"
+                removeClippedSubviews={Platform.OS === 'android'}
+                ListEmptyComponent={
+                  <Pressable onPress={dismissKeyboard} style={styles.emptyChatPress}>
+                    <Text style={styles.emptyChat}>Say hello to {peer.name}!</Text>
+                  </Pressable>
+                }
+                ListFooterComponent={listFooter}
               />
             </View>
-            <Text style={styles.incomingCallTitle}>
-              Incoming {incomingCall === 'voice' ? 'voice' : 'video'} call
-            </Text>
-            <Text style={styles.incomingCallSubtitle}>
-              {peer.name} wants to practice English with you.
-            </Text>
+          </TouchableWithoutFeedback>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.incomingCallAcceptBtn,
-                pressed && styles.chatOptionsBtnPressed,
+          <KeyboardStickyView
+            offset={{ closed: 0, opened: 0 }}
+            style={styles.inputStickyWrap}
+          >
+            <View
+              onLayout={(e) => {
+                const h = Math.ceil(e.nativeEvent.layout.height);
+                if (h > 0 && h !== inputDockHeight) setInputDockHeight(h);
+              }}
+              style={[
+                styles.inputFooter,
+                { paddingBottom: keyboardHeight > 0 ? 6 : bottomInset },
               ]}
-              onPress={() => void acceptIncomingCall()}
             >
-              <Text style={styles.incomingCallAcceptText}>Accept</Text>
-            </Pressable>
+              {renderChatInputBar()}
+            </View>
+          </KeyboardStickyView>
+        </View>
+      </View>
 
-            <Pressable
-              style={({ pressed }) => [
-                styles.chatOptionsBtn,
-                styles.chatOptionsBtnLast,
-                pressed && styles.chatOptionsBtnPressed,
-              ]}
-              onPress={declineIncomingCall}
-            >
-              <Text style={styles.chatOptionsBtnTextDanger}>Decline</Text>
-            </Pressable>
-          </View>
-        </Pressable>
-      </Modal>
+      {/* Full-screen call — covers chat in-place (WhatsApp-style) */}
+      {isInCallUi ? (
+        <Animated.View
+          entering={FadeIn.duration(220)}
+          exiting={FadeOut.duration(160)}
+          style={styles.callFullscreen}
+        >
+          {renderActiveCallStage()}
+        </Animated.View>
+      ) : null}
+
+      {renderIncomingCallModal()}
 
       <Modal
         visible={showChatOptions}
@@ -1586,6 +1778,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: WA.chatBg,
   },
+  callIntentHint: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 36,
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 20,
+    color: UI.textSecondary,
+    fontWeight: '500',
+  },
   centeredBody: {
     flex: 1,
     justifyContent: 'center',
@@ -1790,44 +1993,168 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     justifyContent: 'center',
   },
-  splitVideoContainer: {
-    height: 250,
+  chatLayer: {
+    flex: 1,
+  },
+  chatLayerHidden: {
+    opacity: 0,
+  },
+  callFullscreen: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',
-    overflow: 'hidden',
+    zIndex: 40,
+    elevation: 40,
+  },
+  callOnlyScreen: {
+    flex: 1,
+    backgroundColor: '#0B141A',
+  },
+  callOnlyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 8,
+  },
+  callOnlyHeaderTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  callOnlyLobby: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+    gap: 12,
+    paddingBottom: 40,
+  },
+  callOnlyPeerName: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  callOnlyStatus: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  callOnlyPrimaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#25D366',
+    paddingHorizontal: 28,
+    paddingVertical: 16,
+    borderRadius: 28,
+    minWidth: 240,
+  },
+  callOnlyPrimaryBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  callOnlySecondaryBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    minWidth: 240,
+  },
+  callOnlySecondaryBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  callTopBar: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    zIndex: 2,
+  },
+  callTopInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  callTopText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  callPeerName: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  callStatusText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 13,
+    marginTop: 2,
+    fontWeight: '500',
+  },
+  callStage: {
+    flex: 1,
     position: 'relative',
-    zIndex: 10,
+    overflow: 'hidden',
+  },
+  callPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 14,
+  },
+  callHintText: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 4,
   },
   remoteVideo: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     width: '100%',
     height: '100%',
   },
   localVideo: {
     position: 'absolute',
-    bottom: 15,
-    right: 15,
-    width: 80,
-    height: 120,
-    borderRadius: 8,
+    right: 16,
+    width: 110,
+    height: 160,
+    borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: '#333',
+    backgroundColor: '#222',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.25)',
     ...cardShadow,
   },
   callingText: {
     color: '#fff',
-    fontSize: 15,
-    alignSelf: 'center',
-    marginTop: 100,
+    fontSize: 17,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   voiceCallBody: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+    paddingHorizontal: 24,
   },
   voiceCallTitle: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
     marginTop: 8,
   },
@@ -1837,28 +2164,30 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   videoControls: {
-    position: 'absolute',
-    bottom: 15,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 15,
+    gap: 18,
+    paddingTop: 12,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(0,0,0,0.35)',
   },
   controlBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.18)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   controlBtnMuted: {
-    backgroundColor: 'rgba(255,255,255,0.5)',
+    backgroundColor: 'rgba(255,255,255,0.45)',
   },
   controlBtnEnd: {
     backgroundColor: '#ff3b30',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
   },
   messageRow: {
     flexDirection: 'row',

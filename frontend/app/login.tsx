@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,15 +19,20 @@ import {
   resolveProfileComplete,
   sendOtpEmail,
   verifyOtpCode,
+  transferDeviceSession,
 } from '@/utils/authApi';
 import { isProfileCompleteUser } from '@/utils/profile';
 import { saveAuthSession, isLoggedInLocally } from '@/utils/authStorage';
+import { bootstrapNotifications } from '@/utils/notificationApi';
+import { queueAppTourForNewUser } from '@/components/AppTourOverlay';
 import { syncUserDataFromServer } from '@/utils/userDataSync';
 import { warmApiServer } from '@/utils/checkApiHealth';
 
 type LoginStep = 'EMAIL_INPUT' | 'OTP_INPUT';
 
 const GMAIL_REGEX = /^[^\s@]+@gmail\.com$/i;
+const DEVICE_ACTIVE_MESSAGE =
+  'This account is already logged in on another device. Please log out from the previous device before signing in on this one.';
 
 function isValidGmail(email: string) {
   return GMAIL_REGEX.test(email.trim());
@@ -63,6 +69,94 @@ export default function LoginScreen() {
   const gmailValid = isValidGmail(email);
   const trimmedEmail = email.trim().toLowerCase();
 
+  const completeLogin = useCallback(
+    async (data: Awaited<ReturnType<typeof verifyOtpCode>>) => {
+      const userId = String(data.user.id ?? data.user._id ?? '');
+      await saveAuthSession({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        user: {
+          id: userId,
+          email: data.user.email,
+          name: data.user.name,
+          phone: data.user.phone,
+          gender: data.user.gender,
+          region: data.user.region,
+          level: data.user.level,
+          avatar: data.user.avatar,
+        },
+      });
+
+      if (data.isNewUser) {
+        await queueAppTourForNewUser();
+      }
+
+      let profileComplete = resolveProfileComplete(data);
+
+      if (!profileComplete) {
+        try {
+          const profile = await fetchMyProfile();
+          profileComplete = isProfileCompleteUser(profile);
+        } catch {
+          // Keep profileComplete false for new users
+        }
+      }
+
+      if (profileComplete) {
+        await syncUserDataFromServer();
+        void bootstrapNotifications(true);
+        router.replace('/(tabs)');
+      } else {
+        void bootstrapNotifications(true);
+        router.replace('/create-profile');
+      }
+    },
+    [router]
+  );
+
+  const runTransfer = useCallback(
+    async (transferToken?: string) => {
+      setLoading(true);
+      setError('');
+      try {
+        const data = await transferDeviceSession(
+          transferToken
+            ? { transferToken }
+            : { email: trimmedEmail, code: otp }
+        );
+        await completeLogin(data);
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? e.message
+            : 'Could not transfer this account. Please verify OTP again.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [completeLogin, trimmedEmail, otp]
+  );
+
+  const promptDeviceTransfer = useCallback(
+    (message: string, transferToken?: string) => {
+      setError(message || DEVICE_ACTIVE_MESSAGE);
+      Alert.alert(
+        'Already logged in elsewhere',
+        message || DEVICE_ACTIVE_MESSAGE,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Transfer to this device',
+            style: 'destructive',
+            onPress: () => void runTransfer(transferToken),
+          },
+        ]
+      );
+    },
+    [runTransfer]
+  );
+
   const handleSendOTP = async () => {
     if (!gmailValid || loading) return;
     setLoading(true);
@@ -84,39 +178,14 @@ export default function LoginScreen() {
     setError('');
     try {
       const data = await verifyOtpCode(trimmedEmail, otp);
-      const userId = String(data.user.id ?? data.user._id ?? '');
-      await saveAuthSession({
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
-        user: {
-          id: userId,
-          email: data.user.email,
-          name: data.user.name,
-          phone: data.user.phone,
-          gender: data.user.gender,
-          region: data.user.region,
-          level: data.user.level,
-        },
-      });
-
-      let profileComplete = resolveProfileComplete(data);
-
-      if (!profileComplete) {
-        try {
-          const profile = await fetchMyProfile();
-          profileComplete = isProfileCompleteUser(profile);
-        } catch {
-          // Keep profileComplete false for new users
-        }
-      }
-
-      if (profileComplete) {
-        await syncUserDataFromServer();
-        router.replace('/(tabs)');
-      } else {
-        router.replace('/create-profile');
-      }
+      await completeLogin(data);
     } catch (e) {
+      const deviceErr = e as Error & { code?: string; transferToken?: string };
+      if (deviceErr?.code === 'DEVICE_ALREADY_ACTIVE') {
+        setLoading(false);
+        promptDeviceTransfer(deviceErr.message || DEVICE_ACTIVE_MESSAGE, deviceErr.transferToken);
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Invalid or expired OTP. Try again.');
     } finally {
       setLoading(false);

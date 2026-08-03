@@ -8,6 +8,7 @@ export type UserProfile = {
   region?: string;
   level?: string;
   profileCompleted?: boolean;
+  avatar?: string;
 };
 
 /** Matches backend isUserProfileComplete */

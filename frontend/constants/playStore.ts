@@ -14,8 +14,10 @@ export const PLAY_STORE_URLS = {
   supportEmail: APP_INFO.email,
 } as const;
 
-/** Permission strings shown on iOS/Android — required for Google Play (camera, mic). */
+/** Permission strings shown on iOS/Android — required for Google Play (camera, mic, photos). */
 export const PLAY_STORE_PERMISSIONS = {
+  profilePhoto:
+    `${APP_INFO.appName} lets you choose one profile photo from your gallery. We only access the single photo you select — not your full library.`,
   camera:
     `${APP_INFO.appName} uses your camera only when you start video English practice. We do not record or upload video without your action.`,
   microphone:

@@ -32,8 +32,12 @@ async function readAll(): Promise<Partial<Record<GameId, GameProgress>>> {
 }
 
 async function writeAll(all: Partial<Record<GameId, GameProgress>>): Promise<void> {
-  const key = await userScopedKey(STORAGE_KEY);
-  await AsyncStorage.setItem(key, JSON.stringify(all));
+  try {
+    const key = await userScopedKey(STORAGE_KEY);
+    await AsyncStorage.setItem(key, JSON.stringify(all));
+  } catch {
+    // No signed-in user — refuse unscoped writes.
+  }
 }
 
 export async function loadGameProgress(gameId: GameId): Promise<GameProgress> {

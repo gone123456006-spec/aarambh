@@ -189,14 +189,14 @@ export default function VedScreen() {
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.safeTop}>
         <View style={[styles.navBar, getAndroidHeaderCompactStyle()]}>
           <Pressable
-            onPress={() => router.navigate('/(tabs)/')}
+            onPress={() => router.navigate('/(tabs)')}
             style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
             hitSlop={12}
           >
             <Feather name="arrow-left" size={24} color={UI.text} />
           </Pressable>
           <View style={styles.headerAvatar}>
-            <Ionicons name="sparkles" size={20} color="#fff" />
+            <Ionicons name="sparkles" size={16} color="#fff" />
           </View>
           <View style={styles.headerText}>
             <Text style={styles.headerTitle} numberOfLines={1}>
@@ -348,9 +348,9 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   headerAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     backgroundColor: UI.accent,
     alignItems: 'center',
     justifyContent: 'center',
@@ -360,13 +360,13 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: '700',
     color: UI.text,
     letterSpacing: -0.3,
   },
   headerSubtitle: {
-    fontSize: 13,
+    fontSize: 12,
     color: UI.textSecondary,
     marginTop: 2,
   },

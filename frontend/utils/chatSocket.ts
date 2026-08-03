@@ -2,6 +2,7 @@ import { io, Socket } from 'socket.io-client';
 import { getSocketUrl } from '@/constants/socket';
 import { getAccessToken } from '@/utils/authStorage';
 import { ensureValidSession, refreshAccessToken } from '@/utils/api';
+import { getDeviceId } from '@/utils/deviceId';
 
 import type { CallMode } from './mediaPermissions';
 
@@ -33,22 +34,23 @@ function attachReconnectAuthRefresh(sock: Socket) {
   sock.io.off('reconnect_attempt');
   sock.io.on('reconnect_attempt', async () => {
     await ensureValidSession();
-    const fresh = await getAccessToken();
+    const [fresh, deviceId] = await Promise.all([getAccessToken(), getDeviceId()]);
     if (fresh) {
-      sock.auth = { token: fresh };
+      sock.auth = { token: fresh, deviceId };
     }
   });
 }
 
-function openSocket(accessToken: string): Promise<Socket> {
+async function openSocket(accessToken: string): Promise<Socket> {
   if (socket) {
     socket.removeAllListeners();
     socket.disconnect();
     socket = null;
   }
 
+  const deviceId = await getDeviceId();
   socket = io(getSocketUrl(), {
-    auth: { token: accessToken },
+    auth: { token: accessToken, deviceId },
     transports: ['websocket'],
     reconnection: true,
     reconnectionAttempts: 8,
@@ -85,9 +87,9 @@ function openSocket(accessToken: string): Promise<Socket> {
 export async function connectChatSocket(): Promise<Socket> {
   if (socket?.connected) {
     await ensureValidSession();
-    const fresh = await getAccessToken();
+    const [fresh, deviceId] = await Promise.all([getAccessToken(), getDeviceId()]);
     if (fresh) {
-      socket.auth = { token: fresh };
+      socket.auth = { token: fresh, deviceId };
     }
     return socket;
   }

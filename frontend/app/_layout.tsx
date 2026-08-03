@@ -19,6 +19,8 @@ import {
 } from '@/constants/navigationTransitions';
 import { startApiKeepAlive } from '@/utils/checkApiHealth';
 import { initWebRTC } from '@/utils/webrtcNative';
+import AppUpdatePrompt from '@/components/AppUpdatePrompt';
+import { startPersistentSessionMaintenance } from '@/utils/persistentSession';
 
 enableScreens(true);
 initWebRTC();
@@ -39,6 +41,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     return startApiKeepAlive(60_000);
+  }, []);
+
+  useEffect(() => {
+    return startPersistentSessionMaintenance();
   }, []);
 
   return (
@@ -68,6 +74,7 @@ export default function RootLayout() {
               }}
             />
           </Stack>
+          <AppUpdatePrompt />
           <StatusBar style="auto" />
         </ThemeProvider>
       </KeyboardProvider>

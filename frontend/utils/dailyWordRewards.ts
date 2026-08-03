@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getTotalGameScore, setTotalGameScore } from '@/utils/gameStats';
 import { userScopedKey } from '@/utils/userStorage';
 import { DAILY_WORD_TOTAL_DAYS } from '@/constants/dailyWords';
+import { reportNotificationEvent } from '@/utils/notificationApi';
 
 export const DAILY_WORD_POINTS = 5;
 export const JOURNEY_COMPLETION_BONUS = 2999;
@@ -136,6 +137,11 @@ export async function claimDailyWordPoints(): Promise<{
   const { bonusAdded, totalScore: afterBonus } = await tryAwardJourneyBonus(next);
 
   notifyDailyRewardStatusChanged();
+
+  void reportNotificationEvent('daily_reward_claimed', {
+    pointsAdded: DAILY_WORD_POINTS,
+    journeyBonusAdded: bonusAdded,
+  });
 
   return {
     claimed: true,

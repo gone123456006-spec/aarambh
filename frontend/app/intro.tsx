@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, Image, StyleSheet, Dimensions, Pressable, FlatList } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isLoggedInLocally } from '@/utils/authStorage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -17,6 +18,19 @@ export default function IntroScreen() {
   const flatListRef = useRef<FlatList>(null);
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const loggedIn = await isLoggedInLocally();
+      if (!cancelled && loggedIn) {
+        router.replace('/(tabs)');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   useEffect(() => {
     const timer = setInterval(() => {
