@@ -3,6 +3,8 @@ const User = require('../models/User');
 const Message = require('../models/Message');
 const ChatSession = require('../models/ChatSession');
 const chatService = require('../services/chatService');
+const connectionState = require('../services/connectionStateService');
+const { CONNECTION_STATES } = connectionState;
 const { createNotification } = require('../services/notificationService');
 const { validateChatMessage } = require('../utils/chatMessageValidation');
 
@@ -51,14 +53,14 @@ const emitMatchPair = async (socket, peerSocket, sessionId, userId, peerUserId) 
         'Chat partner found! 💬',
         `You’re connected with ${peerForSocket.name || 'a learner'}. Practice English together!`,
         'chat',
-        { key: `chat-match-${sessionId}-${userId}`, data: { route: '/random-chat' } }
+        { key: `chat-match-${sessionId}-${userId}`, data: { route: '/random-chat' }, allowWhenBusy: true }
       ),
       createNotification(
         peerUserId,
         'Chat partner found! 💬',
         `You’re connected with ${peerForPeerSocket.name || 'a learner'}. Practice English together!`,
         'chat',
-        { key: `chat-match-${sessionId}-${peerUserId}`, data: { route: '/random-chat' } }
+        { key: `chat-match-${sessionId}-${peerUserId}`, data: { route: '/random-chat' }, allowWhenBusy: true }
       ),
     ]);
   } catch (err) {
@@ -67,6 +69,122 @@ const emitMatchPair = async (socket, peerSocket, sessionId, userId, peerUserId) 
 
   return true;
 };
+
+function participantIds(session) {
+  return (session?.participants || []).map((p) => String(p));
+}
+
+async function connectMatchedPair(io, socket, peerSocket, userId, peerUserId) {
+  if (connectionState.isBusy(userId) || connectionState.isBusy(peerUserId)) {
+    return false;
+  }
+
+  const priorSelf = connectionState.getState(userId).sessionId;
+  const priorPeer = connectionState.getState(peerUserId).sessionId;
+
+  const session = await chatService.createSession(userId, peerUserId);
+  if (!session) return false;
+
+  const sessionId = session._id.toString();
+  const isNewSession = sessionId !== priorSelf && sessionId !== priorPeer;
+
+  const claimedSelf = await connectionState.claimForSession(userId, {
+    sessionId,
+    peerId: peerUserId,
+    state: CONNECTION_STATES.CHAT_CONNECTED,
+  });
+  const claimedPeer = await connectionState.claimForSession(peerUserId, {
+    sessionId,
+    peerId: userId,
+    state: CONNECTION_STATES.CHAT_CONNECTED,
+  });
+
+  if (!claimedSelf || !claimedPeer) {
+    if (isNewSession && session.status === 'active') {
+      await chatService.endSession(sessionId, userId);
+    }
+    if (claimedSelf) await connectionState.markAvailable(userId);
+    else await connectionState.reconcileUser(userId);
+    if (claimedPeer) await connectionState.markAvailable(peerUserId);
+    else await connectionState.reconcileUser(peerUserId);
+    connectionState.emitToUser(io, userId);
+    connectionState.emitToUser(io, peerUserId);
+    return false;
+  }
+
+  socket.join(`room:${sessionId}`);
+  peerSocket.join(`room:${sessionId}`);
+
+  const sent = await emitMatchPair(socket, peerSocket, sessionId, userId, peerUserId);
+  if (!sent) {
+    await chatService.endSession(sessionId, userId);
+    await connectionState.releaseSession(sessionId, [userId, peerUserId]);
+    connectionState.emitToUser(io, userId);
+    connectionState.emitToUser(io, peerUserId);
+    return false;
+  }
+
+  connectionState.emitToUser(io, userId, claimedSelf);
+  connectionState.emitToUser(io, peerUserId, claimedPeer);
+  return true;
+}
+
+async function tryMatchmake(io, socket, userId) {
+  chatService.removeFromWaitingPool(userId);
+  await connectionState.reconcileUser(userId);
+
+  const existing = connectionState.getState(userId);
+  if (connectionState.isBusy(userId) && existing.sessionId) {
+    const session = await ChatSession.findById(existing.sessionId);
+    if (session && session.status === 'active' && session.hasParticipant(userId)) {
+      socket.join(`room:${existing.sessionId}`);
+      const peer = existing.peerId ? await chatService.getPeerProfile(existing.peerId) : null;
+      if (peer) {
+        socket.emit('match:found', { sessionId: existing.sessionId, peer });
+        connectionState.emitToUser(io, userId, existing);
+        return true;
+      }
+    }
+    await connectionState.markAvailable(userId);
+    connectionState.emitToUser(io, userId);
+  }
+
+  const peer = chatService.findRandomMatch(userId);
+  if (peer) {
+    chatService.removeFromWaitingPool(peer.userId);
+    const peerSocket = io.sockets.sockets.get(peer.socketId);
+    if (peerSocket) {
+      const connected = await connectMatchedPair(io, socket, peerSocket, userId, peer.userId);
+      if (connected) return true;
+      if (!connectionState.isBusy(peer.userId)) {
+        await chatService.addToWaitingPool(peer.userId, peer.socketId);
+      }
+    }
+  }
+
+  const queued = await chatService.addToWaitingPool(userId, socket.id);
+  if (queued) {
+    socket.emit('match:searching');
+  } else {
+    socket.emit('connection:busy', connectionState.getState(userId));
+    connectionState.emitToUser(io, userId);
+  }
+  return false;
+}
+
+async function endLiveSession(io, socket, sessionId, userId, { notifyPeer = true } = {}) {
+  const session = await ChatSession.findById(sessionId);
+  const ids = participantIds(session);
+  const uniqueIds = ids.length ? ids : [String(userId)];
+  setCallState(sessionId, 'idle');
+  await chatService.endSession(sessionId, userId);
+  await connectionState.releaseSession(sessionId, uniqueIds);
+  uniqueIds.forEach((id) => connectionState.emitToUser(io, id));
+  if (notifyPeer) {
+    socket.to(`room:${sessionId}`).emit('peer:disconnected');
+  }
+  socket.leave(`room:${sessionId}`);
+}
 
 const configureChatSocket = (io) => {
   // Authentication Middleware for Sockets
@@ -113,50 +231,22 @@ const configureChatSocket = (io) => {
     // Register user as online
     chatService.registerOnlineUser(userId, socket.id);
     User.findByIdAndUpdate(userId, { isOnline: true, socketId: socket.id }).exec();
+    connectionState.reconcileUser(userId).then((snap) => {
+      connectionState.emitToUser(io, userId, snap);
+    }).catch((err) => {
+      console.error('Connection-state reconcile failed:', err.message || err);
+    });
 
     // 1. Join personal room for targeted alerts/notifications
     socket.join(`user:${userId}`);
 
-    // 2. Search for a random match
+    // 2. Search for a random match — busy users rejoin their live session instead.
     socket.on('match:start', async () => {
       console.log(`User ${userId} started matchmaking search`);
-      
-      // Prevent double entry
-      chatService.removeFromWaitingPool(userId);
-
-      // Check if a peer is available in waiting pool
-      const peer = chatService.findRandomMatch(userId);
-
-      if (peer) {
-        console.log(`Match found between ${userId} and ${peer.userId}`);
-
-        // Remove peer from waiting pool
-        chatService.removeFromWaitingPool(peer.userId);
-
-        // Create Chat Session in DB
-        const session = await chatService.createSession(userId, peer.userId);
-        const sessionId = session._id.toString();
-
-        const peerSocket = io.sockets.sockets.get(peer.socketId);
-        
-        if (peerSocket) {
-          socket.join(`room:${sessionId}`);
-          peerSocket.join(`room:${sessionId}`);
-
-          const sent = await emitMatchPair(socket, peerSocket, sessionId, userId, peer.userId);
-          if (!sent) {
-            await chatService.addToWaitingPool(userId, socket.id);
-            socket.emit('match:searching');
-          }
-        } else {
-          // Fallback if peer disconnected right before matching
-          await chatService.addToWaitingPool(userId, socket.id);
-          socket.emit('match:searching');
-        }
-      } else {
-        // No match found immediately, put user in waiting pool
-        await chatService.addToWaitingPool(userId, socket.id);
-        socket.emit('match:searching');
+      try {
+        await tryMatchmake(io, socket, userId);
+      } catch (err) {
+        console.error('Match start error:', err);
       }
     });
 
@@ -243,45 +333,9 @@ const configureChatSocket = (io) => {
       console.log(`User ${userId} requested skip for session ${sessionId}`);
 
       try {
-        await chatService.endSession(sessionId, userId);
-        setCallState(sessionId, 'idle');
-
-        // Notify peer they were skipped
-        socket.to(`room:${sessionId}`).emit('peer:disconnected');
-
-        // Make current socket leave session room
-        socket.leave(`room:${sessionId}`);
-
-        // Automatically place this user back in waiting pool to look for next match
+        await endLiveSession(io, socket, sessionId, userId);
         socket.emit('match:searching');
-        const peer = chatService.findRandomMatch(userId);
-
-        if (peer) {
-          chatService.removeFromWaitingPool(peer.userId);
-          const newSession = await chatService.createSession(userId, peer.userId);
-          const newSessionId = newSession._id.toString();
-          const peerSocket = io.sockets.sockets.get(peer.socketId);
-
-          if (peerSocket) {
-            socket.join(`room:${newSessionId}`);
-            peerSocket.join(`room:${newSessionId}`);
-
-            const sent = await emitMatchPair(
-              socket,
-              peerSocket,
-              newSessionId,
-              userId,
-              peer.userId
-            );
-            if (!sent) {
-              await chatService.addToWaitingPool(userId, socket.id);
-            }
-          } else {
-            await chatService.addToWaitingPool(userId, socket.id);
-          }
-        } else {
-          await chatService.addToWaitingPool(userId, socket.id);
-        }
+        await tryMatchmake(io, socket, userId);
       } catch (err) {
         console.error('Skip error:', err);
       }
@@ -298,6 +352,20 @@ const configureChatSocket = (io) => {
         return;
       }
 
+      const session = await ChatSession.findById(sessionId).select('participants');
+      const ids = participantIds(session);
+      const peerId = ids.find((id) => id !== String(userId));
+      if (peerId) {
+        const peerSnap = connectionState.getState(peerId);
+        if (
+          peerSnap.sessionId &&
+          peerSnap.sessionId !== String(sessionId)
+        ) {
+          socket.emit('video:call-busy', { sessionId, reason: 'unavailable' });
+          return;
+        }
+      }
+
       setCallState(sessionId, 'ringing');
       const callMode = mode === 'voice' ? 'voice' : 'video';
       socket.to(`room:${sessionId}`).emit('video:call-incoming', { callerId: userId, mode: callMode });
@@ -309,6 +377,9 @@ const configureChatSocket = (io) => {
 
       setCallState(sessionId, 'active');
       const callMode = mode === 'voice' ? 'voice' : 'video';
+      const session = await ChatSession.findById(sessionId).select('participants');
+      await connectionState.upgradeCall(sessionId, participantIds(session), callMode);
+      participantIds(session).forEach((id) => connectionState.emitToUser(io, id));
       socket.to(`room:${sessionId}`).emit('video:call-accepted', { acceptorId: userId, mode: callMode });
     });
 
@@ -317,10 +388,12 @@ const configureChatSocket = (io) => {
       if (!(await assertSessionParticipant(sessionId, userId))) return;
 
       setCallState(sessionId, 'idle');
+      const session = await ChatSession.findById(sessionId).select('participants');
+      await connectionState.downgradeToChat(sessionId, participantIds(session));
+      participantIds(session).forEach((id) => connectionState.emitToUser(io, id));
       socket.to(`room:${sessionId}`).emit('video:call-rejected', { rejectorId: userId });
 
       try {
-        const session = await ChatSession.findById(sessionId).select('participants');
         const peerId = (session?.participants || [])
           .map((p) => String(p))
           .find((id) => id !== String(userId));
@@ -334,6 +407,7 @@ const configureChatSocket = (io) => {
             {
               key: `missed-call-${sessionId}-${Date.now()}`,
               data: { route: '/random-chat?intent=call' },
+              allowWhenBusy: true,
             }
           );
         }
@@ -347,6 +421,9 @@ const configureChatSocket = (io) => {
       if (!(await assertSessionParticipant(sessionId, userId))) return;
 
       setCallState(sessionId, 'idle');
+      const session = await ChatSession.findById(sessionId).select('participants');
+      await connectionState.downgradeToChat(sessionId, participantIds(session));
+      participantIds(session).forEach((id) => connectionState.emitToUser(io, id));
       socket.to(`room:${sessionId}`).emit('video:call-ended', { enderId: userId });
     });
 
@@ -388,7 +465,7 @@ const configureChatSocket = (io) => {
       socket.emit('match:idle');
     });
 
-    // 8. Handle Disconnect
+    // 8. Handle Disconnect — session ends and both users become available again.
     socket.on('disconnect', async () => {
       console.log(`Socket Disconnected: User ${userId}`);
       
@@ -402,7 +479,6 @@ const configureChatSocket = (io) => {
         lastSeen: new Date(),
       });
 
-      // Find any active session of this user and end it
       try {
         const activeSession = await ChatSession.findOne({
           participants: userId,
@@ -410,12 +486,9 @@ const configureChatSocket = (io) => {
         });
 
         if (activeSession) {
-          const sessionId = activeSession._id.toString();
-          setCallState(sessionId, 'idle');
-          await chatService.endSession(sessionId, userId);
-
-          // Inform peer user they disconnected
-          socket.to(`room:${sessionId}`).emit('peer:disconnected');
+          await endLiveSession(io, socket, activeSession._id.toString(), userId);
+        } else {
+          await connectionState.markAvailable(userId);
         }
       } catch (err) {
         console.error('Disconnect session cleanup failure:', err);

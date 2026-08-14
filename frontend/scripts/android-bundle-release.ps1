@@ -25,8 +25,35 @@ if ($longPaths -ne 1) {
     Write-Host ''
 }
 
+# Stop any other Gradle holding .gradle locks (fixes executionHistory.lock timeout).
+& (Join-Path $PSScriptRoot 'android-stop-gradle.ps1')
+
+# Keep Java/Gradle/BundleTool temp off full C: drive
+# (fixes :app:packageReleaseBundle "There is not enough space on the disk").
+$buildTmp = 'D:\aarambh\.tmp-build'
+New-Item -ItemType Directory -Force -Path $buildTmp | Out-Null
+$env:TEMP = $buildTmp
+$env:TMP = $buildTmp
+$env:JAVA_TOOL_OPTIONS = "-Djava.io.tmpdir=$($buildTmp -replace '\\','/')"
+if (-not $env:GRADLE_USER_HOME) {
+    $env:GRADLE_USER_HOME = Join-Path $env:USERPROFILE '.gradle'
+}
+
+$cFreeGb = [math]::Round((Get-PSDrive C).Free / 1GB, 2)
+Write-Host "C: free space: $cFreeGb GB" -ForegroundColor DarkGray
+if ((Get-PSDrive C).Free -lt 2GB) {
+    Write-Host 'C: is low — clearing Java/Gradle leftovers in Local\Temp...' -ForegroundColor Yellow
+    Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Temp') -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^(hsperfdata_|java_pid|gradle-|bundletool|R8-|tmp)' } |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Host "Using build temp: $buildTmp" -ForegroundColor DarkGray
+Write-Host "Using Gradle home: $env:GRADLE_USER_HOME" -ForegroundColor DarkGray
+
 Set-Location $androidDir
-.\gradlew.bat bundleRelease
+# All Expo SDK 54 ABIs: ARM phones/tablets + x86 Chromebooks/TVs/Intel devices.
+.\gradlew.bat bundleRelease "-PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64" -PnewArchEnabled=true --no-daemon
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $aab = Join-Path $androidDir 'app\build\outputs\bundle\release\app-release.aab'
@@ -34,6 +61,22 @@ if (Test-Path $aab) {
     Write-Host ""
     Write-Host "AAB ready:" -ForegroundColor Green
     Write-Host $aab
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($aab)
+    $abis = $zip.Entries |
+        Where-Object { $_.FullName -like '*.so' } |
+        ForEach-Object { if ($_.FullName -match '(armeabi-v7a|arm64-v8a|x86_64|x86)') { $matches[1] } } |
+        Sort-Object -Unique
+    $zip.Dispose()
+    Write-Host "Native ABIs in this AAB: $($abis -join ', ')" -ForegroundColor Cyan
+    $requiredAbis = @('armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64')
+    $missingAbis = $requiredAbis | Where-Object { $abis -notcontains $_ }
+    if ($missingAbis) {
+        Write-Host "ERROR: AAB is missing ABIs: $($missingAbis -join ', '). Play will drop devices." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host 'Device coverage: ARM phones/tablets + x86 Chromebooks/TVs/Intel devices included.' -ForegroundColor Green
 }
 
 exit 0

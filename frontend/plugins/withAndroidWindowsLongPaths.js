@@ -11,10 +11,10 @@ def isWindowsBuild = System.getProperty('os.name').toLowerCase().contains('windo
 subprojects { subproject ->
     subproject.plugins.withId('com.android.library') {
         subproject.android {
-            if (isWindowsBuild) {
-                defaultConfig {
-                    externalNativeBuild {
-                        cmake {
+            defaultConfig {
+                externalNativeBuild {
+                    cmake {
+                        if (isWindowsBuild) {
                             def shortNinja = new File('C:/ninja/ninja.exe')
                             if (shortNinja.exists()) {
                                 arguments '-DCMAKE_MAKE_PROGRAM=' + shortNinja.absolutePath.replace('\\\\', '/')

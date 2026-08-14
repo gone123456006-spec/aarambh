@@ -48,7 +48,7 @@ if (Test-Path $gradlew) {
         }
         $done = Wait-Job $job -Timeout 15
         if (-not $done) {
-            Stop-Job $job -Force -ErrorAction SilentlyContinue
+            Stop-Job $job -ErrorAction SilentlyContinue
             Write-Host 'gradlew --stop timed out (locks cleared; safe to rebuild).' -ForegroundColor Yellow
         }
         Remove-Job $job -Force -ErrorAction SilentlyContinue

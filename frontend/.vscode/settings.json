@@ -3,5 +3,24 @@
     "source.fixAll": "explicit",
     "source.organizeImports": "explicit",
     "source.sortMembers": "explicit"
+  },
+  "editor.formatOnSave": true,
+  "typescript.tsdk": "node_modules/typescript/lib",
+  // Exclude node_modules from Java/Gradle project scanning.
+  // Eliminates all false-positive "Missing Gradle project configuration"
+  // and "missing required library" errors in the Problems panel.
+  "java.import.exclusions": [
+    "**/node_modules/**",
+    "**/.expo/**",
+    "**/.gradle/**"
+  ],
+  "java.autobuild.enabled": false,
+  "gradle.nestedProjects": false,
+  // Suppress generated Java metadata files from the Explorer
+  "files.exclude": {
+    "**/.classpath": true,
+    "**/.project": true,
+    "**/.settings": true,
+    "**/.factorypath": true
   }
 }

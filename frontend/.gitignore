@@ -45,3 +45,6 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Extracted/debug native libs (do not ship)
+/lib/

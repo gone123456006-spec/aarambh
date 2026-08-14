@@ -33,8 +33,14 @@ const subscriptionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['active', 'expired', 'cancelled'],
-      default: 'active',
+      enum: ['active', 'expired', 'cancelled', 'pending'],
+      default: 'pending',
+      index: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ['pending', 'completed', 'failed', 'refunded'],
+      default: 'pending',
       index: true,
     },
     /** Razorpay payment id (pay_…) — primary payment reference */
@@ -56,6 +62,14 @@ const subscriptionSchema = new mongoose.Schema(
     razorpaySignature: {
       type: String,
       trim: true,
+    },
+    emailSent: {
+      type: Boolean,
+      default: false,
+    },
+    emailSentAt: {
+      type: Date,
+      default: null,
     },
   },
   {

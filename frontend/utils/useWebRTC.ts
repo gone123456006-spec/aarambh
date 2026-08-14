@@ -8,6 +8,7 @@ import {
 import type { CallMode } from './mediaPermissions';
 import { getWebRTC } from './webrtcNative';
 import { getIceServers } from './webrtcConfig';
+import { setCallAudioMode, configureRemoteAudio } from './audioRouting';
 
 type MediaStreamLike = {
   getTracks: () => Array<{ stop: () => void }>;
@@ -66,7 +67,10 @@ function buildPeerConnection(
 
   pc.ontrack = (event) => {
     if (event.streams?.[0]) {
-      onRemoteStream(event.streams[0]);
+      const remoteStream = event.streams[0];
+      // Configure remote audio for maximum volume and clarity
+      configureRemoteAudio(remoteStream);
+      onRemoteStream(remoteStream);
     }
   };
 
@@ -143,8 +147,16 @@ export function useWebRTC(
     const webrtc = getWebRTC();
     if (!webrtc) return null;
 
+    // High-quality audio constraints for clear voice and video calls
     const stream = (await webrtc.mediaDevices.getUserMedia({
-      audio: true,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 48000,
+        sampleSize: 16,
+        channelCount: 1,
+      },
       video: mode === 'video' ? { facingMode: 'user' } : false,
     })) as MediaStreamLike;
 
@@ -174,6 +186,9 @@ export function useWebRTC(
       try {
         tearDownPeerConnection();
 
+        // Configure audio routing for speaker output (loud, clear audio)
+        await setCallAudioMode(mode, true);
+
         const stream = localStreamRef.current ?? (await getMedia(mode));
         if (!stream) return false;
 
@@ -189,7 +204,11 @@ export function useWebRTC(
         );
         pcRef.current = pc;
 
-        const offer = await pc.createOffer({});
+        // Create offer with optimal constraints for audio quality
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: mode === 'video',
+        });
         await pc.setLocalDescription(offer);
         emitWebRTCOffer(sock, sessionId, offer, mode);
         return true;
@@ -208,6 +227,9 @@ export function useWebRTC(
       try {
         const webrtc = getWebRTC()!;
         tearDownPeerConnection();
+
+        // Configure audio routing for speaker output (loud, clear audio)
+        await setCallAudioMode(mode, true);
 
         let stream = localStreamRef.current;
         if (!stream) {
@@ -292,6 +314,11 @@ export function useWebRTC(
       localStreamRef.current = null;
       setLocalStream(null);
     }
+
+    // Reset audio routing to default when call ends
+    setCallAudioMode('video', false).catch((err) => {
+      console.warn('Failed to reset audio mode:', err);
+    });
   }, [tearDownPeerConnection]);
 
   useEffect(() => {

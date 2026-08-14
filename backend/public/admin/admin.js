@@ -72,6 +72,18 @@ function switchTab(name) {
   if (name === 'content') {
     loadCourses().then(() => renderCategorySections());
   }
+  if (name === 'subscriptions') {
+    loadSubscriptions();
+  }
+  if (name === 'games') {
+    $('gameSelect').value = '';
+    $('questionFormSection').classList.add('hidden');
+    $('levelManagementSection').classList.add('hidden');
+    $('questionsListSection').classList.add('hidden');
+  }
+  if (name === 'notifications') {
+    loadNotifications();
+  }
 }
 
 function startAutoRefresh() {
@@ -112,14 +124,22 @@ async function loadStats() {
       { label: 'New this week', value: s.newUsersThisWeek },
       { label: 'Courses', value: s.totalCourses },
       { label: 'Active chats', value: s.activeChatSessions },
+      { label: 'Active Subscriptions', value: s.activeSubscriptions, color: '#00b894' },
+      { label: 'Expired Subscriptions', value: s.expiredSubscriptions, color: '#636e72' },
+      { label: 'Total Revenue', value: '₹' + (s.totalRevenue || 0), color: '#e60000' },
+      { label: 'Revenue (30d)', value: '₹' + (s.revenueThisMonth || 0), color: '#ff9f43' },
+      { label: 'Enrolled Courses', value: s.enrolledCourses },
+      { label: 'Active Learners (7d)', value: s.activeLearners },
+      { label: 'New Subs (30d)', value: s.recentSubscriptions },
+      { label: 'Total Transactions', value: s.revenueTransactions },
     ];
 
     grid.innerHTML = cards
       .map(
         (c) => `
-      <div class="stat-card">
+      <div class="stat-card"${c.color ? ` style="background: ${c.color}; color: white"` : ''}>
         <div class="value">${c.value ?? 0}</div>
-        <div class="label">${c.label}</div>
+        <div class="label"${c.color ? ' style="color: rgba(255,255,255,0.9)"' : ''}>${c.label}</div>
       </div>`
       )
       .join('');
@@ -189,38 +209,7 @@ async function loadUsers(page = usersPage) {
 }
 
 async function openUserModal(userId) {
-  const modal = $('userModal');
-  const body = $('userModalBody');
-  modal.classList.remove('hidden');
-  body.textContent = 'Loading…';
-
-  try {
-    const data = await api(`/api/admin/users/${userId}`);
-    const u = data.user;
-    const cp = data.courseProgress || {};
-    const games = data.gameProgress || [];
-
-    body.innerHTML = `
-      <dl>
-        <dt>Name</dt><dd>${u.name || '—'}</dd>
-        <dt>Email</dt><dd>${u.email}</dd>
-        <dt>Phone</dt><dd>${u.phone || '—'}</dd>
-        <dt>Gender</dt><dd>${u.gender || '—'}</dd>
-        <dt>Region</dt><dd>${u.region || '—'}</dd>
-        <dt>Level</dt><dd>${u.level || '—'}</dd>
-        <dt>Profile</dt><dd>${u.profileCompleted ? 'Complete' : 'Incomplete'}</dd>
-        <dt>Online</dt><dd>${u.isOnline ? 'Yes' : 'No'}</dd>
-        <dt>Session</dt><dd>${u.hasActiveSession ? `Active (${u.sessionCount})` : 'None'}</dd>
-        <dt>Last seen</dt><dd>${formatDate(u.lastSeen)}</dd>
-        <dt>Joined</dt><dd>${formatDate(u.createdAt)}</dd>
-        <dt>Referral</dt><dd>${u.referralCode || '—'}</dd>
-        <dt>Lessons done</dt><dd>${(cp.completedLessons || []).length}</dd>
-        <dt>Last lesson</dt><dd>${cp.lastLessonId || '—'}</dd>
-        <dt>Games</dt><dd>${games.length ? games.map((g) => `${g.gameId} L${g.level}`).join(', ') : '—'}</dd>
-      </dl>`;
-  } catch (e) {
-    body.innerHTML = `<p class="status err">${e.message}</p>`;
-  }
+  await showUserDetails(userId);
 }
 
 function closeUserModal() {
@@ -693,5 +682,870 @@ $('createCourseBtn').addEventListener('click', createCourse);
 $('userSearch').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loadUsers(1);
 });
+
+// ============================================================================
+// GAME QUESTIONS MANAGEMENT
+// ============================================================================
+
+let selectedGame = null;
+let currentGameConfig = null;
+let gameQuestions = [];
+
+$('gameSelect').addEventListener('change', async (e) => {
+  selectedGame = e.target.value;
+  if (!selectedGame) {
+    $('currentMaxLevel').value = '';
+    $('totalQuestions').value = '';
+    $('questionsListSection').classList.add('hidden');
+    return;
+  }
+  
+  try {
+    showStatus($('gameQuestionsStatus'), 'Loading game configuration...', 'info');
+    const [config, stats] = await Promise.all([
+      api(`/api/admin/games/${selectedGame}/levels`),
+      api(`/api/admin/games/${selectedGame}/questions/stats`)
+    ]);
+    
+    currentGameConfig = config;
+    $('currentMaxLevel').value = config.maxLevel;
+    $('totalQuestions').value = stats.total || 0;
+    showStatus($('gameQuestionsStatus'), `Loaded: ${stats.total} questions, max level ${config.maxLevel}`, 'ok');
+  } catch (err) {
+    showStatus($('gameQuestionsStatus'), 'Failed to load game config: ' + err.message, 'err');
+  }
+});
+
+$('loadGameQuestionsBtn').addEventListener('click', async () => {
+  if (!selectedGame) {
+    showStatus($('gameQuestionsStatus'), 'Please select a game first', 'err');
+    return;
+  }
+  
+  try {
+    showStatus($('gameQuestionsStatus'), 'Loading questions...', 'info');
+    const data = await api(`/api/admin/games/${selectedGame}/questions?active=true`);
+    gameQuestions = data.questions || [];
+    
+    renderGameQuestions();
+    $('questionsListSection').classList.remove('hidden');
+    $('questionsGameTitle').textContent = selectedGame.charAt(0).toUpperCase() + selectedGame.slice(1);
+    showStatus($('gameQuestionsStatus'), `Loaded ${gameQuestions.length} questions`, 'ok');
+  } catch (err) {
+    showStatus($('gameQuestionsStatus'), 'Failed to load questions: ' + err.message, 'err');
+  }
+});
+
+$('newQuestionBtn').addEventListener('click', () => {
+  if (!selectedGame) {
+    showStatus($('gameQuestionsStatus'), 'Please select a game first', 'err');
+    return;
+  }
+  
+  $('questionFormTitle').textContent = 'Add New Question';
+  $('editQuestionId').value = '';
+  $('questionForm').reset();
+  $('questionLevel').value = 1;
+  $('questionDifficulty').value = 'easy';
+  $('questionOrder').value = 0;
+  
+  showQuestionFields(selectedGame);
+  $('questionFormSection').classList.remove('hidden');
+  $('questionFormSection').scrollIntoView({ behavior: 'smooth' });
+});
+
+$('manageLevelsBtn').addEventListener('click', () => {
+  if (!selectedGame || !currentGameConfig) {
+    showStatus($('gameQuestionsStatus'), 'Please select a game first', 'err');
+    return;
+  }
+  
+  $('levelGameName').textContent = selectedGame.charAt(0).toUpperCase() + selectedGame.slice(1);
+  $('configMaxLevel').value = currentGameConfig.maxLevel;
+  $('configPointsPerCorrect').value = currentGameConfig.pointsPerCorrect || 5;
+  $('configDescription').value = currentGameConfig.description || '';
+  
+  $('levelManagementSection').classList.remove('hidden');
+  $('levelManagementSection').scrollIntoView({ behavior: 'smooth' });
+});
+
+$('cancelQuestionBtn').addEventListener('click', () => {
+  $('questionFormSection').classList.add('hidden');
+});
+
+$('closeLevelConfigBtn').addEventListener('click', () => {
+  $('levelManagementSection').classList.add('hidden');
+});
+
+$('questionForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const btn = $('saveQuestionBtn');
+  btn.disabled = true;
+  
+  try {
+    const questionId = $('editQuestionId').value;
+    const level = parseInt($('questionLevel').value, 10);
+    const difficulty = $('questionDifficulty').value;
+    const order = parseInt($('questionOrder').value, 10);
+    
+    const body = { level, difficulty, order, active: true };
+    
+    // Build question data based on game type
+    if (selectedGame === 'quiz') {
+      const options = [
+        $('quizOption1').value.trim(),
+        $('quizOption2').value.trim(),
+        $('quizOption3').value.trim(),
+        $('quizOption4').value.trim(),
+      ].filter(opt => opt);
+      
+      if (options.length < 2) {
+        throw new Error('Quiz questions need at least 2 options');
+      }
+      
+      body.question = $('quizQuestion').value.trim();
+      body.options = options;
+      body.answer = parseInt($('quizAnswer').value, 10);
+      body.explanation = $('quizExplanation').value.trim() || undefined;
+      
+      if (!body.question) throw new Error('Question text is required');
+      if (body.answer < 0 || body.answer >= options.length) throw new Error('Invalid answer index');
+      
+    } else if (selectedGame === 'scramble') {
+      body.word = $('scrambleWord').value.trim().toUpperCase();
+      body.hint = $('scrambleHint').value.trim();
+      
+      if (!body.word || !body.hint) throw new Error('Word and hint are required');
+      
+    } else if (selectedGame === 'fill') {
+      const options = [
+        $('fillOption1').value.trim(),
+        $('fillOption2').value.trim(),
+        $('fillOption3').value.trim(),
+        $('fillOption4').value.trim(),
+      ].filter(opt => opt);
+      
+      if (options.length < 2) {
+        throw new Error('Fill-blank questions need at least 2 options');
+      }
+      
+      body.sentence = $('fillSentence').value.trim();
+      body.options = options;
+      body.answer = parseInt($('fillAnswer').value, 10);
+      body.correctText = $('fillCorrectText').value.trim();
+      body.rule = $('fillRule').value.trim() || undefined;
+      
+      if (!body.sentence || !body.correctText) throw new Error('Sentence and correct text are required');
+      if (body.answer < 0 || body.answer >= options.length) throw new Error('Invalid answer index');
+      
+    } else if (selectedGame === 'flash') {
+      body.word = $('flashWord').value.trim();
+      body.meaning = $('flashMeaning').value.trim();
+      body.example = $('flashExample').value.trim();
+      
+      if (!body.word || !body.meaning || !body.example) {
+        throw new Error('Word, meaning, and example are all required');
+      }
+    }
+    
+    let result;
+    if (questionId) {
+      result = await api(`/api/admin/games/${selectedGame}/questions/${questionId}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      showStatus($('questionFormStatus'), 'Question updated successfully', 'ok');
+    } else {
+      result = await api(`/api/admin/games/${selectedGame}/questions`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      showStatus($('questionFormStatus'), 'Question created successfully', 'ok');
+    }
+    
+    setTimeout(() => {
+      $('questionFormSection').classList.add('hidden');
+      $('loadGameQuestionsBtn').click();
+    }, 1000);
+    
+  } catch (err) {
+    showStatus($('questionFormStatus'), err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('saveLevelConfigBtn').addEventListener('click', async () => {
+  const btn = $('saveLevelConfigBtn');
+  btn.disabled = true;
+  
+  try {
+    const body = {
+      maxLevel: parseInt($('configMaxLevel').value, 10),
+      pointsPerCorrect: parseInt($('configPointsPerCorrect').value, 10),
+      description: $('configDescription').value.trim(),
+    };
+    
+    if (body.maxLevel < 1) {
+      throw new Error('Max level must be at least 1');
+    }
+    
+    const result = await api(`/api/admin/games/${selectedGame}/levels`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    
+    currentGameConfig = result;
+    $('currentMaxLevel').value = result.maxLevel;
+    
+    showStatus($('levelConfigStatus'), 'Level configuration updated successfully', 'ok');
+    setTimeout(() => {
+      $('levelManagementSection').classList.add('hidden');
+    }, 1200);
+    
+  } catch (err) {
+    showStatus($('levelConfigStatus'), err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function showQuestionFields(gameId) {
+  document.querySelectorAll('.question-type-fields').forEach(el => el.classList.add('hidden'));
+  
+  if (gameId === 'quiz') {
+    $('quizFields').classList.remove('hidden');
+  } else if (gameId === 'scramble') {
+    $('scrambleFields').classList.remove('hidden');
+  } else if (gameId === 'fill') {
+    $('fillFields').classList.remove('hidden');
+  } else if (gameId === 'flash') {
+    $('flashFields').classList.remove('hidden');
+  }
+}
+
+function renderGameQuestions() {
+  const container = $('questionsListContainer');
+  
+  if (gameQuestions.length === 0) {
+    container.innerHTML = '<p style="color: #636e72">No questions found. Create your first question above.</p>';
+    return;
+  }
+  
+  // Group by level
+  const byLevel = {};
+  gameQuestions.forEach(q => {
+    if (!byLevel[q.level]) byLevel[q.level] = [];
+    byLevel[q.level].push(q);
+  });
+  
+  const levels = Object.keys(byLevel).sort((a, b) => parseInt(a) - parseInt(b));
+  
+  let html = '';
+  levels.forEach(level => {
+    const questions = byLevel[level];
+    html += `
+      <div style="margin: 1rem 0; padding: 0.75rem; background: #f8f9fa; border-radius: 4px">
+        <h4 style="margin: 0 0 0.5rem; color: #2d3436">Level ${level} (${questions.length} questions)</h4>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem">
+    `;
+    
+    questions.forEach(q => {
+      const preview = getQuestionPreview(q);
+      html += `
+        <div style="padding: 0.5rem; background: white; border-radius: 4px; border: 1px solid #dfe6e9">
+          <div style="font-size: 0.88rem; color: #636e72; margin-bottom: 0.25rem">
+            <span style="font-weight: 600">${q.difficulty || 'easy'}</span> · Order: ${q.order || 0}
+          </div>
+          <div style="font-size: 0.9rem; color: #2d3436">${preview}</div>
+          <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem">
+            <button type="button" class="secondary" style="font-size: 0.85rem; padding: 0.35rem 0.75rem" onclick="editQuestion('${q._id}')">Edit</button>
+            <button type="button" class="secondary" style="font-size: 0.85rem; padding: 0.35rem 0.75rem; color: #d63031" onclick="deleteQuestion('${q._id}')">Delete</button>
+          </div>
+        </div>
+      `;
+    });
+    
+    html += '</div></div>';
+  });
+  
+  container.innerHTML = html;
+}
+
+function getQuestionPreview(q) {
+  if (selectedGame === 'quiz') {
+    return `<strong>Q:</strong> ${q.question || ''}`;
+  } else if (selectedGame === 'scramble') {
+    return `<strong>Word:</strong> ${q.word || ''} — ${q.hint || ''}`;
+  } else if (selectedGame === 'fill') {
+    return `<strong>Sentence:</strong> ${q.sentence || ''}`;
+  } else if (selectedGame === 'flash') {
+    return `<strong>Word:</strong> ${q.word || ''} — ${q.meaning || ''}`;
+  }
+  return '';
+}
+
+window.editQuestion = async function(questionId) {
+  const question = gameQuestions.find(q => q._id === questionId);
+  if (!question) return;
+  
+  $('questionFormTitle').textContent = 'Edit Question';
+  $('editQuestionId').value = questionId;
+  $('questionLevel').value = question.level;
+  $('questionDifficulty').value = question.difficulty || 'easy';
+  $('questionOrder').value = question.order || 0;
+  
+  showQuestionFields(selectedGame);
+  
+  if (selectedGame === 'quiz') {
+    $('quizQuestion').value = question.question || '';
+    $('quizOption1').value = question.options?.[0] || '';
+    $('quizOption2').value = question.options?.[1] || '';
+    $('quizOption3').value = question.options?.[2] || '';
+    $('quizOption4').value = question.options?.[3] || '';
+    $('quizAnswer').value = question.answer || 0;
+    $('quizExplanation').value = question.explanation || '';
+  } else if (selectedGame === 'scramble') {
+    $('scrambleWord').value = question.word || '';
+    $('scrambleHint').value = question.hint || '';
+  } else if (selectedGame === 'fill') {
+    $('fillSentence').value = question.sentence || '';
+    $('fillOption1').value = question.options?.[0] || '';
+    $('fillOption2').value = question.options?.[1] || '';
+    $('fillOption3').value = question.options?.[2] || '';
+    $('fillOption4').value = question.options?.[3] || '';
+    $('fillAnswer').value = question.answer || 0;
+    $('fillCorrectText').value = question.correctText || '';
+    $('fillRule').value = question.rule || '';
+  } else if (selectedGame === 'flash') {
+    $('flashWord').value = question.word || '';
+    $('flashMeaning').value = question.meaning || '';
+    $('flashExample').value = question.example || '';
+  }
+  
+  $('questionFormSection').classList.remove('hidden');
+  $('questionFormSection').scrollIntoView({ behavior: 'smooth' });
+};
+
+window.deleteQuestion = async function(questionId) {
+  if (!confirm('Are you sure you want to delete this question?')) return;
+  
+  try {
+    await api(`/api/admin/games/${selectedGame}/questions/${questionId}`, {
+      method: 'DELETE',
+    });
+    
+    showStatus($('gameQuestionsStatus'), 'Question deleted successfully', 'ok');
+    $('loadGameQuestionsBtn').click();
+  } catch (err) {
+    showStatus($('gameQuestionsStatus'), 'Failed to delete: ' + err.message, 'err');
+  }
+};
+
+// ============================================================================
+// NOTIFICATION MANAGEMENT
+// ============================================================================
+
+let allNotifications = [];
+
+$('notifAudience').addEventListener('change', (e) => {
+  const val = e.target.value;
+  $('notifRegionFields').classList.toggle('hidden', val !== 'region');
+  $('notifLevelFields').classList.toggle('hidden', val !== 'level');
+  $('notifCustomFields').classList.toggle('hidden', val !== 'custom');
+});
+
+$('newNotificationBtn').addEventListener('click', () => {
+  $('notificationFormTitle').textContent = 'Create Notification';
+  $('editNotificationId').value = '';
+  $('notificationForm').reset();
+  $('notifType').value = 'system';
+  $('notifAudience').value = 'all';
+  
+  $('notifRegionFields').classList.add('hidden');
+  $('notifLevelFields').classList.add('hidden');
+  $('notifCustomFields').classList.add('hidden');
+  $('previewTargetsResult').classList.add('hidden');
+  
+  $('notificationFormSection').classList.remove('hidden');
+  $('notificationFormSection').scrollIntoView({ behavior: 'smooth' });
+});
+
+$('loadNotificationsBtn').addEventListener('click', loadNotifications);
+
+$('cancelNotificationBtn').addEventListener('click', () => {
+  $('notificationFormSection').classList.add('hidden');
+});
+
+$('previewTargetsBtn').addEventListener('click', async () => {
+  try {
+    const body = {
+      targetAudience: $('notifAudience').value,
+      targetRegions: $('notifRegions').value.split(',').map(s => s.trim()).filter(Boolean),
+      targetLevels: $('notifLevels').value.split(',').map(s => s.trim()).filter(Boolean),
+      targetUserIds: $('notifUserIds').value.split(',').map(s => s.trim()).filter(Boolean),
+    };
+    
+    const result = await api('/api/admin/notifications/preview-targets', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    
+    const preview = $('previewTargetsResult');
+    preview.innerHTML = `
+      <strong>${result.count}</strong> users will receive this notification.
+      ${result.sample.length > 0 ? '<br>Sample: ' + result.sample.map(u => u.name || u.email).slice(0, 5).join(', ') : ''}
+    `;
+    preview.classList.remove('hidden');
+  } catch (err) {
+    showStatus($('notificationFormStatus'), 'Preview failed: ' + err.message, 'err');
+  }
+});
+
+$('notificationForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const btn = $('saveNotificationBtn');
+  btn.disabled = true;
+  
+  try {
+    const notificationId = $('editNotificationId').value;
+    
+    const body = {
+      title: $('notifTitle').value.trim(),
+      message: $('notifMessage').value.trim(),
+      type: $('notifType').value,
+      targetAudience: $('notifAudience').value,
+      targetRegions: $('notifRegions').value.split(',').map(s => s.trim()).filter(Boolean),
+      targetLevels: $('notifLevels').value.split(',').map(s => s.trim()).filter(Boolean),
+      targetUserIds: $('notifUserIds').value.split(',').map(s => s.trim()).filter(Boolean),
+      scheduledFor: $('notifSchedule').value || undefined,
+      data: $('notifRoute').value.trim() ? { route: $('notifRoute').value.trim() } : undefined,
+    };
+    
+    if (!body.title || !body.message) {
+      throw new Error('Title and message are required');
+    }
+    
+    let result;
+    if (notificationId) {
+      result = await api(`/api/admin/notifications/${notificationId}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      showStatus($('notificationFormStatus'), 'Notification updated successfully', 'ok');
+    } else {
+      result = await api('/api/admin/notifications', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      showStatus($('notificationFormStatus'), `Notification created and ${body.scheduledFor ? 'scheduled' : 'sent'}`, 'ok');
+    }
+    
+    setTimeout(() => {
+      $('notificationFormSection').classList.add('hidden');
+      loadNotifications();
+    }, 1000);
+    
+  } catch (err) {
+    showStatus($('notificationFormStatus'), err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function loadNotifications() {
+  try {
+    showStatus($('notificationsStatus'), 'Loading notifications...', 'info');
+    const data = await api('/api/admin/notifications?limit=50');
+    allNotifications = data.notifications || [];
+    
+    renderNotifications();
+    showStatus($('notificationsStatus'), `Loaded ${allNotifications.length} notifications`, 'ok');
+  } catch (err) {
+    showStatus($('notificationsStatus'), 'Failed to load: ' + err.message, 'err');
+  }
+}
+
+function renderNotifications() {
+  const container = $('notificationsListContainer');
+  
+  if (allNotifications.length === 0) {
+    container.innerHTML = '<p style="color: #636e72">No notifications found. Create your first notification above.</p>';
+    return;
+  }
+  
+  let html = '<div style="display: flex; flex-direction: column; gap: 0.75rem">';
+  
+  allNotifications.forEach(notif => {
+    const statusColors = {
+      draft: '#636e72',
+      scheduled: '#0984e3',
+      sending: '#fdcb6e',
+      sent: '#00b894',
+      cancelled: '#d63031',
+    };
+    
+    const statusColor = statusColors[notif.status] || '#636e72';
+    
+    html += `
+      <div style="padding: 1rem; background: white; border-radius: 4px; border: 1px solid #dfe6e9">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem">
+          <div>
+            <h4 style="margin: 0 0 0.25rem; color: #2d3436">${notif.title}</h4>
+            <p style="margin: 0; font-size: 0.88rem; color: #636e72">${notif.message}</p>
+          </div>
+          <span style="padding: 0.25rem 0.6rem; background: ${statusColor}; color: white; border-radius: 4px; font-size: 0.8rem; white-space: nowrap">
+            ${notif.status}
+          </span>
+        </div>
+        <div style="font-size: 0.85rem; color: #636e72; margin-bottom: 0.5rem">
+          <strong>Target:</strong> ${notif.targetAudience || 'all'} · 
+          <strong>Type:</strong> ${notif.type} · 
+          ${notif.scheduledFor ? `<strong>Scheduled:</strong> ${formatDate(notif.scheduledFor)}` : '<strong>Sent:</strong> ' + (notif.sentAt ? formatDate(notif.sentAt) : 'Not sent')}
+          ${notif.recipientCount ? ` · <strong>Recipients:</strong> ${notif.recipientCount}` : ''}
+        </div>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+          ${notif.status !== 'sent' && notif.status !== 'cancelled' ? `
+            <button type="button" class="secondary" style="font-size: 0.85rem; padding: 0.35rem 0.75rem" onclick="editNotification('${notif._id}')">Edit</button>
+          ` : ''}
+          ${notif.status === 'scheduled' || notif.status === 'draft' ? `
+            <button type="button" class="secondary" style="font-size: 0.85rem; padding: 0.35rem 0.75rem" onclick="sendNotificationNow('${notif._id}')">Send Now</button>
+          ` : ''}
+          ${notif.status !== 'sent' ? `
+            <button type="button" class="secondary" style="font-size: 0.85rem; padding: 0.35rem 0.75rem; color: #d63031" onclick="deleteNotification('${notif._id}')">Delete</button>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  });
+  
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+window.editNotification = async function(notificationId) {
+  try {
+    const notif = await api(`/api/admin/notifications/${notificationId}`);
+    
+    $('notificationFormTitle').textContent = 'Edit Notification';
+    $('editNotificationId').value = notificationId;
+    $('notifTitle').value = notif.title;
+    $('notifMessage').value = notif.message;
+    $('notifType').value = notif.type;
+    $('notifAudience').value = notif.targetAudience;
+    
+    $('notifRegions').value = (notif.targetRegions || []).join(', ');
+    $('notifLevels').value = (notif.targetLevels || []).join(', ');
+    $('notifUserIds').value = (notif.targetUserIds || []).join(', ');
+    
+    if (notif.scheduledFor) {
+      const d = new Date(notif.scheduledFor);
+      $('notifSchedule').value = d.toISOString().slice(0, 16);
+    } else {
+      $('notifSchedule').value = '';
+    }
+    
+    $('notifRoute').value = notif.data?.route || '';
+    
+    $('notifRegionFields').classList.toggle('hidden', notif.targetAudience !== 'region');
+    $('notifLevelFields').classList.toggle('hidden', notif.targetAudience !== 'level');
+    $('notifCustomFields').classList.toggle('hidden', notif.targetAudience !== 'custom');
+    
+    $('notificationFormSection').classList.remove('hidden');
+    $('notificationFormSection').scrollIntoView({ behavior: 'smooth' });
+  } catch (err) {
+    showStatus($('notificationsStatus'), 'Failed to load notification: ' + err.message, 'err');
+  }
+};
+
+window.sendNotificationNow = async function(notificationId) {
+  if (!confirm('Send this notification now to all target users?')) return;
+  
+  try {
+    await api(`/api/admin/notifications/${notificationId}/send`, {
+      method: 'POST',
+    });
+    
+    showStatus($('notificationsStatus'), 'Notification sent successfully', 'ok');
+    loadNotifications();
+  } catch (err) {
+    showStatus($('notificationsStatus'), 'Failed to send: ' + err.message, 'err');
+  }
+};
+
+window.deleteNotification = async function(notificationId) {
+  if (!confirm('Are you sure you want to delete this notification?')) return;
+  
+  try {
+    await api(`/api/admin/notifications/${notificationId}`, {
+      method: 'DELETE',
+    });
+    
+    showStatus($('notificationsStatus'), 'Notification deleted successfully', 'ok');
+    loadNotifications();
+  } catch (err) {
+    showStatus($('notificationsStatus'), 'Failed to delete: ' + err.message, 'err');
+  }
+};
+
+// ============================================================================
+// SUBSCRIPTION MANAGEMENT
+// ============================================================================
+
+let subscriptionsPage = 1;
+let subscriptionsPagination = { pages: 1 };
+
+$('loadSubscriptionsBtn').addEventListener('click', () => loadSubscriptions(1));
+$('prevSubscriptionsBtn').addEventListener('click', () => loadSubscriptions(subscriptionsPage - 1));
+$('nextSubscriptionsBtn').addEventListener('click', () => loadSubscriptions(subscriptionsPage + 1));
+$('subscriptionStatusFilter').addEventListener('change', () => loadSubscriptions(1));
+$('subscriptionPaymentFilter').addEventListener('change', () => loadSubscriptions(1));
+
+async function loadSubscriptions(page = 1) {
+  const statusFilter = $('subscriptionStatusFilter').value;
+  const paymentFilter = $('subscriptionPaymentFilter').value;
+  
+  let query = `page=${page}&limit=20`;
+  if (statusFilter) query += `&status=${statusFilter}`;
+  if (paymentFilter) query += `&paymentStatus=${paymentFilter}`;
+  
+  try {
+    showStatus($('subscriptionsStatus'), 'Loading subscriptions...', 'info');
+    const data = await api(`/api/admin/subscriptions?${query}`);
+    
+    subscriptionsPage = data.pagination.page;
+    subscriptionsPagination = data.pagination;
+    
+    renderSubscriptions(data.subscriptions);
+    updateSubscriptionsPagination();
+    
+    showStatus($('subscriptionsStatus'), `Loaded ${data.subscriptions.length} subscriptions`, 'ok');
+  } catch (err) {
+    showStatus($('subscriptionsStatus'), 'Failed to load: ' + err.message, 'err');
+    $('subscriptionsTableBody').innerHTML = '<tr><td colspan="9">Error loading subscriptions</td></tr>';
+  }
+}
+
+function renderSubscriptions(subscriptions) {
+  const tbody = $('subscriptionsTableBody');
+  
+  if (subscriptions.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #636e72">No subscriptions found</td></tr>';
+    return;
+  }
+  
+  tbody.innerHTML = subscriptions.map(sub => {
+    const statusColors = {
+      active: '#00b894',
+      expired: '#636e72',
+      cancelled: '#d63031',
+      pending: '#fdcb6e',
+    };
+    
+    const paymentColors = {
+      completed: '#00b894',
+      pending: '#fdcb6e',
+      failed: '#d63031',
+      refunded: '#74b9ff',
+    };
+    
+    return `
+      <tr>
+        <td>
+          <strong>${sub.user?.name || 'Unknown'}</strong><br>
+          <small style="color: #636e72">${sub.user?.email || ''}</small>
+        </td>
+        <td>${sub.planName || 'Pro'}</td>
+        <td>₹${sub.price || 0}</td>
+        <td>${formatDate(sub.purchaseDate)}</td>
+        <td>${formatDate(sub.expiryDate)}</td>
+        <td>
+          <span style="display: inline-block; padding: 0.25rem 0.6rem; background: ${statusColors[sub.status] || '#636e72'}; color: white; border-radius: 4px; font-size: 0.8rem">
+            ${sub.status}
+          </span>
+        </td>
+        <td>
+          <span style="display: inline-block; padding: 0.25rem 0.6rem; background: ${paymentColors[sub.paymentStatus] || '#636e72'}; color: white; border-radius: 4px; font-size: 0.8rem">
+            ${sub.paymentStatus}
+          </span>
+        </td>
+        <td>
+          <small style="font-family: monospace; color: #636e72">${sub.razorpayPaymentId || sub.transactionId || '—'}</small>
+        </td>
+        <td>
+          <button type="button" class="secondary" style="font-size: 0.85rem; padding: 0.35rem 0.75rem" onclick="viewSubscriptionDetails('${sub._id}')">
+            View
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function updateSubscriptionsPagination() {
+  const info = $('subscriptionsPageInfo');
+  const prev = $('prevSubscriptionsBtn');
+  const next = $('nextSubscriptionsBtn');
+  
+  info.textContent = `Page ${subscriptionsPagination.page} of ${subscriptionsPagination.pages} (${subscriptionsPagination.total} total)`;
+  prev.disabled = subscriptionsPagination.page <= 1;
+  next.disabled = subscriptionsPagination.page >= subscriptionsPagination.pages;
+}
+
+window.viewSubscriptionDetails = async function(subscriptionId) {
+  try {
+    const sub = await api(`/api/admin/subscriptions/${subscriptionId}`);
+    
+    const modal = $('userModal');
+    const body = $('userModalBody');
+    
+    body.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 1.5rem">
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">User Information</h4>
+          <table style="width: 100%; font-size: 0.9rem">
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Name:</strong></td><td>${sub.user?.name || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Email:</strong></td><td>${sub.user?.email || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Phone:</strong></td><td>${sub.user?.phone || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Region:</strong></td><td>${sub.user?.region || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Level:</strong></td><td>${sub.user?.level || '—'}</td></tr>
+          </table>
+        </div>
+        
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">Subscription Details</h4>
+          <table style="width: 100%; font-size: 0.9rem">
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Plan:</strong></td><td>${sub.planName || 'Pro'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Amount:</strong></td><td>₹${sub.price || 0} ${sub.currency || 'INR'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Status:</strong></td><td>${sub.status}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Payment Status:</strong></td><td>${sub.paymentStatus}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Purchase Date:</strong></td><td>${formatDate(sub.purchaseDate)}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Expiry Date:</strong></td><td>${formatDate(sub.expiryDate)}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Email Sent:</strong></td><td>${sub.emailSent ? 'Yes (' + formatDate(sub.emailSentAt) + ')' : 'No'}</td></tr>
+          </table>
+        </div>
+        
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">Payment Information</h4>
+          <table style="width: 100%; font-size: 0.9rem">
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Transaction ID:</strong></td><td style="font-family: monospace">${sub.transactionId || sub.razorpayPaymentId || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Order ID:</strong></td><td style="font-family: monospace">${sub.razorpayOrderId || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Payment ID:</strong></td><td style="font-family: monospace">${sub.razorpayPaymentId || '—'}</td></tr>
+          </table>
+        </div>
+      </div>
+    `;
+    
+    modal.classList.remove('hidden');
+  } catch (err) {
+    showStatus($('subscriptionsStatus'), 'Failed to load subscription details: ' + err.message, 'err');
+  }
+};
+
+// Enhanced user details modal with subscription and course info
+async function showUserDetails(userId) {
+  try {
+    const userData = await api(`/api/admin/users/${userId}`);
+    
+    const modal = $('userModal');
+    const body = $('userModalBody');
+    
+    body.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 1.5rem">
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">Profile Information</h4>
+          <table style="width: 100%; font-size: 0.9rem">
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Name:</strong></td><td>${userData.user.name || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Email:</strong></td><td>${userData.user.email || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Phone:</strong></td><td>${userData.user.phone || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Region:</strong></td><td>${userData.user.region || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Level:</strong></td><td>${userData.user.level || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Gender:</strong></td><td>${userData.user.gender || '—'}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Total Points:</strong></td><td>${userData.user.totalPoints || 0}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Registered:</strong></td><td>${formatDate(userData.user.createdAt)}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Last Active:</strong></td><td>${formatDate(userData.user.lastSeen)}</td></tr>
+          </table>
+        </div>
+        
+        ${userData.subscriptionSummary && userData.subscriptionSummary.active ? `
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">Current Subscription</h4>
+          <table style="width: 100%; font-size: 0.9rem">
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Plan:</strong></td><td>${userData.subscriptionSummary.plan}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Status:</strong></td><td>${userData.subscriptionSummary.status}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Expiry:</strong></td><td>${formatDate(userData.subscriptionSummary.expiryDate)}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Days Remaining:</strong></td><td>${userData.subscriptionSummary.remainingDays} days</td></tr>
+          </table>
+        </div>
+        ` : ''}
+        
+        ${userData.subscriptions && userData.subscriptions.length > 0 ? `
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">Subscription History (${userData.subscriptions.length})</h4>
+          <div style="max-height: 200px; overflow-y: auto; border: 1px solid #dfe6e9; border-radius: 4px">
+            ${userData.subscriptions.map(sub => `
+              <div style="padding: 0.75rem; border-bottom: 1px solid #f1f3f5">
+                <div style="font-size: 0.88rem">
+                  <strong>${sub.planName || 'Pro'}</strong> - ₹${sub.price} - ${sub.status}
+                </div>
+                <div style="font-size: 0.8rem; color: #636e72; margin-top: 0.25rem">
+                  ${formatDate(sub.purchaseDate)} → ${formatDate(sub.expiryDate)}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
+        
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">Course Progress</h4>
+          <table style="width: 100%; font-size: 0.9rem">
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Total Lessons:</strong></td><td>${userData.courseProgress?.totalLessons || 0}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Completed:</strong></td><td>${userData.courseProgress?.completedLessons?.length || 0}</td></tr>
+            <tr><td style="padding: 0.5rem 0; color: #636e72"><strong>Completion:</strong></td><td>${userData.courseProgress?.completionPercentage || 0}%</td></tr>
+          </table>
+        </div>
+        
+        ${userData.courses && userData.courses.length > 0 ? `
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">Course Details</h4>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem">
+            ${userData.courses.map(course => `
+              <div style="padding: 0.75rem; background: #f8f9fa; border-radius: 4px">
+                <div style="font-size: 0.88rem"><strong>${course.title}</strong></div>
+                <div style="font-size: 0.8rem; color: #636e72; margin-top: 0.25rem">
+                  ${course.completedInCourse || 0} / ${course.totalLessons || 0} lessons completed
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
+        
+        ${userData.gameProgress && userData.gameProgress.length > 0 ? `
+        <div>
+          <h4 style="margin: 0 0 0.5rem; color: #2d3436">Game Activity</h4>
+          <div style="display: flex; flex-direction: column; gap: 0.5rem">
+            ${userData.gameProgress.map(game => `
+              <div style="padding: 0.75rem; background: #f8f9fa; border-radius: 4px">
+                <div style="font-size: 0.88rem"><strong>${game.gameId.charAt(0).toUpperCase() + game.gameId.slice(1)}</strong></div>
+                <div style="font-size: 0.8rem; color: #636e72; margin-top: 0.25rem">
+                  Level ${game.level || 0} · Score: ${game.score || 0} · Accuracy: ${game.stats?.accuracy || 100}%
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
+      </div>
+    `;
+    
+    modal.classList.remove('hidden');
+  } catch (err) {
+    alert('Failed to load user details: ' + err.message);
+  }
+}
 
 tryRestoreSession();

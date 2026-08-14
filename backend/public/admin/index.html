@@ -52,6 +52,9 @@
 
           <nav class="sidebar-nav" role="tablist">
             <button type="button" class="tab active" data-tab="content">Courses &amp; videos</button>
+            <button type="button" class="tab" data-tab="subscriptions">Subscriptions</button>
+            <button type="button" class="tab" data-tab="games">Game Questions</button>
+            <button type="button" class="tab" data-tab="notifications">Notifications</button>
             <button type="button" class="tab" data-tab="overview">Overview</button>
             <button type="button" class="tab" data-tab="users">Users</button>
           </nav>
@@ -90,6 +93,312 @@
             <div id="categorySections">
               <p style="color: #636e72">Loading categories…</p>
             </div>
+          </div>
+
+          <!-- SUBSCRIPTIONS -->
+          <div id="panel-subscriptions" class="tab-panel hidden">
+            <section class="card">
+              <h2>Subscription Management</h2>
+              <p class="hint">
+                View and manage all user subscriptions, payments, and revenue.
+              </p>
+              
+              <div class="toolbar">
+                <select id="subscriptionStatusFilter">
+                  <option value="">All Status</option>
+                  <option value="active">Active</option>
+                  <option value="expired">Expired</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="pending">Pending</option>
+                </select>
+                <select id="subscriptionPaymentFilter">
+                  <option value="">All Payments</option>
+                  <option value="completed">Completed</option>
+                  <option value="pending">Pending</option>
+                  <option value="failed">Failed</option>
+                  <option value="refunded">Refunded</option>
+                </select>
+                <button type="button" id="loadSubscriptionsBtn">Refresh</button>
+              </div>
+              
+              <div id="subscriptionsStatus" class="status hidden"></div>
+            </section>
+
+            <section class="card">
+              <h3>All Subscriptions</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>Plan</th>
+                      <th>Amount</th>
+                      <th>Purchase Date</th>
+                      <th>Expiry Date</th>
+                      <th>Status</th>
+                      <th>Payment</th>
+                      <th>Transaction ID</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="subscriptionsTableBody">
+                    <tr><td colspan="9">Loading…</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="pagination">
+                <span id="subscriptionsPageInfo">Page 1</span>
+                <div class="row">
+                  <button type="button" id="prevSubscriptionsBtn" class="secondary" disabled>Previous</button>
+                  <button type="button" id="nextSubscriptionsBtn" class="secondary">Next</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- GAME QUESTIONS -->
+          <div id="panel-games" class="tab-panel hidden">
+            <section class="card">
+              <h2>Game Question Management</h2>
+              <p class="hint">
+                Create, edit, and manage questions for all games. Each game has its own question database and level system.
+              </p>
+              
+              <div class="upload-row">
+                <div class="upload-field">
+                  <label for="gameSelect">Select Game</label>
+                  <select id="gameSelect">
+                    <option value="">-- Select a game --</option>
+                    <option value="quiz">Quiz Challenge</option>
+                    <option value="scramble">Word Scramble</option>
+                    <option value="fill">Fill in the Blank</option>
+                    <option value="flash">Flash Cards</option>
+                  </select>
+                </div>
+                <div class="upload-field">
+                  <label>Current Max Level</label>
+                  <input id="currentMaxLevel" type="number" disabled placeholder="--" />
+                </div>
+                <div class="upload-field">
+                  <label>Total Questions</label>
+                  <input id="totalQuestions" type="number" disabled placeholder="--" />
+                </div>
+              </div>
+
+              <button type="button" id="loadGameQuestionsBtn" class="secondary">Load Questions</button>
+              <button type="button" id="newQuestionBtn">Add New Question</button>
+              <button type="button" id="manageLevelsBtn" class="secondary">Manage Levels</button>
+              
+              <div id="gameQuestionsStatus" class="status hidden"></div>
+            </section>
+
+            <div id="questionFormSection" class="card hidden">
+              <h3 id="questionFormTitle">Add New Question</h3>
+              <form id="questionForm">
+                <input type="hidden" id="editQuestionId" />
+                
+                <div class="upload-row">
+                  <div class="upload-field">
+                    <label for="questionLevel">Level *</label>
+                    <input id="questionLevel" type="number" min="1" required />
+                  </div>
+                  <div class="upload-field">
+                    <label for="questionDifficulty">Difficulty</label>
+                    <select id="questionDifficulty">
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </div>
+                  <div class="upload-field">
+                    <label for="questionOrder">Order</label>
+                    <input id="questionOrder" type="number" min="0" value="0" />
+                  </div>
+                </div>
+
+                <div id="quizFields" class="question-type-fields hidden">
+                  <label for="quizQuestion">Question *</label>
+                  <input id="quizQuestion" type="text" placeholder="What is the meaning of 'Eloquent'?" />
+                  
+                  <label>Options * (at least 2)</label>
+                  <input id="quizOption1" type="text" placeholder="Option 1" />
+                  <input id="quizOption2" type="text" placeholder="Option 2" />
+                  <input id="quizOption3" type="text" placeholder="Option 3" />
+                  <input id="quizOption4" type="text" placeholder="Option 4" />
+                  
+                  <label for="quizAnswer">Correct Answer (0-3) *</label>
+                  <input id="quizAnswer" type="number" min="0" max="3" />
+                  
+                  <label for="quizExplanation">Explanation (optional)</label>
+                  <textarea id="quizExplanation" rows="2" placeholder="Brief explanation of the correct answer"></textarea>
+                </div>
+
+                <div id="scrambleFields" class="question-type-fields hidden">
+                  <label for="scrambleWord">Word * (uppercase)</label>
+                  <input id="scrambleWord" type="text" placeholder="ENGLISH" style="text-transform: uppercase" />
+                  
+                  <label for="scrambleHint">Hint *</label>
+                  <input id="scrambleHint" type="text" placeholder="A world language" />
+                </div>
+
+                <div id="fillFields" class="question-type-fields hidden">
+                  <label for="fillSentence">Sentence *</label>
+                  <input id="fillSentence" type="text" placeholder="She ___ to school every day." />
+                  
+                  <label>Options * (at least 2)</label>
+                  <input id="fillOption1" type="text" placeholder="Option 1" />
+                  <input id="fillOption2" type="text" placeholder="Option 2" />
+                  <input id="fillOption3" type="text" placeholder="Option 3" />
+                  <input id="fillOption4" type="text" placeholder="Option 4" />
+                  
+                  <label for="fillAnswer">Correct Answer (0-3) *</label>
+                  <input id="fillAnswer" type="number" min="0" max="3" />
+                  
+                  <label for="fillCorrectText">Correct Text *</label>
+                  <input id="fillCorrectText" type="text" placeholder="goes" />
+                  
+                  <label for="fillRule">Grammar Rule (optional)</label>
+                  <textarea id="fillRule" rows="2" placeholder="Brief grammar rule or explanation"></textarea>
+                </div>
+
+                <div id="flashFields" class="question-type-fields hidden">
+                  <label for="flashWord">Word *</label>
+                  <input id="flashWord" type="text" placeholder="Eloquent" />
+                  
+                  <label for="flashMeaning">Meaning *</label>
+                  <input id="flashMeaning" type="text" placeholder="Well spoken, fluent" />
+                  
+                  <label for="flashExample">Example sentence *</label>
+                  <textarea id="flashExample" rows="2" placeholder="She gave an eloquent speech at the conference."></textarea>
+                </div>
+
+                <div class="row">
+                  <button type="submit" id="saveQuestionBtn">Save Question</button>
+                  <button type="button" id="cancelQuestionBtn" class="secondary">Cancel</button>
+                </div>
+              </form>
+              <div id="questionFormStatus" class="status hidden"></div>
+            </div>
+
+            <div id="levelManagementSection" class="card hidden">
+              <h3>Manage Game Levels</h3>
+              <p class="hint">Configure maximum levels and points for <span id="levelGameName">this game</span>.</p>
+              
+              <div class="upload-row">
+                <div class="upload-field">
+                  <label for="configMaxLevel">Maximum Level</label>
+                  <input id="configMaxLevel" type="number" min="1" />
+                </div>
+                <div class="upload-field">
+                  <label for="configPointsPerCorrect">Points Per Correct Answer</label>
+                  <input id="configPointsPerCorrect" type="number" min="0" value="5" />
+                </div>
+              </div>
+              
+              <label for="configDescription">Description</label>
+              <textarea id="configDescription" rows="2" placeholder="Game description"></textarea>
+              
+              <div class="row">
+                <button type="button" id="saveLevelConfigBtn">Save Configuration</button>
+                <button type="button" id="closeLevelConfigBtn" class="secondary">Close</button>
+              </div>
+              <div id="levelConfigStatus" class="status hidden"></div>
+            </div>
+
+            <section id="questionsListSection" class="card hidden">
+              <h3>Questions for <span id="questionsGameTitle">--</span></h3>
+              <div id="questionsListContainer">
+                <p style="color: #636e72">Load questions for a game above.</p>
+              </div>
+            </section>
+          </div>
+
+          <!-- NOTIFICATIONS -->
+          <div id="panel-notifications" class="tab-panel hidden">
+            <section class="card">
+              <h2>Notification Management</h2>
+              <p class="hint">
+                Create and send notifications to users. Target specific audiences and schedule for later.
+              </p>
+              
+              <button type="button" id="newNotificationBtn">Create Notification</button>
+              <button type="button" id="loadNotificationsBtn" class="secondary">Refresh List</button>
+              
+              <div id="notificationsStatus" class="status hidden"></div>
+            </section>
+
+            <div id="notificationFormSection" class="card hidden">
+              <h3 id="notificationFormTitle">Create Notification</h3>
+              <form id="notificationForm">
+                <input type="hidden" id="editNotificationId" />
+                
+                <label for="notifTitle">Title *</label>
+                <input id="notifTitle" type="text" placeholder="Welcome to Ohm's English" required />
+                
+                <label for="notifMessage">Message *</label>
+                <textarea id="notifMessage" rows="3" placeholder="Start learning English today!" required></textarea>
+                
+                <div class="upload-row">
+                  <div class="upload-field">
+                    <label for="notifType">Type</label>
+                    <select id="notifType">
+                      <option value="system">System</option>
+                      <option value="announcement">Announcement</option>
+                      <option value="feature">New Feature</option>
+                      <option value="maintenance">Maintenance</option>
+                      <option value="promotion">Promotion</option>
+                    </select>
+                  </div>
+                  <div class="upload-field">
+                    <label for="notifAudience">Target Audience</label>
+                    <select id="notifAudience">
+                      <option value="all">All Users</option>
+                      <option value="region">By Region</option>
+                      <option value="level">By Level</option>
+                      <option value="active">Active Users (7 days)</option>
+                      <option value="custom">Custom User IDs</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div id="notifRegionFields" class="hidden">
+                  <label for="notifRegions">Target Regions (comma-separated)</label>
+                  <input id="notifRegions" type="text" placeholder="India, USA, UK" />
+                </div>
+
+                <div id="notifLevelFields" class="hidden">
+                  <label for="notifLevels">Target Levels (comma-separated)</label>
+                  <input id="notifLevels" type="text" placeholder="beginner, intermediate" />
+                </div>
+
+                <div id="notifCustomFields" class="hidden">
+                  <label for="notifUserIds">User IDs (comma-separated)</label>
+                  <textarea id="notifUserIds" rows="2" placeholder="ID1, ID2, ID3"></textarea>
+                </div>
+
+                <label for="notifSchedule">Schedule for (optional, leave empty for immediate)</label>
+                <input id="notifSchedule" type="datetime-local" />
+
+                <label for="notifRoute">Deep Link Route (optional)</label>
+                <input id="notifRoute" type="text" placeholder="/random-chat" />
+
+                <button type="button" id="previewTargetsBtn" class="secondary">Preview Target Users</button>
+                <div id="previewTargetsResult" class="hidden" style="margin: 0.5rem 0; padding: 0.5rem; background: #f0f9ff; border-radius: 4px; font-size: 0.88rem"></div>
+
+                <div class="row" style="margin-top: 1rem">
+                  <button type="submit" id="saveNotificationBtn">Save & Send</button>
+                  <button type="button" id="cancelNotificationBtn" class="secondary">Cancel</button>
+                </div>
+              </form>
+              <div id="notificationFormStatus" class="status hidden"></div>
+            </div>
+
+            <section id="notificationsListSection" class="card">
+              <h3>All Notifications</h3>
+              <div id="notificationsListContainer">
+                <p style="color: #636e72">Loading notifications…</p>
+              </div>
+            </section>
           </div>
 
           <!-- OVERVIEW -->

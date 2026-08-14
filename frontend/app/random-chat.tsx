@@ -383,11 +383,16 @@ export default function RandomChatScreen() {
       });
 
       sock.on('match:found', (data: { sessionId: string; peer: ChatPeer }) => {
+        const current = sessionIdRef.current;
+        if (current && current !== data.sessionId) {
+          return;
+        }
+        const sameSession = current === data.sessionId;
         sessionIdRef.current = data.sessionId;
         setSessionId(data.sessionId);
         setPeer(data.peer);
         setStatus('chat');
-        setMessages([]);
+        if (!sameSession) setMessages([]);
       });
 
       sock.on(
@@ -476,6 +481,7 @@ export default function RandomChatScreen() {
 
       sock.on('video:call-incoming', ({ mode }: { mode?: CallMode }) => {
         if (callPhaseRef.current !== 'idle') return;
+        if (!sessionIdRef.current) return;
         const incomingMode: CallMode = mode === 'voice' ? 'voice' : 'video';
         callPhaseRef.current = 'ringing-in';
         setIncomingCall(incomingMode);

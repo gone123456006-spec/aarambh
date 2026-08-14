@@ -20,6 +20,6 @@ if ($longPaths -ne 1) {
 & (Join-Path $PSScriptRoot 'android-clean-native.ps1')
 
 Set-Location $androidDir
-# arm64-v8a only — faster, avoids armeabi-v7a CMake failures on Windows; covers all modern phones.
-.\gradlew.bat assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
+# All Expo SDK 54 ABIs: ARM phones/tablets + x86 Chromebooks/TVs/Intel devices.
+.\gradlew.bat assembleRelease "-PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64" -PnewArchEnabled=true --no-daemon
 exit $LASTEXITCODE

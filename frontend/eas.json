@@ -27,12 +27,11 @@
       "android": {
         "buildType": "app-bundle",
         "image": "latest",
-        "resourceClass": "medium"
+        "resourceClass": "large"
       },
       "env": {
         "EXPO_NO_CAPABILITY_SYNC": "1",
-        "EXPO_PUBLIC_REMOTE_API_URL": "https://aarambh-api.onrender.com",
-        "GRADLE_OPTS": "-Xmx4096m -XX:MaxMetaspaceSize=1024m"
+        "EXPO_PUBLIC_REMOTE_API_URL": "https://aarambh-api.onrender.com"
       }
     }
   },

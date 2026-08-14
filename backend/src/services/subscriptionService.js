@@ -138,6 +138,7 @@ async function activateFromRazorpayPayment(userId, { orderId, paymentId, signatu
     purchaseDate: new Date(now),
     expiryDate,
     status: 'active',
+    paymentStatus: 'completed',
     transactionId: paymentId,
     razorpayOrderId: orderId,
     razorpayPaymentId: paymentId,
@@ -150,6 +151,27 @@ async function activateFromRazorpayPayment(userId, { orderId, paymentId, signatu
   } catch (err) {
     console.error('Subscription notification failed:', err.message || err);
   }
+
+  // Send confirmation email asynchronously (don't block subscription activation)
+  (async () => {
+    try {
+      const User = require('../models/User');
+      const emailService = require('./emailService');
+      
+      const user = await User.findById(userId).select('name email phone').lean();
+      if (!user) return;
+      
+      const result = await emailService.sendSubscriptionConfirmationEmail(user, subscription);
+      
+      if (result.sent) {
+        subscription.emailSent = true;
+        subscription.emailSentAt = new Date();
+        await subscription.save();
+      }
+    } catch (emailErr) {
+      console.error('Subscription confirmation email failed:', emailErr.message || emailErr);
+    }
+  })();
 
   return subscription;
 }

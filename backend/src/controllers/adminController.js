@@ -102,12 +102,15 @@ function formatUserRow(doc) {
 }
 
 /**
- * Get aggregated dashboard statistics
+ * Get aggregated dashboard statistics including subscriptions and revenue
  */
 const getDashboardStats = asyncHandler(async (req, res) => {
   const now = new Date();
   const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
   const last7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const last30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const Subscription = require('../models/Subscription');
 
   const [
     totalUsers,
@@ -118,6 +121,10 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     newUsersThisWeek,
     totalCourses,
     activeChatSessions,
+    activeSubscriptions,
+    expiredSubscriptions,
+    totalSubscriptions,
+    recentSubscriptions,
   ] = await Promise.all([
     User.countDocuments(USER_ROLE_QUERY),
     User.countDocuments({ ...USER_ROLE_QUERY, isOnline: true }),
@@ -127,7 +134,47 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     User.countDocuments({ ...USER_ROLE_QUERY, createdAt: { $gte: last7d } }),
     Course.countDocuments({}),
     ChatSession.countDocuments({ status: 'active' }),
+    Subscription.countDocuments({ status: 'active', expiryDate: { $gt: now } }),
+    Subscription.countDocuments({ status: 'expired' }),
+    Subscription.countDocuments({}),
+    Subscription.countDocuments({ purchaseDate: { $gte: last30d }, paymentStatus: 'completed' }),
   ]);
+
+  // Calculate revenue
+  const revenueStats = await Subscription.aggregate([
+    { $match: { paymentStatus: 'completed' } },
+    {
+      $group: {
+        _id: null,
+        totalRevenue: { $sum: '$price' },
+        completedPayments: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const revenueThisMonth = await Subscription.aggregate([
+    { 
+      $match: { 
+        paymentStatus: 'completed',
+        purchaseDate: { $gte: last30d },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        revenue: { $sum: '$price' },
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  // Active learners (users with course progress)
+  const activeLearners = await CourseProgress.countDocuments({
+    updatedAt: { $gte: last7d },
+  });
+
+  // Enrolled courses count (users with any course progress)
+  const enrolledCourses = await CourseProgress.countDocuments({});
 
   res.status(200).json(
     new ApiResponse(
@@ -141,8 +188,19 @@ const getDashboardStats = asyncHandler(async (req, res) => {
         newUsersThisWeek,
         totalCourses,
         activeChatSessions,
-        // legacy alias
         activeUsers: onlineUsers,
+        // Subscription stats
+        activeSubscriptions,
+        expiredSubscriptions,
+        totalSubscriptions,
+        recentSubscriptions,
+        totalRevenue: revenueStats[0]?.totalRevenue || 0,
+        revenueThisMonth: revenueThisMonth[0]?.revenue || 0,
+        revenueTransactions: revenueStats[0]?.completedPayments || 0,
+        revenueTransactionsThisMonth: revenueThisMonth[0]?.count || 0,
+        // Learning stats
+        activeLearners,
+        enrolledCourses,
       },
       'Dashboard stats retrieved successfully'
     )
@@ -202,7 +260,7 @@ const getUsers = asyncHandler(async (req, res) => {
 });
 
 /**
- * Single user detail + learning progress
+ * Single user detail + learning progress + subscription + courses
  */
 const getUserById = asyncHandler(async (req, res) => {
   const user = await User.findOne({ _id: req.params.id, role: 'user' });
@@ -211,18 +269,47 @@ const getUserById = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'User not found');
   }
 
-  const [courseProgress, gameProgress] = await Promise.all([
+  const Subscription = require('../models/Subscription');
+  const subscriptionService = require('../services/subscriptionService');
+
+  const [courseProgress, gameProgress, subscriptions, subscriptionSummary] = await Promise.all([
     CourseProgress.findOne({ user: user._id }).lean(),
     GameProgress.find({ user: user._id }).select('gameId level score completed stats').lean(),
+    Subscription.find({ user: user._id }).sort({ createdAt: -1 }).lean(),
+    subscriptionService.getSubscriptionSummary(user._id),
   ]);
+
+  // Calculate course completion stats
+  const courses = await Course.find({}).select('title level lessons').lean();
+  const completedLessons = courseProgress?.completedLessons || [];
+  const totalLessons = courses.reduce((sum, c) => sum + (c.lessons?.length || 0), 0);
+  const completionPercentage = totalLessons > 0 
+    ? Math.round((completedLessons.length / totalLessons) * 100)
+    : 0;
 
   res.status(200).json(
     new ApiResponse(
       200,
       {
         user: formatUserRow(user),
-        courseProgress: courseProgress || { completedLessons: [], lastLessonId: null },
+        courseProgress: {
+          ...(courseProgress || {}),
+          completedLessons: completedLessons || [],
+          lastLessonId: courseProgress?.lastLessonId || null,
+          totalLessons,
+          completionPercentage,
+        },
         gameProgress,
+        subscriptions,
+        subscriptionSummary,
+        courses: courses.map(c => ({
+          title: c.title,
+          level: c.level,
+          totalLessons: c.lessons?.length || 0,
+          completedInCourse: completedLessons.filter(lid => 
+            c.lessons?.some(l => l.lessonKey === lid)
+          ).length,
+        })),
       },
       'User details retrieved successfully'
     )
@@ -629,6 +716,92 @@ const getAnalytics = asyncHandler(async (req, res) => {
   );
 });
 
+/**
+ * Get all subscriptions with pagination and filters
+ */
+const getSubscriptions = asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page || '1', 10);
+  const limit = Math.min(parseInt(req.query.limit || '20', 10), 100);
+  const skip = (page - 1) * limit;
+  const status = req.query.status;
+  const paymentStatus = req.query.paymentStatus;
+
+  const Subscription = require('../models/Subscription');
+
+  const query = {};
+  if (status) query.status = status;
+  if (paymentStatus) query.paymentStatus = paymentStatus;
+
+  const [subscriptions, total] = await Promise.all([
+    Subscription.find(query)
+      .populate('user', 'name email phone region level avatar')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Subscription.countDocuments(query),
+  ]);
+
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        subscriptions,
+        pagination: {
+          total,
+          page,
+          limit,
+          pages: Math.ceil(total / limit) || 1,
+        },
+      },
+      'Subscriptions retrieved successfully'
+    )
+  );
+});
+
+/**
+ * Get subscription by ID
+ */
+const getSubscriptionById = asyncHandler(async (req, res) => {
+  const Subscription = require('../models/Subscription');
+  
+  const subscription = await Subscription.findById(req.params.id)
+    .populate('user', 'name email phone region level avatar')
+    .lean();
+
+  if (!subscription) {
+    throw new ApiError(404, 'Subscription not found');
+  }
+
+  res.status(200).json(
+    new ApiResponse(200, subscription, 'Subscription retrieved successfully')
+  );
+});
+
+/**
+ * Update subscription status (for manual admin actions)
+ */
+const updateSubscriptionStatus = asyncHandler(async (req, res) => {
+  const { status } = req.body;
+  const Subscription = require('../models/Subscription');
+
+  const subscription = await Subscription.findById(req.params.id);
+
+  if (!subscription) {
+    throw new ApiError(404, 'Subscription not found');
+  }
+
+  if (status !== undefined) {
+    subscription.status = status;
+  }
+
+  await subscription.save();
+
+  res.status(200).json(
+    new ApiResponse(200, subscription, 'Subscription updated successfully')
+  );
+});
+
 module.exports = {
   adminLogin,
   getDashboardStats,
@@ -646,4 +819,7 @@ module.exports = {
   uploadVideo,
   uploadPdf,
   getAnalytics,
+  getSubscriptions,
+  getSubscriptionById,
+  updateSubscriptionStatus,
 };

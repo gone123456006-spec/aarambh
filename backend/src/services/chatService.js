@@ -1,5 +1,6 @@
 const ChatSession = require('../models/ChatSession');
 const User = require('../models/User');
+const connectionState = require('./connectionStateService');
 
 const LEVEL_LABELS = {
   starting: 'Starting',
@@ -52,14 +53,17 @@ const getSocketIdByUserId = (userId) => {
  * Add a user to the matching waiting pool
  */
 const addToWaitingPool = async (userId, socketId) => {
+  if (await connectionState.isBusyAsync(userId)) return false;
+
   const user = await User.findById(userId).select('name region gender level avatar');
-  if (!user) return;
+  if (!user) return false;
 
   waitingPool.set(userId.toString(), {
     socketId,
     userId: userId.toString(),
     ...toPeerProfile(user),
   });
+  return true;
 };
 
 /**
@@ -83,13 +87,15 @@ const removeFromWaitingPool = (userId) => {
  */
 const findRandomMatch = (userId) => {
   const myIdStr = userId.toString();
-  const candidates = Array.from(waitingPool.keys()).filter(id => id !== myIdStr);
+  const candidates = Array.from(waitingPool.keys()).filter((id) => {
+    if (id === myIdStr) return false;
+    return !connectionState.isBusy(id);
+  });
 
   if (candidates.length === 0) {
     return null;
   }
 
-  // Pick a random candidates index
   const randomIdx = Math.floor(Math.random() * candidates.length);
   const matchUserId = candidates[randomIdx];
 
@@ -101,16 +107,17 @@ const findRandomMatch = (userId) => {
  * Start a database session for two matched users
  */
 const createSession = async (user1Id, user2Id) => {
-  // End any previously active sessions for both users to prevent duplicate/multi-sessions
-  await ChatSession.updateMany(
-    {
-      participants: { $in: [user1Id, user2Id] },
-      status: 'active',
-    },
-    {
-      $set: { status: 'ended', endedAt: new Date() },
-    }
-  );
+  const existing = await ChatSession.findOne({
+    participants: { $in: [user1Id, user2Id] },
+    status: 'active',
+  });
+
+  if (existing) {
+    const samePair = existing.hasParticipant(user1Id) && existing.hasParticipant(user2Id);
+    // Never steal a user who is already in a live session with someone else.
+    if (!samePair) return null;
+    return existing;
+  }
 
   const newSession = new ChatSession({
     participants: [user1Id, user2Id],

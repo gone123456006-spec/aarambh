@@ -11,18 +11,15 @@ import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-  QUIZ_QUESTIONS,
-  WORD_SCRAMBLES,
-  FILL_BLANKS,
-  FLASHCARDS,
-  QUIZ_LEVEL_COUNT,
-  SCRAMBLE_LEVEL_COUNT,
-  FILL_BLANK_LEVEL_COUNT,
-  FLASHCARD_LEVEL_COUNT,
   POINTS_PER_CORRECT_LEVEL,
   getQuizExplanation,
   shortExplanation,
+  type QuizQuestion,
+  type WordScramble,
+  type FillBlank,
+  type Flashcard,
 } from '@/constants/gameData';
+import { useGameQuestions, useGameLevelConfig } from '@/hooks/use-game-questions';
 import { getTotalGameScore, setTotalGameScore } from '@/utils/gameStats';
 import { useFocusEffect } from 'expo-router';
 import { useGameProgress } from '@/hooks/use-game-progress';

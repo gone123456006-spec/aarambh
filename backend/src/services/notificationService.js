@@ -2,6 +2,7 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const Course = require('../models/Course');
 const CourseProgress = require('../models/CourseProgress');
+const connectionState = require('./connectionStateService');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const FALLBACK_PLAN_PRICE = 249;
@@ -49,12 +50,21 @@ function pick(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+const REQUEST_NOTIFICATION_TYPES = new Set(['chat', 'call']);
+
 /**
  * Create a notification. If `key` is set and already exists for this user, skip.
+ * Incoming chat/call request notifications are not created while the user is busy
+ * in an active chat, voice, or video session (`allowWhenBusy` opts out).
  */
 async function createNotification(userId, title, message, type = 'system', options = {}) {
   try {
-    const { key = null, data = null } = options;
+    const { key = null, data = null, allowWhenBusy = false } = options;
+
+    const isRequest = REQUEST_NOTIFICATION_TYPES.has(type);
+    if (isRequest && !allowWhenBusy && (await connectionState.isBusyAsync(userId))) {
+      return null;
+    }
 
     if (key) {
       const existing = await Notification.findOne({ user: userId, key }).select('_id').lean();

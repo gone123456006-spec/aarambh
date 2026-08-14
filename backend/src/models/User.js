@@ -65,6 +65,26 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    /**
+     * Live practice availability. Busy users must not receive new
+     * chat / voice / video requests until the session ends.
+     */
+    connectionState: {
+      type: String,
+      enum: ['available', 'chat_connected', 'voice_connected', 'video_connected'],
+      default: 'available',
+      index: true,
+    },
+    connectionSessionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ChatSession',
+      default: null,
+    },
+    connectedWith: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
     /** Single-device login: only this device ID may hold an active session. */
     activeDeviceId: {
       type: String,

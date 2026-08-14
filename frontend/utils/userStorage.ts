@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { AUTH_KEYS } from '@/utils/authStorage';
+import { AUTH_KEYS } from '@/utils/authKeys';
 
 /** Local cache keys that must never be shared across accounts on the same device. */
 const USER_DATA_BASE_KEYS = [

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Ohm's",
     "slug": "ohms",
-    "version": "1.0.3",
+    "version": "1.0.9",
     "orientation": "default",
     "icon": "./assets/images/ohms-icon.png",
     "scheme": "ohms",
@@ -27,8 +27,9 @@
     },
     "android": {
       "package": "com.ohms.english",
-      "versionCode": 4,
+      "versionCode": 10,
       "softwareKeyboardLayoutMode": "resize",
+      "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#e60000",
         "foregroundImage": "./assets/images/ohms-adaptive-foreground.png"
@@ -70,14 +71,15 @@
         "expo-build-properties",
         {
           "android": {
+            "newArchEnabled": true,
             "usesCleartextTraffic": false,
             "windowSoftInputMode": "adjustResize",
-            "compileSdkVersion": 35,
-            "targetSdkVersion": 35,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
             "minSdkVersion": 24,
             "buildArchs": [
-              "arm64-v8a",
               "armeabi-v7a",
+              "arm64-v8a",
               "x86",
               "x86_64"
             ]
