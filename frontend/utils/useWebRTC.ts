@@ -8,7 +8,7 @@ import {
 import type { CallMode } from './mediaPermissions';
 import { getWebRTC } from './webrtcNative';
 import { getIceServers } from './webrtcConfig';
-import { setCallAudioMode, configureRemoteAudio } from './audioRouting';
+import { setCallAudioMode, setCallSpeakerOn, configureRemoteAudio } from './audioRouting';
 
 type MediaStreamLike = {
   getTracks: () => Array<{ stop: () => void }>;
@@ -106,6 +106,7 @@ export function useWebRTC(
   const remoteStreamRef = useRef<MediaStreamLike | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const remoteDescriptionSetRef = useRef(false);
+  const speakerOnRef = useRef(false);
   const onConnectionFailedRef = useRef(onConnectionFailed);
 
   useEffect(() => {
@@ -127,6 +128,11 @@ export function useWebRTC(
         console.warn('ICE candidate flush failed', e);
       }
     }
+  }, []);
+
+  const applySpeaker = useCallback(async (speakerOn: boolean) => {
+    speakerOnRef.current = speakerOn;
+    await setCallSpeakerOn(speakerOn);
   }, []);
 
   const handleConnectionFailed = useCallback(() => {
@@ -186,8 +192,9 @@ export function useWebRTC(
       try {
         tearDownPeerConnection();
 
-        // Configure audio routing for speaker output (loud, clear audio)
+        // Configure in-call audio. Video uses loudspeaker; voice uses earpiece.
         await setCallAudioMode(mode, true);
+        await setCallSpeakerOn(speakerOnRef.current);
 
         const stream = localStreamRef.current ?? (await getMedia(mode));
         if (!stream) return false;
@@ -199,6 +206,7 @@ export function useWebRTC(
           (remote) => {
             remoteStreamRef.current = remote;
             setRemoteStream(remote);
+            void setCallSpeakerOn(speakerOnRef.current);
           },
           handleConnectionFailed
         );
@@ -228,8 +236,9 @@ export function useWebRTC(
         const webrtc = getWebRTC()!;
         tearDownPeerConnection();
 
-        // Configure audio routing for speaker output (loud, clear audio)
+        // Configure in-call audio. Video uses loudspeaker; voice uses earpiece.
         await setCallAudioMode(mode, true);
+        await setCallSpeakerOn(speakerOnRef.current);
 
         let stream = localStreamRef.current;
         if (!stream) {
@@ -244,6 +253,7 @@ export function useWebRTC(
           (remote) => {
             remoteStreamRef.current = remote;
             setRemoteStream(remote);
+            void setCallSpeakerOn(speakerOnRef.current);
           },
           handleConnectionFailed
         );
@@ -316,6 +326,7 @@ export function useWebRTC(
     }
 
     // Reset audio routing to default when call ends
+    speakerOnRef.current = false;
     setCallAudioMode('video', false).catch((err) => {
       console.warn('Failed to reset audio mode:', err);
     });
@@ -345,6 +356,10 @@ export function useWebRTC(
     }
   }, []);
 
+  const setSpeakerEnabled = useCallback(async (speakerOn: boolean) => {
+    await applySpeaker(speakerOn);
+  }, [applySpeaker]);
+
   return {
     localStream,
     remoteStream,
@@ -356,5 +371,6 @@ export function useWebRTC(
     endCall,
     toggleMic,
     toggleCamera,
+    setSpeakerEnabled,
   };
 }

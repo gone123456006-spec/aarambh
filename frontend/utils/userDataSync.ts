@@ -29,6 +29,7 @@ type CourseProgressDoc = {
 type GameProgressEntry = {
   level?: number;
   score?: number;
+  completed?: boolean;
   stats?: {
     correctAnswers?: number;
     totalAttempts?: number;
@@ -78,7 +79,7 @@ export async function syncUserDataFromServer(): Promise<void> {
   const localTotalScore = localTotalRaw ? parseInt(localTotalRaw, 10) || 0 : 0;
   const finalTotalScore = Math.max(totalScore, localTotalScore);
 
-  const gameProgress: Partial<Record<GameId, { level: number; score: number }>> = {};
+  const gameProgress: Partial<Record<GameId, { level: number; score: number; completed: boolean }>> = {};
   const gameStats: Partial<
     Record<GameId, { correct: number; incorrect: number; points: number }>
   > = {};
@@ -88,6 +89,7 @@ export async function syncUserDataFromServer(): Promise<void> {
     gameProgress[id] = {
       level: g?.level ?? 0,
       score: g?.score ?? 0,
+      completed: Boolean(g?.completed),
     };
     const correct = g?.stats?.correctAnswers ?? 0;
     const attempts = g?.stats?.totalAttempts ?? 0;

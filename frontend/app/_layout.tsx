@@ -21,6 +21,7 @@ import { startApiKeepAlive } from '@/utils/checkApiHealth';
 import { initWebRTC } from '@/utils/webrtcNative';
 import AppUpdatePrompt from '@/components/AppUpdatePrompt';
 import { startPersistentSessionMaintenance } from '@/utils/persistentSession';
+import { NotificationProvider } from '@/contexts/NotificationContext';
 
 enableScreens(true);
 initWebRTC();
@@ -51,7 +52,8 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
         <KeyboardProvider preload={false}>
-          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <NotificationProvider>
+            <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
             <Stack screenOptions={stackScreenOptions}>
             <Stack.Screen name="index" options={{ headerShown: false }} />
             <Stack.Screen name="intro" options={stackFadeScreen} />
@@ -66,6 +68,7 @@ export default function RootLayout() {
             <Stack.Screen name="contact-us" options={stackSlideScreen} />
             <Stack.Screen name="terms" options={stackSlideScreen} />
             <Stack.Screen name="privacy" options={stackSlideScreen} />
+            <Stack.Screen name="settings" options={stackSlideScreen} />
             <Stack.Screen
               name="modal"
               options={{
@@ -77,6 +80,7 @@ export default function RootLayout() {
           <AppUpdatePrompt />
           <StatusBar style="auto" />
         </ThemeProvider>
+          </NotificationProvider>
       </KeyboardProvider>
     </GestureHandlerRootView>
     </SafeAreaProvider>

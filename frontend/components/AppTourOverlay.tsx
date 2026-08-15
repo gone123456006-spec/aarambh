@@ -111,9 +111,9 @@ const TOUR_STEPS: TourStep[] = [
   {
     key: 'pro',
     image: Icons3D.crown,
-    title: 'Pro subscription',
+    title: 'Course subscriptions',
     description:
-      'Upgrade to Pro (\u20B9249/month) to unlock Intermediate and Advanced course levels.',
+      'Paid categories can be unlocked from Profile or My Courses. A coupon is optional at checkout.',
   },
 ];
 

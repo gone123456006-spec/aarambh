@@ -55,6 +55,7 @@ import { WebRTCVideo } from '@/components/WebRTCVideo';
 import { requestCallPermissions, type CallMode } from '@/utils/mediaPermissions';
 import { isWebRTCAvailable, WEBRTC_REBUILD_HINT } from '@/utils/webrtcNative';
 import { OUTGOING_CALL_TIMEOUT_MS } from '@/utils/webrtcConfig';
+import { defaultCallSpeakerOn } from '@/utils/audioRouting';
 
 const UI = AppUI;
 /** WhatsApp-style chat chrome */
@@ -115,6 +116,7 @@ export default function RandomChatScreen() {
   const [outgoingCallPending, setOutgoingCallPending] = useState(false);
   const [isMicMuted, setIsMicMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
+  const [isSpeakerOn, setIsSpeakerOn] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -158,6 +160,7 @@ export default function RandomChatScreen() {
     endCall,
     toggleMic,
     toggleCamera,
+    setSpeakerEnabled,
   } = useWebRTC(getChatSocket(), sessionId, () => onConnectionFailedRef.current());
 
   const webrtcRef = useRef({
@@ -189,6 +192,7 @@ export default function RandomChatScreen() {
     setOutgoingCallPending(false);
     setIsMicMuted(false);
     setIsCameraOff(false);
+    setIsSpeakerOn(false);
     webrtcRef.current.endCall();
   }, [clearOutgoingCallTimeout]);
 
@@ -575,9 +579,12 @@ export default function RandomChatScreen() {
     callPhaseRef.current = 'accepted';
     setIncomingCall(null);
     setCallMode(mode);
+    const speakerOn = defaultCallSpeakerOn(mode);
+    setIsSpeakerOn(speakerOn);
+    void setSpeakerEnabled(speakerOn);
     setIsVideoCallActive(true);
     acceptVideoCall(sock, sid, mode);
-  }, [incomingCall, declineIncomingCall]);
+  }, [incomingCall, declineIncomingCall, setSpeakerEnabled]);
 
   const initiateCall = useCallback(
     async (mode: CallMode) => {
@@ -596,6 +603,9 @@ export default function RandomChatScreen() {
 
       callPhaseRef.current = 'ringing-out';
       setCallMode(mode);
+      const speakerOn = defaultCallSpeakerOn(mode);
+      setIsSpeakerOn(speakerOn);
+      void setSpeakerEnabled(speakerOn);
       setOutgoingCallPending(true);
       await webrtcRef.current.prepareLocalMedia(mode);
       startVideoCall(sock, sid, mode);
@@ -611,7 +621,7 @@ export default function RandomChatScreen() {
         Alert.alert('No answer', 'Your partner did not answer the call.');
       }, OUTGOING_CALL_TIMEOUT_MS);
     },
-    [outgoingCallPending, isVideoCallActive, incomingCall, clearOutgoingCallTimeout, resetCallState]
+    [outgoingCallPending, isVideoCallActive, incomingCall, clearOutgoingCallTimeout, resetCallState, setSpeakerEnabled]
   );
 
   // Call in English: after matching, start a voice call automatically (same conversation screen).
@@ -1230,6 +1240,22 @@ export default function RandomChatScreen() {
         accessibilityLabel={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
       >
         <Feather name={isMicMuted ? 'mic-off' : 'mic'} size={22} color="white" />
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.controlBtn, isSpeakerOn && styles.controlBtnSpeakerOn]}
+        onPress={() => {
+          const next = !isSpeakerOn;
+          setIsSpeakerOn(next);
+          void setSpeakerEnabled(next);
+        }}
+        accessibilityLabel={isSpeakerOn ? 'Turn off speaker' : 'Turn on speaker'}
+      >
+        <Ionicons
+          name={isSpeakerOn ? 'volume-high' : 'volume-medium'}
+          size={24}
+          color={isSpeakerOn ? '#111111' : 'white'}
+        />
       </TouchableOpacity>
 
       {callMode === 'video' ? (
@@ -2188,6 +2214,9 @@ const styles = StyleSheet.create({
   },
   controlBtnMuted: {
     backgroundColor: 'rgba(255,255,255,0.45)',
+  },
+  controlBtnSpeakerOn: {
+    backgroundColor: '#FFFFFF',
   },
   controlBtnEnd: {
     backgroundColor: '#ff3b30',

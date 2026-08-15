@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "968840225921",
+    "project_id": "ohms-english-learning",
+    "storage_bucket": "ohms-english-learning.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:968840225921:android:9e4c9a4322df6bb580d980",
+        "android_client_info": {
+          "package_name": "com.ohms.english"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAztwbrHVntehyT6XbzF0w9-tqRQ4ttr1A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

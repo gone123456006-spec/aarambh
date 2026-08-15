@@ -87,6 +87,15 @@ export default function LoginScreen() {
         },
       });
 
+      // Check if account deletion was cancelled
+      if (data.deletionCancelled) {
+        Alert.alert(
+          'Welcome Back!',
+          'Your account deletion request has been cancelled. Your account is now active again.',
+          [{ text: 'OK' }]
+        );
+      }
+
       if (data.isNewUser) {
         await queueAppTourForNewUser();
       }

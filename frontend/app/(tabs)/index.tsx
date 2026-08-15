@@ -30,6 +30,7 @@ import { useResponsiveLayout } from '@/hooks/use-responsive-layout';
 import { APP_INFO, phoneTelUri } from '@/constants/appInfo';
 import { AppUI, cardShadow } from '@/constants/theme';
 import { fetchUnreadCount } from '@/utils/notificationApi';
+import { apiFetch } from '@/utils/api';
 
 import { Icons3D } from '@/constants/homeIcons';
 
@@ -39,8 +40,8 @@ const BANNER_44_IMAGE = require('../../assets/images/iagme banner 44 .png');
 const BANNER_RANDOM_CHAT_IMAGE = require('../../assets/images/Banner Iamge 1 .jpeg');
 
 type HomeBanner = {
-  id: number;
-  image: number;
+  id: number | string;
+  image: number | { uri: string };
   route?: '/courses';
 };
 
@@ -126,14 +127,47 @@ export default function HomeScreen() {
   const [userAvatar, setUserAvatar] = useState('');
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [showAppTour, setShowAppTour] = useState(false);
+  const [heroImageUrl, setHeroImageUrl] = useState<string | null>(null);
+  const [heroFailed, setHeroFailed] = useState(false);
   const tourCheckedRef = useRef(false);
   const router = useRouter();
   const scrollViewRef = useRef<ScrollView>(null);
 
+  const displayBanners: HomeBanner[] =
+    heroImageUrl && !heroFailed
+      ? [{ id: 'admin-hero', image: { uri: heroImageUrl } }]
+      : BANNERS;
+
+  const loadHomeHero = useCallback(async () => {
+    try {
+      const res = await apiFetch<{ data?: { imageUrl?: string | null; updatedAt?: string | null } }>(
+        '/api/app/home-hero',
+        {},
+        false
+      );
+      const url = res.data?.imageUrl?.trim() || null;
+      if (!url) {
+        setHeroFailed(false);
+        setHeroImageUrl((prev) => (prev ? null : prev));
+        setActiveBannerIndex(0);
+        return;
+      }
+      const stamp = res.data?.updatedAt ? new Date(res.data.updatedAt).getTime() : Date.now();
+      const joiner = url.includes('?') ? '&' : '?';
+      const next = `${url}${joiner}t=${stamp}`;
+      setHeroFailed(false);
+      setHeroImageUrl((prev) => (prev === next ? prev : next));
+    } catch {
+      /* keep last hero / default banners */
+    }
+  }, []);
+
   useEffect(() => {
+    const count = displayBanners.length;
+    if (count <= 1) return;
     const interval = setInterval(() => {
       let nextIndex = activeBannerIndex + 1;
-      if (nextIndex >= BANNERS.length) {
+      if (nextIndex >= count) {
         nextIndex = 0;
       }
       scrollViewRef.current?.scrollTo({
@@ -144,7 +178,7 @@ export default function HomeScreen() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [activeBannerIndex, bannerLayout.slideWidth]);
+  }, [activeBannerIndex, bannerLayout.slideWidth, displayBanners.length]);
 
   const loadUserHeader = useCallback(async () => {
     try {
@@ -183,6 +217,10 @@ export default function HomeScreen() {
     useCallback(() => {
       loadUserHeader();
       void refreshNotificationBadge();
+      void loadHomeHero();
+      const interval = setInterval(() => {
+        void loadHomeHero();
+      }, 20000);
 
       // First-login app overview — checked once per session, shown once per user.
       if (!tourCheckedRef.current) {
@@ -193,7 +231,9 @@ export default function HomeScreen() {
           }
         });
       }
-    }, [loadUserHeader, refreshNotificationBadge])
+
+      return () => clearInterval(interval);
+    }, [loadUserHeader, refreshNotificationBadge, loadHomeHero])
   );
 
   const headerPillLabel = /^\d+$/.test(userLevel)
@@ -311,7 +351,7 @@ export default function HomeScreen() {
                 setActiveBannerIndex(index);
               }}
             >
-              {BANNERS.map((banner) => {
+              {displayBanners.map((banner) => {
                 const cardBody = (
                   <View
                     style={[
@@ -330,6 +370,9 @@ export default function HomeScreen() {
                         { height: bannerLayout.gradientHeight },
                       ]}
                       resizeMode="cover"
+                      onError={() => {
+                        if (banner.id === 'admin-hero') setHeroFailed(true);
+                      }}
                     />
                   </View>
                 );
@@ -359,11 +402,15 @@ export default function HomeScreen() {
             </ScrollView>
 
             {/* Pagination Dots */}
+            {displayBanners.length > 1 ? (
             <View style={styles.pagination}>
-              {BANNERS.map((_, index) => (
-                <View key={index} style={[styles.dot, activeBannerIndex === index && styles.activeDot]} />
+              {displayBanners.map((banner, index) => (
+                <View key={banner.id} style={[styles.dot, activeBannerIndex === index && styles.activeDot]} />
               ))}
             </View>
+            ) : (
+              <View style={{ height: 16 }} />
+            )}
           </View>
 
           {/* Greeting — plain text, no card */}

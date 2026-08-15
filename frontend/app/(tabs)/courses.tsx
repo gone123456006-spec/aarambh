@@ -5,27 +5,31 @@ import {
   TextInput, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
 import { useGameTabBar } from '@/contexts/game-tab-bar-context';
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   POINTS_PER_CORRECT_LEVEL,
+  QUIZ_LEVEL_COUNT,
+  SCRAMBLE_LEVEL_COUNT,
+  FILL_BLANK_LEVEL_COUNT,
+  FLASHCARD_LEVEL_COUNT,
+  QUIZ_QUESTIONS,
+  WORD_SCRAMBLES,
+  FILL_BLANKS,
+  FLASHCARDS,
   getQuizExplanation,
   shortExplanation,
-  type QuizQuestion,
-  type WordScramble,
-  type FillBlank,
-  type Flashcard,
 } from '@/constants/gameData';
-import { useGameQuestions, useGameLevelConfig } from '@/hooks/use-game-questions';
 import { getTotalGameScore, setTotalGameScore } from '@/utils/gameStats';
 import { useFocusEffect } from 'expo-router';
 import { useGameProgress } from '@/hooks/use-game-progress';
-import { GameId, loadAllGameProgress, GameProgress } from '@/utils/gameProgress';
+import { GameId, loadAllGameProgress, GameProgress, isGameCatalogComplete } from '@/utils/gameProgress';
 import { recordGameAnswer } from '@/utils/gameStats';
 import { Icons3D } from '@/constants/homeIcons';
+import { TAB_BAR_CONTENT_HEIGHT } from '@/constants/navigationTransitions';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CONTENT_H_PADDING = 20;
@@ -172,7 +176,7 @@ function GamesHeader({
     return (
       <View style={ui.navBar}>
         <TouchableOpacity onPress={onBack} style={ui.backBtn} activeOpacity={0.65} hitSlop={12}>
-          <Feather name="arrow-left" size={24} color={UI.text} strokeWidth={3} />
+            <Feather name="arrow-left" size={24} color={UI.text} />
         </TouchableOpacity>
         <Text style={ui.navTitle} numberOfLines={1}>
           {title}
@@ -263,13 +267,15 @@ function ScoreBoard({ points }: { points: number }) {
 function GameCard({
   game,
   savedLevel,
+  catalogComplete,
   onPress,
 }: {
   game: (typeof GAMES)[0];
   savedLevel: number;
+  catalogComplete: boolean;
   onPress: () => void;
 }) {
-  const hasProgress = savedLevel > 0;
+  const hasProgress = savedLevel > 0 && !catalogComplete;
   return (
     <TouchableOpacity
       style={[ui.gameCard, cardShadow, { width: GAME_CARD_WIDTH }]}
@@ -283,11 +289,15 @@ function GameCard({
           contentFit="contain"
           transition={200}
         />
-        {hasProgress && (
+        {catalogComplete ? (
+          <View style={[ui.gameCardBadge, { backgroundColor: '#00b894' }]}>
+            <Text style={ui.gameCardBadgeText}>Done</Text>
+          </View>
+        ) : hasProgress ? (
           <View style={[ui.gameCardBadge, { backgroundColor: game.color }]}>
             <Text style={ui.gameCardBadgeText}>Lv {savedLevel + 1}</Text>
           </View>
-        )}
+        ) : null}
       </View>
       <View style={ui.gameCardBody}>
         <Text style={ui.gameCardTitle} numberOfLines={2}>
@@ -296,11 +306,11 @@ function GameCard({
         <Text style={ui.gameCardDesc} numberOfLines={2}>
           {game.desc}
         </Text>
-        <View style={[ui.gameCardCta, { backgroundColor: game.color }]}>
+        <View style={[ui.gameCardCta, { backgroundColor: catalogComplete ? '#00b894' : game.color }]}>
           <Text style={ui.gameCardCtaText}>
-            {hasProgress ? 'Continue' : 'Play'}
+            {catalogComplete ? 'Completed' : hasProgress ? 'Continue' : 'Play'}
           </Text>
-          <Feather name="arrow-right" size={14} color="#fff" />
+          <Feather name={catalogComplete ? 'check' : 'arrow-right'} size={14} color="#fff" />
         </View>
       </View>
     </TouchableOpacity>
@@ -316,11 +326,29 @@ function GameLoading({ color }: { color: string }) {
   );
 }
 
-function scoreEmoji(score: number, total: number) {
-  const pct = score / total;
-  if (pct >= 0.8) return '🎉';
-  if (pct >= 0.5) return '👍';
-  return '😅';
+const ALL_LEVELS_DONE_MESSAGE =
+  "You've completed all available levels! New levels will be available in a future update.";
+
+function AllLevelsCompleteView({
+  scoreLine,
+  onClose,
+}: {
+  scoreLine?: string;
+  onClose: () => void;
+}) {
+  return (
+    <View style={gs.mcqGameContainer}>
+      <View style={gs.doneBox}>
+        <Text style={gs.doneEmoji}>🏆</Text>
+        <Text style={gs.doneTitle}>All Levels Completed</Text>
+        <Text style={gs.doneMessage}>{ALL_LEVELS_DONE_MESSAGE}</Text>
+        {scoreLine ? <Text style={gs.doneScore}>{scoreLine}</Text> : null}
+        <TouchableOpacity style={gs.mcqDoneBtn} onPress={onClose} activeOpacity={0.85}>
+          <Text style={gs.doneBtnText}>Back to Games</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 }
 
 function WrongAnswerHint({ correctText, explanation }: { correctText: string; explanation: string }) {
@@ -701,29 +729,33 @@ function QuizGame({
   onScore: (n: number) => void;
   onHeaderMeta?: (meta: GameHeaderMeta | null) => void;
 }) {
-  const { idx, setIdx, score, setScore, ready, completeGame } = useGameProgress('quiz', QUIZ_QUESTIONS.length);
+  const { idx, setIdx, score, setScore, ready, allComplete, finishCatalog } = useGameProgress('quiz', QUIZ_QUESTIONS.length);
   const [selected, setSelected] = useState<number | null>(null);
   const [done, setDone] = useState(false);
 
-  const finishAndClose = async () => {
-    await completeGame();
-    onClose();
-  };
-
   const q = QUIZ_QUESTIONS[idx];
   const shuffled = React.useMemo(
-    () => shuffleOptions(q.options, q.answer),
-    [idx, q.options, q.answer],
+    () => (q ? shuffleOptions(q.options, q.answer) : { options: [], correctIndex: 0 }),
+    [idx, q],
   );
 
   useSyncGameHeader(
     onHeaderMeta,
-    ready && !done
+    ready && !done && !allComplete
       ? { level: idx + 1, total: QUIZ_QUESTIONS.length, accentColor: '#e60000' }
       : null,
   );
 
   if (!ready) return <GameLoading color={MCQ.purple} />;
+  if (allComplete || done) {
+    return (
+      <AllLevelsCompleteView
+        scoreLine={`${score * POINTS_PER_CORRECT_LEVEL} pts · ${score} / ${QUIZ_QUESTIONS.length} correct`}
+        onClose={onClose}
+      />
+    );
+  }
+  if (!q) return <GameLoading color={MCQ.purple} />;
 
   const isCorrect = selected !== null && selected === shuffled.correctIndex;
   const isLastLevel = idx + 1 >= QUIZ_QUESTIONS.length;
@@ -745,39 +777,27 @@ function QuizGame({
       setIdx(idx + 1);
       setSelected(null);
     } else {
+      void finishCatalog();
       setDone(true);
     }
   };
 
   return (
     <View style={gs.mcqGameContainer}>
-      {done ? (
-        <View style={gs.doneBox}>
-          <Text style={gs.doneEmoji}>{scoreEmoji(score, QUIZ_QUESTIONS.length)}</Text>
-          <Text style={gs.doneTitle}>Quiz Complete!</Text>
-          <Text style={gs.doneScore}>
-            {score * POINTS_PER_CORRECT_LEVEL} pts · {score} / {QUIZ_QUESTIONS.length} correct
-          </Text>
-          <TouchableOpacity style={gs.mcqDoneBtn} onPress={finishAndClose}>
-            <Text style={gs.doneBtnText}>Back to Games</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <McqGameplay
-          accentColor="#e60000"
-          idx={idx}
-          total={QUIZ_QUESTIONS.length}
-          question={q.q}
-          shuffled={shuffled}
-          selected={selected}
-          onPick={pick}
-          isCorrect={isCorrect}
-          correctText={correctText}
-          explanation={getQuizExplanation(q)}
-          onNext={goNext}
-          isLastLevel={isLastLevel}
-        />
-      )}
+      <McqGameplay
+        accentColor="#e60000"
+        idx={idx}
+        total={QUIZ_QUESTIONS.length}
+        question={q.q}
+        shuffled={shuffled}
+        selected={selected}
+        onPick={pick}
+        isCorrect={isCorrect}
+        correctText={correctText}
+        explanation={getQuizExplanation(q)}
+        onNext={goNext}
+        isLastLevel={isLastLevel}
+      />
     </View>
   );
 }
@@ -792,27 +812,31 @@ function ScrambleGame({
   onScore: (n: number) => void;
   onHeaderMeta?: (meta: GameHeaderMeta | null) => void;
 }) {
-  const { idx, setIdx, score, setScore, ready, completeGame } = useGameProgress('scramble', WORD_SCRAMBLES.length);
+  const { idx, setIdx, score, setScore, ready, allComplete, finishCatalog } = useGameProgress('scramble', WORD_SCRAMBLES.length);
   const [input, setInput] = useState('');
   const [result, setResult] = useState<'correct' | 'wrong' | null>(null);
   const [done, setDone] = useState(false);
-  const scrambled = React.useMemo(() => scrambleWord(WORD_SCRAMBLES[idx].word), [idx]);
-
-  const finishAndClose = async () => {
-    await completeGame();
-    onClose();
-  };
+  const item = WORD_SCRAMBLES[idx];
+  const scrambled = React.useMemo(() => scrambleWord(item?.word ?? ''), [item?.word]);
 
   useSyncGameHeader(
     onHeaderMeta,
-    ready && !done
+    ready && !done && !allComplete
       ? { level: idx + 1, total: WORD_SCRAMBLES.length, accentColor: '#6C5CE7' }
       : null,
   );
 
   if (!ready) return <GameLoading color={MCQ.purple} />;
+  if (allComplete || done) {
+    return (
+      <AllLevelsCompleteView
+        scoreLine={`${score * POINTS_PER_CORRECT_LEVEL} pts · ${score} / ${WORD_SCRAMBLES.length} correct`}
+        onClose={onClose}
+      />
+    );
+  }
+  if (!item) return <GameLoading color={MCQ.purple} />;
 
-  const item = WORD_SCRAMBLES[idx];
   const isLastLevel = idx + 1 >= WORD_SCRAMBLES.length;
 
   const check = () => {
@@ -832,38 +856,26 @@ function ScrambleGame({
       setInput('');
       setResult(null);
     } else {
+      void finishCatalog();
       setDone(true);
     }
   };
 
   return (
     <View style={gs.mcqGameContainer}>
-      {done ? (
-        <View style={gs.doneBox}>
-          <Text style={gs.doneEmoji}>{scoreEmoji(score, WORD_SCRAMBLES.length)}</Text>
-          <Text style={gs.doneTitle}>Scramble Complete!</Text>
-          <Text style={gs.doneScore}>
-            {score * POINTS_PER_CORRECT_LEVEL} pts · {score} / {WORD_SCRAMBLES.length} correct
-          </Text>
-          <TouchableOpacity style={gs.mcqDoneBtn} onPress={finishAndClose}>
-            <Text style={gs.doneBtnText}>Back to Games</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <ScrambleGameplay
-          idx={idx}
-          total={WORD_SCRAMBLES.length}
-          hint={item.hint}
-          scrambled={scrambled}
-          input={input}
-          onChangeInput={setInput}
-          result={result}
-          correctWord={item.word}
-          onCheck={check}
-          onNext={goNext}
-          isLastLevel={isLastLevel}
-        />
-      )}
+      <ScrambleGameplay
+        idx={idx}
+        total={WORD_SCRAMBLES.length}
+        hint={item.hint}
+        scrambled={scrambled}
+        input={input}
+        onChangeInput={setInput}
+        result={result}
+        correctWord={item.word}
+        onCheck={check}
+        onNext={goNext}
+        isLastLevel={isLastLevel}
+      />
     </View>
   );
 }
@@ -878,29 +890,33 @@ function FillBlanksGame({
   onScore: (n: number) => void;
   onHeaderMeta?: (meta: GameHeaderMeta | null) => void;
 }) {
-  const { idx, setIdx, score, setScore, ready, completeGame } = useGameProgress('fill', FILL_BLANKS.length);
+  const { idx, setIdx, score, setScore, ready, allComplete, finishCatalog } = useGameProgress('fill', FILL_BLANKS.length);
   const [selected, setSelected] = useState<number | null>(null);
   const [done, setDone] = useState(false);
 
-  const finishAndClose = async () => {
-    await completeGame();
-    onClose();
-  };
-
   const q = FILL_BLANKS[idx];
   const shuffled = React.useMemo(
-    () => shuffleOptions(q.options, q.answer),
-    [idx, q.options, q.answer],
+    () => (q ? shuffleOptions(q.options, q.answer) : { options: [], correctIndex: 0 }),
+    [idx, q],
   );
 
   useSyncGameHeader(
     onHeaderMeta,
-    ready && !done
+    ready && !done && !allComplete
       ? { level: idx + 1, total: FILL_BLANKS.length, accentColor: '#00b894' }
       : null,
   );
 
   if (!ready) return <GameLoading color={MCQ.purple} />;
+  if (allComplete || done) {
+    return (
+      <AllLevelsCompleteView
+        scoreLine={`${score * POINTS_PER_CORRECT_LEVEL} pts · ${score} / ${FILL_BLANKS.length} correct`}
+        onClose={onClose}
+      />
+    );
+  }
+  if (!q) return <GameLoading color={MCQ.purple} />;
 
   const isCorrect = selected !== null && selected === shuffled.correctIndex;
   const isLastLevel = idx + 1 >= FILL_BLANKS.length;
@@ -922,39 +938,27 @@ function FillBlanksGame({
       setIdx(idx + 1);
       setSelected(null);
     } else {
+      void finishCatalog();
       setDone(true);
     }
   };
 
   return (
     <View style={gs.mcqGameContainer}>
-      {done ? (
-        <View style={gs.doneBox}>
-          <Text style={gs.doneEmoji}>{scoreEmoji(score, FILL_BLANKS.length)}</Text>
-          <Text style={gs.doneTitle}>All Levels Complete!</Text>
-          <Text style={gs.doneScore}>
-            {score * POINTS_PER_CORRECT_LEVEL} pts · {score} / {FILL_BLANKS.length} correct
-          </Text>
-          <TouchableOpacity style={gs.mcqDoneBtn} onPress={finishAndClose}>
-            <Text style={gs.doneBtnText}>Back to Games</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <McqGameplay
-          accentColor="#00b894"
-          idx={idx}
-          total={FILL_BLANKS.length}
-          question={q.sentence}
-          shuffled={shuffled}
-          selected={selected}
-          onPick={pick}
-          isCorrect={isCorrect}
-          correctText={correctText}
-          explanation={q.rule}
-          onNext={goNext}
-          isLastLevel={isLastLevel}
-        />
-      )}
+      <McqGameplay
+        accentColor="#00b894"
+        idx={idx}
+        total={FILL_BLANKS.length}
+        question={q.sentence}
+        shuffled={shuffled}
+        selected={selected}
+        onPick={pick}
+        isCorrect={isCorrect}
+        correctText={correctText}
+        explanation={q.rule}
+        onNext={goNext}
+        isLastLevel={isLastLevel}
+      />
     </View>
   );
 }
@@ -967,13 +971,13 @@ function FlashcardGame({
   onClose: () => void;
   onHeaderMeta?: (meta: GameHeaderMeta | null) => void;
 }) {
-  const { idx, setIdx, ready, completeGame } = useGameProgress('flash', FLASHCARDS.length);
+  const { idx, setIdx, ready, allComplete, finishCatalog } = useGameProgress('flash', FLASHCARDS.length);
   const [flipped, setFlipped] = useState(false);
   const [done, setDone] = useState(false);
 
   useSyncGameHeader(
     onHeaderMeta,
-    ready && !done
+    ready && !done && !allComplete
       ? {
           level: idx + 1,
           total: FLASHCARDS.length,
@@ -983,14 +987,19 @@ function FlashcardGame({
       : null,
   );
 
-  const finishAndClose = async () => {
-    await completeGame();
-    onClose();
-  };
+  const card = FLASHCARDS[idx];
 
   if (!ready) return <GameLoading color={MCQ.purple} />;
+  if (allComplete || done) {
+    return (
+      <AllLevelsCompleteView
+        scoreLine={`You reviewed all ${FLASHCARDS.length} cards`}
+        onClose={onClose}
+      />
+    );
+  }
+  if (!card) return <GameLoading color={MCQ.purple} />;
 
-  const card = FLASHCARDS[idx];
   const isLastLevel = idx + 1 >= FLASHCARDS.length;
 
   const next = () => {
@@ -998,24 +1007,10 @@ function FlashcardGame({
     if (idx + 1 < FLASHCARDS.length) {
       setIdx(idx + 1);
     } else {
+      void finishCatalog();
       setDone(true);
     }
   };
-
-  if (done) {
-    return (
-      <View style={gs.mcqGameContainer}>
-        <View style={gs.doneBox}>
-          <Text style={gs.doneEmoji}>🎉</Text>
-          <Text style={gs.doneTitle}>Flashcards Complete!</Text>
-          <Text style={gs.doneScore}>You reviewed all {FLASHCARDS.length} cards</Text>
-          <TouchableOpacity style={gs.mcqDoneBtn} onPress={finishAndClose}>
-            <Text style={gs.doneBtnText}>Back to Games</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
 
   return (
     <View style={gs.mcqGameContainer}>
@@ -1035,10 +1030,43 @@ function FlashcardGame({
 }
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
-export default function GamesScreen() {
+class GamesCrashBoundary extends React.Component<
+  { children: React.ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <View style={[ui.root, { justifyContent: 'center', alignItems: 'center', padding: 28 }]}>
+          <Text style={ui.pageTitle}>Games</Text>
+          <Text style={[ui.pageSubtitle, { textAlign: 'center', marginBottom: 18 }]}>
+            Something went wrong while opening games. Please try again.
+          </Text>
+          <TouchableOpacity
+            style={[ui.gameCardCta, { backgroundColor: UI.accent, alignSelf: 'center' }]}
+            onPress={() => this.setState({ failed: false })}
+            activeOpacity={0.85}
+          >
+            <Text style={ui.gameCardCtaText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function GamesScreen() {
   const { setHideTabBar } = useGameTabBar();
   const insets = useSafeAreaInsets();
-  const tabBarHeight = useBottomTabBarHeight();
+  const tabBarHeightCtx = React.useContext(BottomTabBarHeightContext);
+  const tabBarHeight = tabBarHeightCtx ?? TAB_BAR_CONTENT_HEIGHT + insets.bottom;
   const [activeGame, setActiveGame] = useState<GameId | null>(null);
   const [gameHeaderMeta, setGameHeaderMeta] = useState<GameHeaderMeta | null>(null);
   const [totalScore, setTotalScore] = useState(0);
@@ -1156,6 +1184,7 @@ export default function GamesScreen() {
                         key={game.id}
                         game={game}
                         savedLevel={savedProgress?.[game.id]?.level ?? 0}
+                        catalogComplete={isGameCatalogComplete(savedProgress?.[game.id], game.total)}
                         onPress={() => setActiveGame(game.id)}
                       />
                     ))}
@@ -1176,6 +1205,14 @@ export default function GamesScreen() {
         </ScrollView>
       )}
     </View>
+  );
+}
+
+export default function GamesTab() {
+  return (
+    <GamesCrashBoundary>
+      <GamesScreen />
+    </GamesCrashBoundary>
   );
 }
 
@@ -1527,8 +1564,17 @@ const gs = StyleSheet.create({
     ...cardShadow,
   },
   doneEmoji: { fontSize: 60, marginBottom: 16 },
-  doneTitle: { fontSize: 28, fontWeight: '800', color: UI.text, marginBottom: 8 },
-  doneScore: { fontSize: 18, fontWeight: '600', color: UI.textSecondary, marginBottom: 32 },
+  doneTitle: { fontSize: 28, fontWeight: '800', color: UI.text, marginBottom: 8, textAlign: 'center' },
+  doneMessage: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: UI.textSecondary,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  doneScore: { fontSize: 16, fontWeight: '600', color: UI.textSecondary, marginBottom: 32, textAlign: 'center' },
   doneBtn: { backgroundColor: UI.accent, paddingHorizontal: 32, paddingVertical: 14, borderRadius: 22, alignSelf: 'center' },
   doneBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
 });

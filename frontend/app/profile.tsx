@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Platform, StatusBar, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Platform, StatusBar, Alert, ActivityIndicator, Image } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter, Stack } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,13 +12,20 @@ import { fetchMyProfile } from '@/utils/authApi';
 import { uploadUserAvatar } from '@/utils/avatarApi';
 import { pickProfileImageUri } from '@/utils/pickProfileImage';
 import {
+  CategorySlug,
   SubscriptionSummary,
   FREE_SUBSCRIPTION,
-  PRO_PRICE_LABEL,
   fetchSubscription,
-  purchaseWithRazorpay,
+  formatPlanPrice,
   formatSubscriptionDate,
 } from '@/utils/subscriptionApi';
+import SubscriptionCheckoutModal from '@/components/SubscriptionCheckoutModal';
+
+const PLAN_STUDENTS: Record<CategorySlug, number> = {
+  beginner: require('../assets/images/plans/beginner-student.png'),
+  intermediate: require('../assets/images/plans/intermediate-student.png'),
+  advanced: require('../assets/images/plans/advanced-student.png'),
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -35,7 +42,7 @@ export default function ProfileScreen() {
 
   const [subscription, setSubscription] = useState<SubscriptionSummary>(FREE_SUBSCRIPTION);
   const [subLoading, setSubLoading] = useState(true);
-  const [purchasing, setPurchasing] = useState(false);
+  const [checkoutCategory, setCheckoutCategory] = useState<CategorySlug | null>(null);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const loadSubscription = React.useCallback(async () => {
@@ -49,37 +56,9 @@ export default function ProfileScreen() {
     }
   }, []);
 
-  const runPurchase = React.useCallback(async () => {
-    setPurchasing(true);
-    try {
-      const summary = await purchaseWithRazorpay();
-      setSubscription(summary);
-      Alert.alert(
-        'Pro activated 🎉',
-        `Your Pro subscription is active until ${formatSubscriptionDate(summary.expiryDate)}. Intermediate and Advanced courses are now unlocked.`
-      );
-    } catch (e: any) {
-      const message = e?.message || 'Could not complete the payment. Please try again.';
-      if (/payment cancelled/i.test(message)) {
-        return;
-      }
-      Alert.alert('Payment failed', message);
-    } finally {
-      setPurchasing(false);
-    }
+  const openCheckout = React.useCallback((category: CategorySlug) => {
+    setCheckoutCategory(category);
   }, []);
-
-  const handleBuyOrRenew = React.useCallback(() => {
-    const isRenew = subscription.status === 'active' || subscription.status === 'expired';
-    Alert.alert(
-      isRenew ? 'Renew Pro subscription' : 'Buy Pro subscription',
-      `Pro plan • ${PRO_PRICE_LABEL}\n\nPay securely with Razorpay to unlock Intermediate and Advanced courses for 30 days.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: `Pay ${PRO_PRICE_LABEL.split('/')[0]}`, onPress: () => void runPurchase() },
-      ]
-    );
-  }, [subscription.status, runPurchase]);
 
   const loadProfile = React.useCallback(async () => {
       try {
@@ -210,70 +189,108 @@ export default function ProfileScreen() {
             : subscription.status === 'expired'
               ? 'Expired'
               : 'Free plan';
+          const PLAN_ORDER: CategorySlug[] = ['beginner', 'intermediate', 'advanced'];
+          const PLAN_FEATURES: Record<CategorySlug, string> = {
+            beginner: 'Basics & grammar',
+            intermediate: 'Fluency practice',
+            advanced: 'Pro English',
+          };
+          const plans = (
+            subscription.plans.length
+              ? subscription.plans
+              : [
+                  { category: 'beginner' as const, title: 'Beginner', price: 0, currency: 'INR', durationDays: 30, enabled: false, requiresPayment: false },
+                  { category: 'intermediate' as const, title: 'Intermediate', price: 249, currency: 'INR', durationDays: 30, enabled: true, requiresPayment: true },
+                  { category: 'advanced' as const, title: 'Advanced', price: 249, currency: 'INR', durationDays: 30, enabled: true, requiresPayment: true },
+                ]
+          )
+            .slice()
+            .sort((a, b) => PLAN_ORDER.indexOf(a.category) - PLAN_ORDER.indexOf(b.category));
           return (
             <LinearGradient colors={gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.subCard}>
               <View style={styles.subHeaderRow}>
                 <View style={styles.subTitleWrap}>
                   <MaterialCommunityIcons name={isPro ? 'crown' : 'crown-outline'} size={22} color="#ffd166" />
-                  <Text style={styles.subPlanName}>{isPro ? 'Pro Subscription' : 'Free Plan'}</Text>
+                  <Text style={styles.subPlanName}>{isPro ? 'Subscriptions' : 'Course plans'}</Text>
                 </View>
                 <View style={[styles.subBadge, isPro ? styles.subBadgeActive : styles.subBadgeInactive]}>
                   <Text style={styles.subBadgeText}>{statusLabel}</Text>
                 </View>
               </View>
 
-              <Text style={styles.subPrice}>
-                {PRO_PRICE_LABEL}
-                <Text style={styles.subPriceSub}>  •  Unlocks Intermediate & Advanced</Text>
+              <Text style={styles.subInfoText}>
+                Buy a category to unlock its videos. A coupon is optional at checkout.
               </Text>
 
               {subLoading ? (
                 <ActivityIndicator color="#fff" style={{ marginVertical: 16 }} />
-              ) : isPro ? (
-                <View style={styles.subMetaBox}>
-                  <View style={styles.subMetaRow}>
-                    <Text style={styles.subMetaLabel}>Start date</Text>
-                    <Text style={styles.subMetaValue}>{formatSubscriptionDate(subscription.startDate)}</Text>
-                  </View>
-                  <View style={styles.subMetaRow}>
-                    <Text style={styles.subMetaLabel}>Expiry date</Text>
-                    <Text style={styles.subMetaValue}>{formatSubscriptionDate(subscription.expiryDate)}</Text>
-                  </View>
-                  <View style={styles.subMetaRow}>
-                    <Text style={styles.subMetaLabel}>Remaining</Text>
-                    <Text style={styles.subMetaValue}>
-                      {subscription.remainingDays} day{subscription.remainingDays === 1 ? '' : 's'}
-                    </Text>
-                  </View>
-                </View>
               ) : (
-                <Text style={styles.subInfoText}>
-                  {subscription.status === 'expired'
-                    ? 'Your Pro subscription has expired. Renew to unlock Pro courses again — your progress is saved.'
-                    : 'Beginner courses are free. Go Pro to unlock all Intermediate and Advanced courses.'}
-                </Text>
+                <View style={styles.planList}>
+                  {plans.map((plan) => {
+                    const unlocked = Boolean(subscription.access?.[plan.category]) || !plan.requiresPayment;
+                    const activeSub = subscription.activeSubscriptions?.find(
+                      (s) => s.category === plan.category || s.category === 'all'
+                    );
+                    const feature = PLAN_FEATURES[plan.category] || '';
+                    const priceLabel = plan.requiresPayment ? formatPlanPrice(plan) : 'Free';
+                    const planStatus =
+                      unlocked && activeSub?.expiryDate
+                        ? formatSubscriptionDate(activeSub.expiryDate)
+                        : unlocked
+                          ? 'Unlocked'
+                          : priceLabel;
+                    return (
+                      <View key={plan.category} style={styles.planCard}>
+                        <Image
+                          source={PLAN_STUDENTS[plan.category]}
+                          style={styles.planStudent}
+                          resizeMode="contain"
+                        />
+                        <Text
+                          style={styles.planRowTitle}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.7}
+                        >
+                          {plan.title}
+                        </Text>
+                        <Text
+                          style={styles.planRowFeature}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.75}
+                        >
+                          {feature}
+                        </Text>
+                        <Text style={styles.planRowSub} numberOfLines={1}>
+                          {planStatus}
+                        </Text>
+                        {plan.requiresPayment ? (
+                          <TouchableOpacity
+                            style={styles.planBuyChip}
+                            onPress={() => openCheckout(plan.category)}
+                            activeOpacity={0.9}
+                          >
+                            <Text style={styles.planBuyChipText}>{unlocked ? 'Renew' : 'Buy'}</Text>
+                          </TouchableOpacity>
+                        ) : (
+                          <Text style={styles.planFreeChip}>Free</Text>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
               )}
-
-              <TouchableOpacity
-                style={[styles.subBuyBtn, purchasing && { opacity: 0.7 }]}
-                onPress={handleBuyOrRenew}
-                disabled={purchasing || subLoading}
-                activeOpacity={0.9}
-              >
-                {purchasing ? (
-                  <ActivityIndicator color="#4a2b8a" />
-                ) : (
-                  <>
-                    <Feather name={isPro ? 'refresh-cw' : 'unlock'} size={18} color="#4a2b8a" />
-                    <Text style={styles.subBuyBtnText}>
-                      {isPro ? 'Renew Subscription' : subscription.status === 'expired' ? 'Renew Subscription' : 'Buy Subscription'}
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
             </LinearGradient>
           );
         })()}
+
+        <SubscriptionCheckoutModal
+          visible={checkoutCategory != null}
+          category={checkoutCategory}
+          onClose={() => setCheckoutCategory(null)}
+          onPurchased={(summary) => setSubscription(summary)}
+        />
 
         {/* Details Card */}
         <View style={styles.detailsCard}>
@@ -474,6 +491,66 @@ const styles = StyleSheet.create({
     color: '#4a2b8a',
     fontSize: 15,
     fontWeight: '800',
+  },
+  planList: {
+    marginTop: 14,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  planCard: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14,
+    paddingTop: 8,
+    paddingBottom: 12,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    gap: 3,
+    minWidth: 0,
+  },
+  planStudent: {
+    width: 54,
+    height: 54,
+    marginBottom: 2,
+  },
+  planRowTitle: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 11,
+    textAlign: 'center',
+    width: '100%',
+  },
+  planRowFeature: {
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 10,
+    fontWeight: '500',
+    textAlign: 'center',
+    width: '100%',
+  },
+  planRowSub: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 10,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  planBuyChip: {
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginTop: 4,
+  },
+  planBuyChipText: {
+    color: '#4a2b8a',
+    fontWeight: '800',
+    fontSize: 11,
+  },
+  planFreeChip: {
+    color: '#fff',
+    fontWeight: '800',
+    fontSize: 11,
+    opacity: 0.85,
+    marginTop: 6,
   },
   detailsCard: {
     backgroundColor: '#fff',

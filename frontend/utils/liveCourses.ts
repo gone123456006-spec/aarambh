@@ -22,9 +22,9 @@ export type AppCategory = {
   subtitle: string;
   color: [string, string];
   lessons: AppLesson[];
-  /** Requires a Pro subscription (all non-beginner levels). */
+  /** Requires a paid subscription for this category (from admin plans). */
   isPro: boolean;
-  /** Locked because the user has no active Pro subscription. */
+  /** Locked because the user does not have access to this paid category. */
   locked: boolean;
 };
 
@@ -75,8 +75,8 @@ export function mapApiCoursesToApp(courses: ApiCourse[]): AppCategory[] {
       title: course.title,
       subtitle: course.subtitle || '',
       color: colorPair,
-      isPro: course.isPro ?? course.level !== 'beginner',
-      locked: course.locked ?? false,
+      isPro: course.isPro ?? !/beginner/i.test(`${course.level || ''} ${course.title || ''}`),
+      locked: Boolean(course.locked) && Boolean(course.isPro),
       lessons: (course.lessons || []).map((lesson) => ({
         id: lesson.lessonKey || lesson._id || '',
         mongoId: lesson._id,

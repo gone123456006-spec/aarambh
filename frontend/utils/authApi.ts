@@ -13,6 +13,7 @@ type VerifyOtpData = {
   refreshToken: string;
   isNewUser: boolean;
   isProfileComplete: boolean;
+  deletionCancelled?: boolean;
 };
 
 export type DeviceAlreadyActiveError = {

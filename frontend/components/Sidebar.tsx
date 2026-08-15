@@ -134,7 +134,7 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
     router.push('/profile');
   };
 
-  const navigateTo = (path: '/about' | '/contact-us' | '/terms' | '/privacy') => {
+  const navigateTo = (path: '/about' | '/contact-us' | '/terms' | '/privacy' | '/settings') => {
     onClose();
     router.push(path);
   };
@@ -156,6 +156,7 @@ export default function Sidebar({ visible, onClose }: SidebarProps) {
   };
 
   const mainItems: MenuItem[] = [
+    { icon: 'settings', label: 'Settings', onPress: () => navigateTo('/settings') },
     { icon: 'info', label: 'About Us', onPress: () => navigateTo('/about') },
     { icon: 'phone', label: 'Contact Us', onPress: () => navigateTo('/contact-us') },
     { icon: 'file-text', label: 'Terms & Conditions', onPress: () => navigateTo('/terms') },

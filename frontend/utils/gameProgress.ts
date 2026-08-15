@@ -6,14 +6,16 @@ import { userScopedKey } from '@/utils/userStorage';
 export type GameId = 'quiz' | 'scramble' | 'fill' | 'flash';
 
 export interface GameProgress {
+  /** Next unplayed 0-based level. If >= current catalog size, all available levels are done. */
   level: number;
   score: number;
+  completed?: boolean;
 }
 
 const STORAGE_KEY = 'gameProgress';
 const SERVER_SYNC_DEBOUNCE_MS = 800;
 
-const DEFAULT: GameProgress = { level: 0, score: 0 };
+const DEFAULT: GameProgress = { level: 0, score: 0, completed: false };
 
 const pendingServerSync = new Map<
   GameId,
@@ -47,6 +49,7 @@ export async function loadGameProgress(gameId: GameId): Promise<GameProgress> {
   return {
     level: Math.max(0, saved.level ?? 0),
     score: Math.max(0, saved.score ?? 0),
+    completed: Boolean(saved.completed),
   };
 }
 
@@ -60,6 +63,28 @@ export async function loadAllGameProgress(): Promise<Record<GameId, GameProgress
   };
 }
 
+/** True when every currently shipped level has been finished. */
+export function isGameCatalogComplete(progress: GameProgress | null | undefined, totalLevels: number): boolean {
+  if (!progress || totalLevels <= 0) return false;
+  return (progress.level ?? 0) >= totalLevels;
+}
+
+/**
+ * Resume point after an app update.
+ * Completed catalogs stay locked. If new levels are added, play continues from the first new level.
+ */
+export function resolvePlayableProgress(progress: GameProgress, totalLevels: number): {
+  idx: number;
+  allComplete: boolean;
+} {
+  if (totalLevels <= 0) return { idx: 0, allComplete: false };
+  const level = Math.max(0, progress.level ?? 0);
+  if (level >= totalLevels) {
+    return { idx: totalLevels, allComplete: true };
+  }
+  return { idx: Math.min(level, totalLevels - 1), allComplete: false };
+}
+
 async function syncProgressToServer(gameId: GameId, progress: GameProgress): Promise<void> {
   const token = await getAccessToken();
   if (!token) return;
@@ -70,6 +95,7 @@ async function syncProgressToServer(gameId: GameId, progress: GameProgress): Pro
       gameId,
       level: progress.level,
       score: progress.score,
+      completed: Boolean(progress.completed),
     }),
   });
 }
@@ -112,6 +138,7 @@ export async function saveGameProgress(gameId: GameId, progress: GameProgress): 
   const normalized: GameProgress = {
     level: Math.max(0, progress.level),
     score: Math.max(0, progress.score),
+    completed: Boolean(progress.completed),
   };
 
   try {
@@ -144,5 +171,6 @@ export async function clearGameProgress(gameId: GameId): Promise<void> {
 
 export function clampLevel(level: number, totalLevels: number): number {
   if (totalLevels <= 0) return 0;
-  return Math.min(Math.max(0, level), totalLevels - 1);
+  // Allow `totalLevels` as a sentinel meaning "all current levels completed".
+  return Math.min(Math.max(0, level), totalLevels);
 }
