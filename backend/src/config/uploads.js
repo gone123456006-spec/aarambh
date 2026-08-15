@@ -8,6 +8,7 @@ const UPLOAD_DIRS = {
   videos: path.join(UPLOAD_ROOT, 'videos'),
   pdfs: path.join(UPLOAD_ROOT, 'pdfs'),
   avatars: path.join(UPLOAD_ROOT, 'avatars'),
+  hero: path.join(UPLOAD_ROOT, 'hero'),
 };
 
 /** Time before uploaded video/PDF URLs are exposed to the app
@@ -40,8 +41,49 @@ function resolveBaseUrl(req) {
 
 function buildPublicUploadUrl(req, subpath) {
   const base = resolveBaseUrl(req).replace(/\/$/, '');
-  const normalized = subpath.replace(/\\/g, '/').replace(/^\/+/, '');
+  const normalized = String(subpath || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .split('?')[0];
   return `${base}/uploads/${normalized}`;
+}
+
+function relativeUploadPath(fileUrl) {
+  if (!fileUrl) return null;
+  const raw = String(fileUrl).replace(/\\/g, '/');
+  const marker = '/uploads/';
+  const idx = raw.indexOf(marker);
+  if (idx === -1) {
+    if (!raw.includes('://') && raw.startsWith('hero/')) return raw.split('?')[0];
+    return null;
+  }
+  return raw.slice(idx + marker.length).split('?')[0];
+}
+
+function resolveUploadFilePath(relativePath) {
+  const normalized = String(relativePath || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .split('?')[0];
+  if (!normalized || normalized.includes('..')) return null;
+  const fullPath = path.resolve(UPLOAD_ROOT, normalized);
+  const root = path.resolve(UPLOAD_ROOT) + path.sep;
+  if (!fullPath.startsWith(root) && fullPath !== path.resolve(UPLOAD_ROOT)) return null;
+  return fullPath;
+}
+
+function deleteFileByUrl(fileUrl) {
+  const relative = relativeUploadPath(fileUrl);
+  if (!relative) return;
+  deleteFileByRelativePath(relative);
+}
+
+function deleteFileByRelativePath(relativePath) {
+  const fullPath = resolveUploadFilePath(relativePath);
+  if (!fullPath) return;
+  if (fs.existsSync(fullPath)) {
+    fs.unlinkSync(fullPath);
+  }
 }
 
 function buildUploadPayload(req, subpath) {
@@ -54,18 +96,6 @@ function buildUploadPayload(req, subpath) {
   };
 }
 
-function deleteFileByUrl(fileUrl) {
-  if (!fileUrl || !fileUrl.includes('/uploads/')) return;
-
-  const relative = fileUrl.split('/uploads/')[1];
-  if (!relative) return;
-
-  const fullPath = path.join(UPLOAD_ROOT, relative);
-  if (fs.existsSync(fullPath)) {
-    fs.unlinkSync(fullPath);
-  }
-}
-
 module.exports = {
   UPLOAD_DIRS,
   UPLOAD_ROOT,
@@ -74,5 +104,8 @@ module.exports = {
   resolveBaseUrl,
   buildPublicUploadUrl,
   buildUploadPayload,
+  relativeUploadPath,
+  resolveUploadFilePath,
   deleteFileByUrl,
+  deleteFileByRelativePath,
 };

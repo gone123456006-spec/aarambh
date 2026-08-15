@@ -80,9 +80,27 @@ async function sendSubscriptionConfirmationEmail(user, subscription) {
                           <strong>Plan:</strong>
                         </td>
                         <td style="color: #333333; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #e0e0e0; text-align: right;">
-                          ${subscription.planName || 'Pro'}
+                          ${subscription.planName || 'Pro'}${subscription.category && subscription.category !== 'all' ? ` (${subscription.category})` : ''}
                         </td>
                       </tr>
+                      ${subscription.originalPrice != null && subscription.discountAmount > 0 ? `
+                      <tr>
+                        <td style="color: #666666; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #e0e0e0;">
+                          <strong>Original price:</strong>
+                        </td>
+                        <td style="color: #333333; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #e0e0e0; text-align: right;">
+                          ₹${subscription.originalPrice}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="color: #666666; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #e0e0e0;">
+                          <strong>Discount${subscription.couponCode ? ` (${subscription.couponCode})` : ''}:</strong>
+                        </td>
+                        <td style="color: #00b894; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #e0e0e0; text-align: right;">
+                          −₹${subscription.discountAmount}
+                        </td>
+                      </tr>
+                      ` : ''}
                       <tr>
                         <td style="color: #666666; font-size: 14px; padding: 8px 0; border-bottom: 1px solid #e0e0e0;">
                           <strong>Amount Paid:</strong>
@@ -123,7 +141,7 @@ async function sendSubscriptionConfirmationEmail(user, subscription) {
               </table>
               
               <p style="margin: 0 0 30px; color: #333333; font-size: 16px; line-height: 1.6;">
-                You now have full access to all premium features, courses, and content. Start learning and enjoy your enhanced experience!
+                You now have access to ${subscription.planName || 'your'} courses. Start learning and enjoy your enhanced experience!
               </p>
               
               <!-- CTA Button -->

@@ -73,7 +73,11 @@ function switchTab(name) {
     loadCourses().then(() => renderCategorySections());
   }
   if (name === 'subscriptions') {
+    loadSubscriptionPlans();
     loadSubscriptions();
+  }
+  if (name === 'coupons') {
+    loadCoupons();
   }
   if (name === 'games') {
     $('gameSelect').value = '';
@@ -83,6 +87,11 @@ function switchTab(name) {
   }
   if (name === 'notifications') {
     loadNotifications();
+    loadPushNotificationStats();
+    loadPushNotificationHistory();
+  }
+  if (name === 'home') {
+    loadHomeHero();
   }
 }
 
@@ -179,7 +188,7 @@ async function loadUsers(page = usersPage) {
     usersPagination = data.pagination || { pages: 1, page: 1, total: 0 };
 
     if (!data.users?.length) {
-      tbody.innerHTML = '<tr><td colspan="6">No users found</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7">No users found</td></tr>';
     } else {
       tbody.innerHTML = data.users
         .map(
@@ -187,6 +196,22 @@ async function loadUsers(page = usersPage) {
         <tr>
           <td>${u.name || '—'}</td>
           <td>${u.email}</td>
+          <td>
+            <code class="user-id-cell" style="cursor: pointer; font-size: 0.85rem; padding: 0.25rem 0.5rem; background: #f0f0f0; border-radius: 4px;" 
+                  onclick="navigator.clipboard.writeText('${u._id}').then(() => {
+                    const el = this;
+                    const orig = el.textContent;
+                    el.textContent = '✓ Copied!';
+                    el.style.background = '#00b894';
+                    el.style.color = 'white';
+                    setTimeout(() => {
+                      el.textContent = orig;
+                      el.style.background = '#f0f0f0';
+                      el.style.color = '';
+                    }, 1500);
+                  })"
+                  title="Click to copy User ID">${u._id}</code>
+          </td>
           <td>${u.level || '—'}</td>
           <td>${statusBadges(u)}</td>
           <td>${formatDate(u.lastSeen)}</td>
@@ -248,6 +273,21 @@ function refreshAll(silent = false) {
   if (!$('panel-users').classList.contains('hidden')) loadUsers();
   if (!$('panel-content').classList.contains('hidden')) {
     loadCourses().then(() => renderCategorySections());
+  }
+  if (!$('panel-subscriptions').classList.contains('hidden')) {
+    loadSubscriptionPlans();
+    loadSubscriptions(subscriptionsPage);
+  }
+  if (!$('panel-coupons').classList.contains('hidden')) {
+    loadCoupons();
+  }
+  if (!$('panel-notifications')?.classList.contains('hidden')) {
+    loadNotifications();
+    loadPushNotificationStats();
+    loadPushNotificationHistory();
+  }
+  if (!$('panel-home')?.classList.contains('hidden')) {
+    loadHomeHero(true);
   }
   if (!silent) {
     const hint = $('autoRefreshHint');
@@ -1155,6 +1195,262 @@ $('notificationForm').addEventListener('submit', async (e) => {
   }
 });
 
+// ============================================
+// PUSH NOTIFICATIONS (FCM)
+// ============================================
+
+async function loadPushNotificationStats() {
+  try {
+    const data = await api('/api/admin/push-notifications/stats');
+    const stats = data.data || {};
+    
+    $('activeDevicesCount').textContent = stats.activeDevices || 0;
+    $('usersWithNotifCount').textContent = stats.usersWithNotifications || 0;
+    $('totalPushSentCount').textContent = stats.totalNotificationsSent || 0;
+    
+    // Daily notification stats
+    const daily = stats.dailyNotifications || {};
+    $('dailyNotifSentToday').textContent = daily.sentToday || 0;
+    $('dailyNotifTotalAll').textContent = daily.totalAllTime || 0;
+    
+    const fcmStatus = stats.firebaseEnabled ? '●' : '○';
+    const fcmColor = stats.firebaseEnabled ? '#00b894' : '#636e72';
+    $('fcmStatusIndicator').textContent = fcmStatus;
+    $('fcmStatusIndicator').style.color = fcmColor;
+    $('fcmStatusIndicator').title = stats.firebaseEnabled 
+      ? 'Firebase Cloud Messaging is enabled' 
+      : 'Firebase Cloud Messaging is not configured';
+    
+    showStatus($('pushNotifStatus'), 
+      stats.firebaseEnabled 
+        ? `Ready to send notifications to ${stats.activeDevices} devices` 
+        : 'Push notifications not configured. Add FIREBASE_SERVICE_ACCOUNT_JSON to .env', 
+      stats.firebaseEnabled ? 'ok' : 'warn'
+    );
+  } catch (err) {
+    showStatus($('pushNotifStatus'), 'Failed to load stats: ' + err.message, 'err');
+  }
+}
+
+async function loadPushNotificationHistory() {
+  try {
+    const data = await api('/api/admin/push-notifications/history?limit=20');
+    const notifications = data.data?.notifications || [];
+    
+    if (notifications.length === 0) {
+      $('pushNotifHistoryContainer').innerHTML = '<p style="color: #636e72">No push notifications sent yet</p>';
+      return;
+    }
+    
+    $('pushNotifHistoryContainer').innerHTML = notifications.map(notif => {
+      const statusBadge = notif.status === 'sent' 
+        ? `<span style="color: #00b894">●</span> Sent` 
+        : notif.status === 'failed'
+        ? `<span style="color: #d63031">●</span> Failed`
+        : `<span style="color: #fdcb6e">●</span> ${notif.status}`;
+      
+      const successRate = notif.totalSent > 0 
+        ? ((notif.successCount / notif.totalSent) * 100).toFixed(1) 
+        : '0.0';
+      
+      return `
+        <div class="notification-item" style="padding: 0.75rem; margin-bottom: 0.5rem; border: 1px solid #dfe6e9; border-radius: 6px">
+          <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem">
+            <strong style="font-size: 0.95rem">${notif.title}</strong>
+            <span style="font-size: 0.8rem; color: #636e72">${formatDate(notif.createdAt)}</span>
+          </div>
+          <p style="margin: 0.25rem 0; color: #2d3436; font-size: 0.88rem">${notif.body}</p>
+          <div style="display: flex; gap: 1rem; margin-top: 0.5rem; font-size: 0.85rem; color: #636e72">
+            <span>${statusBadge}</span>
+            <span>Target: ${notif.targetType}</span>
+            <span>Sent: ${notif.successCount}/${notif.totalSent} (${successRate}%)</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    $('pushNotifHistoryContainer').innerHTML = `<p style="color: #d63031">Failed to load history: ${err.message}</p>`;
+  }
+}
+
+$('loadPushStatsBtn').addEventListener('click', () => {
+  loadPushNotificationStats();
+  loadPushNotificationHistory();
+});
+
+$('newPushNotifBtn').addEventListener('click', () => {
+  $('pushNotifForm').reset();
+  $('pushSpecificUsersFields').classList.add('hidden');
+  $('pushNotifFormSection').classList.remove('hidden');
+  $('pushNotifFormStatus').classList.add('hidden');
+  $('pushNotifFormSection').scrollIntoView({ behavior: 'smooth' });
+});
+
+$('cancelPushNotifBtn').addEventListener('click', () => {
+  $('pushNotifFormSection').classList.add('hidden');
+});
+
+$('resetPushNotifBtn')?.addEventListener('click', () => {
+  $('pushTitle').value = '';
+  $('pushBody').value = '';
+  $('pushImage').value = '';
+  $('pushTargetType').value = 'all';
+  $('pushUserIds').value = '';
+  $('pushDataJson').value = '';
+  $('pushSpecificUsersFields').classList.add('hidden');
+  showStatus($('pushNotifFormStatus'), 'Form reset', 'info');
+});
+
+$('pushTargetType').addEventListener('change', (e) => {
+  const isSpecific = e.target.value === 'specific';
+  $('pushSpecificUsersFields').classList.toggle('hidden', !isSpecific);
+});
+
+$('pushNotifForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const btn = $('sendPushNotifBtn');
+  const origText = btn.textContent;
+  
+  try {
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    showStatus($('pushNotifFormStatus'), 'Sending push notification...', 'info');
+    
+    const title = $('pushTitle').value.trim();
+    const body = $('pushBody').value.trim();
+    const imageUrl = $('pushImage').value.trim() || undefined;
+    const targetType = $('pushTargetType').value;
+    
+    let data = {};
+    const customDataStr = $('pushDataJson').value.trim();
+    if (customDataStr) {
+      try {
+        data = JSON.parse(customDataStr);
+      } catch (err) {
+        throw new Error('Invalid JSON in custom data field');
+      }
+    }
+    
+    let targetUserIds = [];
+    if (targetType === 'specific') {
+      const idsStr = $('pushUserIds').value.trim();
+      if (!idsStr) {
+        throw new Error('Please enter at least one user ID');
+      }
+      targetUserIds = idsStr.split(',').map(id => id.trim()).filter(Boolean);
+    }
+    
+    const payload = {
+      title,
+      body,
+      imageUrl,
+      targetType,
+      data,
+    };
+    
+    if (targetUserIds.length > 0) {
+      payload.targetUserIds = targetUserIds;
+    }
+    
+    const result = await api('/api/admin/push-notifications/send', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    
+    showStatus($('pushNotifFormStatus'), 
+      `Push notification sent successfully! Delivered to ${result.data?.successCount || 0} devices.`, 
+      'ok'
+    );
+    
+    setTimeout(() => {
+      $('pushNotifFormSection').classList.add('hidden');
+      loadPushNotificationStats();
+      loadPushNotificationHistory();
+    }, 2000);
+    
+  } catch (err) {
+    showStatus($('pushNotifFormStatus'), 'Failed to send: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+});
+
+$('triggerDailyNotifBtn').addEventListener('click', async () => {
+  const btn = $('triggerDailyNotifBtn');
+  const origText = btn.textContent;
+  
+  if (!confirm('This will send daily engagement notifications to all eligible users right now. Continue?')) {
+    return;
+  }
+  
+  try {
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    showStatus($('pushNotifStatus'), 'Triggering daily notifications...', 'info');
+    
+    const result = await api('/api/admin/push-notifications/trigger-daily', {
+      method: 'POST',
+    });
+    
+    const stats = result.data || {};
+    showStatus($('pushNotifStatus'), 
+      `Daily notifications sent! ${stats.totalSent || 0} sent, ${stats.skipped || 0} skipped`, 
+      'ok'
+    );
+    
+    setTimeout(() => {
+      loadPushNotificationStats();
+      loadPushNotificationHistory();
+    }, 1000);
+    
+  } catch (err) {
+    showStatus($('pushNotifStatus'), 'Failed to trigger: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+});
+
+$('viewDailyMessagesBtn').addEventListener('click', async () => {
+  try {
+    showStatus($('pushNotifStatus'), 'Loading daily message pool...', 'info');
+    
+    const data = await api('/api/admin/push-notifications/daily-config');
+    const config = data.data || {};
+    const messages = config.messagePool || [];
+    
+    $('dailyNotifSchedule').textContent = config.schedule || '10:00 AM IST';
+    
+    $('dailyMessagesContainer').innerHTML = messages.map((msg, idx) => `
+      <div style="padding: 0.75rem; margin-bottom: 0.5rem; border: 1px solid #dfe6e9; border-radius: 6px; background: #f8f9fa">
+        <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.5rem">
+          <strong style="font-size: 0.9rem">${msg.title}</strong>
+          <span style="font-size: 0.75rem; color: #636e72; background: #e0e0e0; padding: 2px 6px; border-radius: 3px">${idx + 1}/${messages.length}</span>
+        </div>
+        <p style="margin: 0; color: #2d3436; font-size: 0.85rem">${msg.body}</p>
+      </div>
+    `).join('');
+    
+    $('dailyMessagesModal').classList.remove('hidden');
+    $('dailyMessagesModal').scrollIntoView({ behavior: 'smooth' });
+    showStatus($('pushNotifStatus'), '', 'info');
+    $('pushNotifStatus').classList.add('hidden');
+    
+  } catch (err) {
+    showStatus($('pushNotifStatus'), 'Failed to load messages: ' + err.message, 'err');
+  }
+});
+
+$('closeDailyMessagesBtn').addEventListener('click', () => {
+  $('dailyMessagesModal').classList.add('hidden');
+});
+
+// ============================================
+// IN-APP NOTIFICATIONS
+// ============================================
+
 async function loadNotifications() {
   try {
     showStatus($('notificationsStatus'), 'Loading notifications...', 'info');
@@ -1357,7 +1653,7 @@ function renderSubscriptions(subscriptions) {
           <strong>${sub.user?.name || 'Unknown'}</strong><br>
           <small style="color: #636e72">${sub.user?.email || ''}</small>
         </td>
-        <td>${sub.planName || 'Pro'}</td>
+        <td>${sub.planName || 'Pro'}${sub.category && sub.category !== 'all' ? ` · ${sub.category}` : ''}${sub.couponCode ? `<br><small class="coupon-code">${sub.couponCode}</small>` : ''}</td>
         <td>₹${sub.price || 0}</td>
         <td>${formatDate(sub.purchaseDate)}</td>
         <td>${formatDate(sub.expiryDate)}</td>
@@ -1547,5 +1843,390 @@ async function showUserDetails(userId) {
     alert('Failed to load user details: ' + err.message);
   }
 }
+
+// ============================================================================
+// Category subscription plans
+// ============================================================================
+
+async function loadSubscriptionPlans() {
+  const grid = $('plansGrid');
+  if (!grid) return;
+  try {
+    const data = await api('/api/admin/subscription-plans');
+    renderSubscriptionPlans(data.plans || []);
+  } catch (err) {
+    showStatus($('plansStatus'), 'Failed to load plans: ' + err.message, 'err');
+    grid.innerHTML = '<p class="hint">Could not load subscription plans.</p>';
+  }
+}
+
+function renderSubscriptionPlans(plans) {
+  const grid = $('plansGrid');
+  if (!plans.length) {
+    grid.innerHTML = '<p class="hint">No plans found.</p>';
+    return;
+  }
+
+  const order = ['beginner', 'intermediate', 'advanced'];
+  const sorted = [...plans].sort(
+    (a, b) => order.indexOf(a.category) - order.indexOf(b.category)
+  );
+
+  grid.innerHTML = sorted
+    .map((plan) => {
+      const on = Boolean(plan.enabled);
+      return `
+        <article class="plan-card" data-category="${plan.category}">
+          <div class="plan-card-head">
+            <div>
+              <h3>${plan.title || plan.category}</h3>
+              <span class="plan-badge ${on && Number(plan.price) > 0 ? 'on' : 'off'}">${on && Number(plan.price) > 0 ? 'Paid in app' : 'Free in app'}</span>
+            </div>
+            <label class="toggle-switch" title="Enable or disable paid subscription">
+              <input type="checkbox" data-plan-toggle="${plan.category}" ${on ? 'checked' : ''} />
+              <span></span>
+            </label>
+          </div>
+          <div class="upload-field">
+            <label>Price (₹)</label>
+            <input type="number" min="0" step="1" data-plan-price="${plan.category}" value="${plan.price ?? 0}" />
+          </div>
+          <div class="upload-field">
+            <label>Duration (days)</label>
+            <input type="number" min="1" step="1" data-plan-days="${plan.category}" value="${plan.durationDays ?? 30}" />
+          </div>
+          <button type="button" class="secondary" data-plan-save="${plan.category}">Save price</button>
+        </article>
+      `;
+    })
+    .join('');
+
+  grid.querySelectorAll('[data-plan-toggle]').forEach((el) => {
+    el.addEventListener('change', () => {
+      void updateSubscriptionPlan(el.getAttribute('data-plan-toggle'), { enabled: el.checked });
+    });
+  });
+  grid.querySelectorAll('[data-plan-save]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const category = el.getAttribute('data-plan-save');
+      const price = Number(grid.querySelector(`[data-plan-price="${category}"]`)?.value);
+      const durationDays = Number(grid.querySelector(`[data-plan-days="${category}"]`)?.value);
+      void updateSubscriptionPlan(category, { price, durationDays });
+    });
+  });
+}
+
+async function updateSubscriptionPlan(category, body) {
+  try {
+    showStatus($('plansStatus'), 'Saving…', 'info');
+    await api(`/api/admin/subscription-plans/${category}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    showStatus($('plansStatus'), 'Plan updated — app reflects this immediately', 'ok');
+    await loadSubscriptionPlans();
+  } catch (err) {
+    showStatus($('plansStatus'), err.message, 'err');
+    await loadSubscriptionPlans();
+  }
+}
+
+// ============================================================================
+// Coupons
+// ============================================================================
+
+function resetCouponForm() {
+  $('couponEditId').value = '';
+  $('couponDiscountType').value = 'percent';
+  $('couponDiscountValue').value = '';
+  $('couponMinPurchase').value = '';
+  $('couponExpiresAt').value = '';
+  $('couponMaxUses').value = '';
+  $('couponDescription').value = '';
+  $('couponActive').checked = true;
+  $('saveCouponBtn').textContent = 'Generate coupon';
+  $('cancelCouponEditBtn').classList.add('hidden');
+}
+
+async function loadCoupons() {
+  try {
+    const data = await api('/api/admin/coupons');
+    renderCoupons(data.coupons || []);
+  } catch (err) {
+    showStatus($('couponsStatus'), 'Failed to load coupons: ' + err.message, 'err');
+    $('couponsTableBody').innerHTML = '<tr><td colspan="7">Error loading coupons</td></tr>';
+  }
+}
+
+function renderCoupons(coupons) {
+  const tbody = $('couponsTableBody');
+  if (!coupons.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #636e72">No coupons yet. Generate one above.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = coupons
+    .map((c) => {
+      const expired = c.expiresAt && new Date(c.expiresAt).getTime() <= Date.now();
+      const status = !c.active ? 'Disabled' : expired ? 'Expired' : 'Active';
+      const statusColor = status === 'Active' ? '#00b894' : status === 'Expired' ? '#fdcb6e' : '#636e72';
+      const discount =
+        c.discountType === 'percent' ? `${c.discountValue}%` : `₹${c.discountValue}`;
+      const uses = c.maxUses ? `${c.usedCount || 0} / ${c.maxUses}` : `${c.usedCount || 0}`;
+      return `
+        <tr>
+          <td><span class="coupon-code">${c.code}</span></td>
+          <td>${discount}</td>
+          <td>
+            <span style="display: inline-block; padding: 0.25rem 0.6rem; background: ${statusColor}; color: white; border-radius: 4px; font-size: 0.8rem">
+              ${status}
+            </span>
+          </td>
+          <td>${uses}</td>
+          <td>${c.expiresAt ? formatDate(c.expiresAt) : '—'}</td>
+          <td>${c.minPurchase ? '₹' + c.minPurchase : '—'}</td>
+          <td>
+            <button type="button" class="secondary" data-coupon-toggle="${c._id}" data-active="${c.active ? '1' : '0'}">
+              ${c.active ? 'Disable' : 'Enable'}
+            </button>
+            <button type="button" class="secondary" data-coupon-edit="${c._id}">Edit</button>
+            <button type="button" data-coupon-delete="${c._id}">Delete</button>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  tbody.querySelectorAll('[data-coupon-toggle]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const id = el.getAttribute('data-coupon-toggle');
+      const active = el.getAttribute('data-active') !== '1';
+      void updateCoupon(id, { active });
+    });
+  });
+  tbody.querySelectorAll('[data-coupon-edit]').forEach((el) => {
+    el.addEventListener('click', () => startCouponEdit(el.getAttribute('data-coupon-edit'), coupons));
+  });
+  tbody.querySelectorAll('[data-coupon-delete]').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (confirm('Delete this coupon? Users will no longer be able to use it.')) {
+        void deleteCoupon(el.getAttribute('data-coupon-delete'));
+      }
+    });
+  });
+}
+
+function startCouponEdit(id, coupons) {
+  const coupon = coupons.find((c) => String(c._id) === String(id));
+  if (!coupon) return;
+  $('couponEditId').value = coupon._id;
+  $('couponDiscountType').value = coupon.discountType;
+  $('couponDiscountValue').value = coupon.discountValue;
+  $('couponMinPurchase').value = coupon.minPurchase || '';
+  $('couponExpiresAt').value = coupon.expiresAt ? String(coupon.expiresAt).slice(0, 10) : '';
+  $('couponMaxUses').value = coupon.maxUses || '';
+  $('couponDescription').value = coupon.description || '';
+  $('couponActive').checked = Boolean(coupon.active);
+  $('saveCouponBtn').textContent = 'Save coupon';
+  $('cancelCouponEditBtn').classList.remove('hidden');
+  $('couponForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function saveCoupon(event) {
+  event.preventDefault();
+  const editId = $('couponEditId').value;
+  const payload = {
+    discountType: $('couponDiscountType').value,
+    discountValue: Number($('couponDiscountValue').value),
+    minPurchase: $('couponMinPurchase').value ? Number($('couponMinPurchase').value) : 0,
+    expiresAt: $('couponExpiresAt').value || null,
+    maxUses: $('couponMaxUses').value ? Number($('couponMaxUses').value) : null,
+    description: $('couponDescription').value.trim(),
+    active: $('couponActive').checked,
+  };
+
+  try {
+    showStatus($('couponsStatus'), editId ? 'Saving coupon…' : 'Generating coupon…', 'info');
+    const data = await api(editId ? `/api/admin/coupons/${editId}` : '/api/admin/coupons', {
+      method: editId ? 'PUT' : 'POST',
+      body: JSON.stringify(payload),
+    });
+    const code = data.code || data.coupon?.code;
+    showStatus(
+      $('couponsStatus'),
+      editId ? 'Coupon updated' : `Coupon created: ${code}`,
+      'ok'
+    );
+    resetCouponForm();
+    await loadCoupons();
+  } catch (err) {
+    showStatus($('couponsStatus'), err.message, 'err');
+  }
+}
+
+async function updateCoupon(id, body) {
+  try {
+    await api(`/api/admin/coupons/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    showStatus($('couponsStatus'), 'Coupon updated', 'ok');
+    await loadCoupons();
+  } catch (err) {
+    showStatus($('couponsStatus'), err.message, 'err');
+  }
+}
+
+async function deleteCoupon(id) {
+  try {
+    await api(`/api/admin/coupons/${id}`, { method: 'DELETE' });
+    showStatus($('couponsStatus'), 'Coupon deleted', 'ok');
+    await loadCoupons();
+  } catch (err) {
+    showStatus($('couponsStatus'), err.message, 'err');
+  }
+}
+
+$('couponForm')?.addEventListener('submit', saveCoupon);
+$('cancelCouponEditBtn')?.addEventListener('click', () => {
+  resetCouponForm();
+  showStatus($('couponsStatus'), 'Edit cancelled', 'info');
+});
+
+// ============================================================================
+// HOME PAGE HERO
+// ============================================================================
+
+let heroDraftFile = null;
+let heroDraftObjectUrl = null;
+let heroHasLiveImage = false;
+
+function revokeHeroDraftUrl() {
+  if (heroDraftObjectUrl) {
+    URL.revokeObjectURL(heroDraftObjectUrl);
+    heroDraftObjectUrl = null;
+  }
+}
+
+function setHeroFrame(imageEl, emptyEl, src) {
+  if (src) {
+    imageEl.src = src;
+    imageEl.classList.remove('hidden');
+    emptyEl.classList.add('hidden');
+  } else {
+    imageEl.removeAttribute('src');
+    imageEl.classList.add('hidden');
+    emptyEl.classList.remove('hidden');
+  }
+}
+
+function clearHeroDraft() {
+  revokeHeroDraftUrl();
+  heroDraftFile = null;
+  const input = $('heroFileInput');
+  if (input) input.value = '';
+  setHeroFrame($('heroDraftImage'), $('heroDraftEmpty'), null);
+  $('saveHeroBtn').disabled = true;
+  $('clearHeroDraftBtn').disabled = true;
+}
+
+async function loadHomeHero(silent = false) {
+  try {
+    const data = await api('/api/admin/home-hero');
+    heroHasLiveImage = Boolean(data?.imageUrl);
+    const cacheBust = data?.updatedAt ? `?t=${new Date(data.updatedAt).getTime()}` : '';
+    setHeroFrame(
+      $('heroLiveImage'),
+      $('heroLiveEmpty'),
+      data?.imageUrl ? `${data.imageUrl}${cacheBust}` : null
+    );
+    $('deleteHeroBtn').disabled = !heroHasLiveImage;
+    $('heroLiveMeta').textContent = heroHasLiveImage
+      ? `Last saved ${formatDate(data.updatedAt)} · this is what the Home screen shows`
+      : '';
+    if (!silent) {
+      showStatus($('heroStatus'), heroHasLiveImage ? 'Current hero loaded' : 'No custom hero saved yet', 'info');
+    }
+  } catch (err) {
+    showStatus($('heroStatus'), err.message, 'err');
+  }
+}
+
+function onHeroFileChosen(file) {
+  if (!file) {
+    clearHeroDraft();
+    return;
+  }
+  const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+  if (!allowed.includes(file.type)) {
+    showStatus($('heroStatus'), 'Use a JPG, PNG, WebP, or GIF image', 'err');
+    clearHeroDraft();
+    return;
+  }
+  if (file.size > 8 * 1024 * 1024) {
+    showStatus($('heroStatus'), 'Image is too large. Use a file under 8 MB.', 'err');
+    clearHeroDraft();
+    return;
+  }
+  revokeHeroDraftUrl();
+  heroDraftFile = file;
+  heroDraftObjectUrl = URL.createObjectURL(file);
+  setHeroFrame($('heroDraftImage'), $('heroDraftEmpty'), heroDraftObjectUrl);
+  $('saveHeroBtn').disabled = false;
+  $('clearHeroDraftBtn').disabled = false;
+  showStatus($('heroStatus'), 'Preview ready — save to put this on the Home page', 'info');
+}
+
+async function saveHomeHero() {
+  if (!heroDraftFile) {
+    showStatus($('heroStatus'), 'Choose an image first', 'err');
+    return;
+  }
+  if ($('saveHeroBtn').disabled) return;
+  $('saveHeroBtn').disabled = true;
+  $('clearHeroDraftBtn').disabled = true;
+  $('heroFileInput').disabled = true;
+  showStatus($('heroStatus'), 'Saving hero image…', 'info');
+  try {
+    const fd = new FormData();
+    fd.append('image', heroDraftFile, heroDraftFile.name || 'hero.jpg');
+    await uploadWithProgress('/api/admin/home-hero', fd);
+    clearHeroDraft();
+    await loadHomeHero(true);
+    showStatus($('heroStatus'), 'Saved — the Home page now shows this image', 'ok');
+  } catch (err) {
+    $('saveHeroBtn').disabled = false;
+    $('clearHeroDraftBtn').disabled = false;
+    showStatus($('heroStatus'), err.message, 'err');
+  } finally {
+    $('heroFileInput').disabled = false;
+  }
+}
+
+async function deleteHomeHero() {
+  if (!heroHasLiveImage) return;
+  if (!confirm('Remove the current hero image? The app will go back to the default Home banners.')) {
+    return;
+  }
+  $('deleteHeroBtn').disabled = true;
+  try {
+    await api('/api/admin/home-hero', { method: 'DELETE' });
+    await loadHomeHero(true);
+    showStatus($('heroStatus'), 'Hero image removed', 'ok');
+  } catch (err) {
+    $('deleteHeroBtn').disabled = false;
+    showStatus($('heroStatus'), err.message, 'err');
+  }
+}
+
+$('heroFileInput')?.addEventListener('change', (e) => {
+  onHeroFileChosen(e.target.files && e.target.files[0]);
+});
+$('saveHeroBtn')?.addEventListener('click', () => void saveHomeHero());
+$('clearHeroDraftBtn')?.addEventListener('click', () => {
+  clearHeroDraft();
+  showStatus($('heroStatus'), 'Preview cleared', 'info');
+});
+$('deleteHeroBtn')?.addEventListener('click', () => void deleteHomeHero());
 
 tryRestoreSession();

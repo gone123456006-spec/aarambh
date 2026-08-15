@@ -101,6 +101,21 @@ const userSchema = new mongoose.Schema(
         type: String,
       },
     ],
+    /** Account deletion fields */
+    deletionPending: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletionRequestedAt: {
+      type: Date,
+      default: null,
+    },
+    scheduledDeletionAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,

@@ -38,6 +38,14 @@ const errorHandler = (err, req, res, next) => {
     error = new ApiError(401, 'Invalid token, authorization denied');
   }
 
+  if (err.name === 'MulterError' || err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+    const tooBig = err.code === 'LIMIT_FILE_SIZE';
+    error = new ApiError(
+      400,
+      tooBig ? 'That file is too large. Use an image under 8 MB.' : 'Please upload a single JPG, PNG, WebP, or GIF.'
+    );
+  }
+
   const statusCode = error.statusCode || 500;
   const message = error.message || 'Internal Server Error';
 

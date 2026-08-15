@@ -4,19 +4,23 @@ const ApiResponse = require('../utils/ApiResponse');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { applyCourseMediaAvailability } = require('../utils/mediaAvailability');
-const { sortCourseLessons, isProLevel } = require('../constants/curriculum');
+const { sortCourseLessons } = require('../constants/curriculum');
 const { ownedBy } = require('../utils/ownership');
-const { hasActiveSubscription } = require('../services/subscriptionService');
+const { hasAccessToCategory } = require('../services/subscriptionService');
+const planService = require('../services/planService');
 
 /**
- * Flag Pro courses and strip their lesson media for users without an active
- * subscription. Beginner courses stay fully open. This is the authoritative
- * backend gate — the frontend cannot bypass it.
+ * Flag paid categories and strip lesson media for users without access.
+ * Admin can disable a category subscription to make it free immediately.
  */
-function applyProAccess(courseDoc, subscribed) {
-  const pro = isProLevel(courseDoc.level);
-  const locked = pro && !subscribed;
-  const out = { ...courseDoc, isPro: pro, locked };
+async function applyPlanAccess(courseDoc, userId) {
+  const plan = await planService.getPlan(courseDoc.level);
+  const requiresPayment = plan
+    ? planService.isPaidCategory(plan)
+    : require('../constants/curriculum').isProLevel(courseDoc.level);
+  const hasAccess = await hasAccessToCategory(userId, courseDoc.level);
+  const locked = Boolean(requiresPayment && !hasAccess);
+  const out = { ...courseDoc, isPro: Boolean(requiresPayment), locked };
 
   if (locked && Array.isArray(out.lessons)) {
     out.lessons = out.lessons.map((lesson) => ({
@@ -24,6 +28,11 @@ function applyProAccess(courseDoc, subscribed) {
       videoUrl: null,
       pdfUrl: null,
       locked: true,
+    }));
+  } else if (Array.isArray(out.lessons)) {
+    out.lessons = out.lessons.map((lesson) => ({
+      ...lesson,
+      locked: false,
     }));
   }
 
@@ -35,13 +44,13 @@ function applyProAccess(courseDoc, subscribed) {
  * (Shared catalog — not user-owned content.)
  */
 const getCourses = asyncHandler(async (req, res) => {
-  const subscribed = await hasActiveSubscription(req.user._id);
   const courses = await Course.find({}).sort({ sortOrder: 1, createdAt: 1 });
-  const withMedia = courses.map((course) => {
+  const withMedia = [];
+  for (const course of courses) {
     const doc = course.toObject();
     doc.lessons = sortCourseLessons(doc.lessons || []);
-    return applyProAccess(applyCourseMediaAvailability(doc), subscribed);
-  });
+    withMedia.push(await applyPlanAccess(applyCourseMediaAvailability(doc), req.user._id));
+  }
   res.status(200).json(new ApiResponse(200, withMedia, 'Courses retrieved successfully'));
 });
 
@@ -65,8 +74,9 @@ const getCourseById = asyncHandler(async (req, res) => {
   course.views += 1;
   await course.save();
 
-  const subscribed = await hasActiveSubscription(req.user._id);
-  const doc = applyProAccess(applyCourseMediaAvailability(course), subscribed);
+  const plain = course.toObject();
+  plain.lessons = sortCourseLessons(plain.lessons || []);
+  const doc = await applyPlanAccess(applyCourseMediaAvailability(plain), req.user._id);
 
   res.status(200).json(new ApiResponse(200, doc, 'Course retrieved successfully'));
 });

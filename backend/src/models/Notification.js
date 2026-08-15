@@ -1,69 +1,64 @@
 const mongoose = require('mongoose');
 
-const NOTIFICATION_TYPES = [
-  'system',
-  'welcome',
-  'reward',
-  'course',
-  'game',
-  'points',
-  'leaderboard',
-  'subscription',
-  'chat',
-  'call',
-  'achievement',
-];
-
+/**
+ * Stores notification history for tracking and analytics.
+ */
 const notificationSchema = new mongoose.Schema(
   {
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      index: true,
-    },
     title: {
       type: String,
       required: true,
-      trim: true,
     },
-    message: {
+    body: {
       type: String,
       required: true,
-      trim: true,
     },
-    type: {
+    imageUrl: {
       type: String,
-      enum: NOTIFICATION_TYPES,
-      default: 'system',
-      index: true,
     },
-    /** Dedup key e.g. "daily-reward-2026-07-17" — unique per user when set */
-    key: {
-      type: String,
-      trim: true,
-    },
-    /** Optional deep-link / payload for the app */
     data: {
       type: mongoose.Schema.Types.Mixed,
-      default: null,
+      default: {},
     },
-    read: {
-      type: Boolean,
-      default: false,
-      index: true,
+    // Target audience
+    targetType: {
+      type: String,
+      enum: ['all', 'specific', 'test'],
+      default: 'all',
+    },
+    targetUserIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+      },
+    ],
+    // Sending stats
+    sentBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    totalSent: {
+      type: Number,
+      default: 0,
+    },
+    successCount: {
+      type: Number,
+      default: 0,
+    },
+    failureCount: {
+      type: Number,
+      default: 0,
+    },
+    status: {
+      type: String,
+      enum: ['pending', 'sending', 'sent', 'failed'],
+      default: 'pending',
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-notificationSchema.index({ user: 1, createdAt: -1 });
-notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
-notificationSchema.index({ user: 1, key: 1 }, { unique: true, sparse: true });
+notificationSchema.index({ createdAt: -1 });
+notificationSchema.index({ targetType: 1, createdAt: -1 });
 
-const Notification = mongoose.model('Notification', notificationSchema);
-
-module.exports = Notification;
-module.exports.NOTIFICATION_TYPES = NOTIFICATION_TYPES;
+module.exports = mongoose.model('Notification', notificationSchema);

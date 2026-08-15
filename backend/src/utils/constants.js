@@ -6,6 +6,7 @@ module.exports = {
     video: 100 * 1024 * 1024, // 100MB
     pdf: 20 * 1024 * 1024,    // 20MB
     image: 5 * 1024 * 1024,   // 5MB
+    hero: 8 * 1024 * 1024,    // 8MB home hero banner
   },
   GAMES: {
     QUIZ: "quiz",

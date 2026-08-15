@@ -1,4 +1,4 @@
-const Notification = require('../models/Notification');
+const Notification = require('../models/InAppNotification');
 const User = require('../models/User');
 const Course = require('../models/Course');
 const CourseProgress = require('../models/CourseProgress');
@@ -251,7 +251,7 @@ async function notifyGameProgress(userId, { gameId, level, score, completed, pre
     await createNotification(
       userId,
       `${label} cleared! 🏅`,
-      `You completed ${label}. Try another game or check your rank on the Leaderboard.`,
+      `You completed every available ${label} level. New levels will unlock in a future update.`,
       'achievement',
       {
         key: `game-completed-${gameId}`,
@@ -295,22 +295,20 @@ async function notifyPointsMilestones(userId, prevPoints, nextPoints) {
   }
 }
 
-async function notifySubscriptionActivated(userId, { expiryDate } = {}) {
+async function notifySubscriptionActivated(userId, { expiryDate, planName, category } = {}) {
   const expiry =
     expiryDate instanceof Date
       ? expiryDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
       : '30 days';
+  const title = planName ? `${planName} is active 👑` : 'Subscription active! 👑';
+  const body = category
+    ? `${planName || 'Your plan'} is unlocked until ${expiry}. Enjoy learning!`
+    : `Your courses are unlocked until ${expiry}. Enjoy learning!`;
 
-  return createNotification(
-    userId,
-    'Pro subscription active! 👑',
-    `Intermediate and Advanced courses are unlocked until ${expiry}. Enjoy learning!`,
-    'subscription',
-    {
-      key: `sub-active-${Date.now()}`,
-      data: { route: '/profile' },
-    }
-  );
+  return createNotification(userId, title, body, 'subscription', {
+    key: `sub-active-${Date.now()}`,
+    data: { route: '/profile' },
+  });
 }
 
 async function notifySubscriptionStatus(userId) {

@@ -1,5 +1,9 @@
 const express = require('express');
 const ApiResponse = require('../utils/ApiResponse');
+const homeHeroController = require('../controllers/homeHeroController');
+const notificationController = require('../controllers/notificationController');
+const accountDeletionController = require('../controllers/accountDeletionController');
+const { protect } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -42,5 +46,17 @@ router.get('/version', (req, res) => {
     )
   );
 });
+
+router.get('/home-hero', homeHeroController.getPublicHero);
+
+// Device token management (requires authentication)
+router.post('/device-token', protect, notificationController.registerDeviceToken);
+router.delete('/device-token', protect, notificationController.unregisterDeviceToken);
+router.post('/test-notification', protect, notificationController.testNotification);
+
+// Account deletion (requires authentication)
+router.post('/user/request-deletion', protect, accountDeletionController.requestDeletion);
+router.post('/user/cancel-deletion', protect, accountDeletionController.cancelDeletion);
+router.get('/user/deletion-status', protect, accountDeletionController.getDeletionStatus);
 
 module.exports = router;

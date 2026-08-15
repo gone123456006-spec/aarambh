@@ -1,121 +1,218 @@
-const notificationService = require('../services/notificationService');
-const ApiResponse = require('../utils/ApiResponse');
+const firebaseService = require('../services/firebaseService');
+const dailyNotificationService = require('../services/dailyNotificationService');
+const { triggerDailyNotificationsNow } = require('../services/notificationScheduler');
+const Notification = require('../models/Notification');
+const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 
 /**
- * GET /api/notifications
- * Returns recent notifications + unread count. Also bootstraps auto notifications on open.
+ * Register a device token for push notifications.
+ * POST /api/app/device-token
+ * Body: { token, platform?, model?, osVersion? }
  */
-const getNotifications = asyncHandler(async (req, res) => {
-  const unreadOnly = String(req.query.unreadOnly || '') === 'true';
-  const skipBootstrap = String(req.query.bootstrap || '1') === '0';
+exports.registerDeviceToken = asyncHandler(async (req, res) => {
+  const { token, platform, model, osVersion } = req.body;
 
-  if (!skipBootstrap) {
-    await notificationService.bootstrapUserNotifications(req.user._id, { isLogin: false });
+  if (!token || typeof token !== 'string') {
+    throw new ApiError(400, 'Valid FCM token is required');
   }
 
-  const [notifications, unreadCount] = await Promise.all([
-    notificationService.getNotifications(req.user._id, {
-      limit: 60,
-      unreadOnly,
-    }),
-    notificationService.getUnreadCount(req.user._id),
-  ]);
+  const deviceInfo = { platform, model, osVersion };
+  const deviceToken = await firebaseService.registerToken(req.user._id, token, deviceInfo);
 
-  res.status(200).json(
-    new ApiResponse(
-      200,
-      { notifications, unreadCount },
-      'Notifications retrieved successfully'
-    )
-  );
-});
-
-/** GET /api/notifications/unread-count */
-const getUnreadCount = asyncHandler(async (req, res) => {
-  const unreadCount = await notificationService.getUnreadCount(req.user._id);
-  res.status(200).json(new ApiResponse(200, { unreadCount }, 'Unread count retrieved'));
-});
-
-/** POST /api/notifications/bootstrap — force auto-send on login / app open */
-const bootstrap = asyncHandler(async (req, res) => {
-  const isLogin = Boolean(req.body?.isLogin);
-  const result = await notificationService.bootstrapUserNotifications(req.user._id, { isLogin });
-  const [notifications, unreadCount] = await Promise.all([
-    notificationService.getNotifications(req.user._id, { limit: 60 }),
-    notificationService.getUnreadCount(req.user._id),
-  ]);
-  res.status(200).json(
-    new ApiResponse(200, { ...result, notifications, unreadCount }, 'Notifications refreshed')
-  );
+  res.json({
+    success: true,
+    message: 'Device token registered successfully',
+    data: {
+      tokenId: deviceToken._id,
+      isActive: deviceToken.isActive,
+    },
+  });
 });
 
 /**
- * POST /api/notifications/events — frontend events (daily reward claim, etc.)
- * Body: { event, payload }
+ * Unregister a device token.
+ * DELETE /api/app/device-token
+ * Body: { token }
  */
-const reportEvent = asyncHandler(async (req, res) => {
-  const { event, payload = {} } = req.body || {};
-  const userId = req.user._id;
+exports.unregisterDeviceToken = asyncHandler(async (req, res) => {
+  const { token } = req.body;
 
-  switch (event) {
-    case 'daily_reward_claimed':
-      await notificationService.notifyDailyRewardClaimed(userId, payload);
-      break;
-    case 'chat_tip':
-      await notificationService.notifyChatTip(userId);
-      break;
-    case 'call_tip':
-      await notificationService.notifyCallTip(userId);
-      break;
-    default:
-      throw new ApiError(400, `Unknown notification event: ${event || '(empty)'}`);
+  if (!token) {
+    throw new ApiError(400, 'Token is required');
   }
 
-  const unreadCount = await notificationService.getUnreadCount(userId);
-  res.status(200).json(new ApiResponse(200, { unreadCount }, 'Event recorded'));
+  await firebaseService.unregisterToken(token);
+
+  res.json({
+    success: true,
+    message: 'Device token unregistered successfully',
+  });
 });
 
-const markAsRead = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const notification = await notificationService.markAsRead(id, req.user._id);
+/**
+ * Send a push notification (Admin only).
+ * POST /api/admin/notifications/send
+ * Body: { title, body, imageUrl?, data?, targetType: 'all' | 'specific', targetUserIds? }
+ */
+exports.sendNotification = asyncHandler(async (req, res) => {
+  const { title, body, imageUrl, data, targetType, targetUserIds } = req.body;
 
-  if (!notification) {
-    throw new ApiError(404, 'Notification not found or access denied');
+  if (!title || !body) {
+    throw new ApiError(400, 'Title and body are required');
   }
 
-  res.status(200).json(new ApiResponse(200, notification, 'Notification marked as read'));
-});
-
-const markAllAsRead = asyncHandler(async (req, res) => {
-  await notificationService.markAllAsRead(req.user._id);
-  res.status(200).json(new ApiResponse(200, { unreadCount: 0 }, 'All notifications marked as read'));
-});
-
-/** DELETE /api/notifications/:id */
-const deleteNotification = asyncHandler(async (req, res) => {
-  const deleted = await notificationService.deleteNotification(req.params.id, req.user._id);
-  if (!deleted) {
-    throw new ApiError(404, 'Notification not found or access denied');
+  if (targetType === 'specific' && (!targetUserIds || targetUserIds.length === 0)) {
+    throw new ApiError(400, 'Target user IDs are required for specific notifications');
   }
-  const unreadCount = await notificationService.getUnreadCount(req.user._id);
-  res.status(200).json(new ApiResponse(200, { id: req.params.id, unreadCount }, 'Notification deleted'));
+
+  const { notification, result } = await firebaseService.createAndSendNotification({
+    title,
+    body,
+    imageUrl,
+    data,
+    targetType: targetType || 'all',
+    targetUserIds: targetUserIds || [],
+    sentBy: req.user._id,
+  });
+
+  res.json({
+    success: true,
+    message: `Notification sent to ${result.successCount} device(s)`,
+    data: {
+      notificationId: notification._id,
+      totalSent: notification.totalSent,
+      successCount: notification.successCount,
+      failureCount: notification.failureCount,
+    },
+  });
 });
 
-/** DELETE /api/notifications — clear all for this user */
-const deleteAllNotifications = asyncHandler(async (req, res) => {
-  await notificationService.deleteAllNotifications(req.user._id);
-  res.status(200).json(new ApiResponse(200, { unreadCount: 0 }, 'All notifications deleted'));
+/**
+ * Get notification history (Admin only).
+ * GET /api/admin/notifications/history
+ * Query: ?limit=20&skip=0
+ */
+exports.getNotificationHistory = asyncHandler(async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+  const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
+
+  const notifications = await Notification.find()
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .skip(skip)
+    .populate('sentBy', 'name email')
+    .lean();
+
+  const total = await Notification.countDocuments();
+
+  res.json({
+    success: true,
+    data: {
+      notifications,
+      total,
+      limit,
+      skip,
+    },
+  });
 });
 
-module.exports = {
-  getNotifications,
-  getUnreadCount,
-  bootstrap,
-  reportEvent,
-  markAsRead,
-  markAllAsRead,
-  deleteNotification,
-  deleteAllNotifications,
-};
+/**
+ * Get notification stats (Admin only).
+ * GET /api/admin/push-notifications/stats
+ */
+exports.getNotificationStats = asyncHandler(async (req, res) => {
+  const DeviceToken = require('../models/DeviceToken');
+
+  const [totalUsers, activeTokens, totalNotifications, recentNotifications, dailyStats] = await Promise.all([
+    User.countDocuments(),
+    DeviceToken.countDocuments({ isActive: true }),
+    Notification.countDocuments(),
+    Notification.countDocuments({
+      createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+    }),
+    dailyNotificationService.getDailyNotificationStats(),
+  ]);
+
+  // Count unique users with active tokens
+  const uniqueUsers = await DeviceToken.distinct('userId', { isActive: true });
+
+  res.json({
+    success: true,
+    data: {
+      totalUsers,
+      activeDevices: activeTokens,
+      usersWithNotifications: uniqueUsers.length,
+      totalNotificationsSent: totalNotifications,
+      last7Days: recentNotifications,
+      firebaseEnabled: firebaseService.isFirebaseEnabled(),
+      dailyNotifications: dailyStats,
+    },
+  });
+});
+
+/**
+ * Test notification to current user (for testing).
+ * POST /api/app/test-notification
+ */
+exports.testNotification = asyncHandler(async (req, res) => {
+  if (!firebaseService.isFirebaseEnabled()) {
+    throw new ApiError(503, 'Push notifications are not configured');
+  }
+
+  const result = await firebaseService.sendToUsers(
+    [req.user._id],
+    {
+      title: 'Test Notification',
+      body: 'This is a test notification from Ohm\'s!',
+    },
+    { type: 'test' }
+  );
+
+  res.json({
+    success: true,
+    message: 'Test notification sent',
+    data: result,
+  });
+});
+
+/**
+ * Manually trigger daily notifications to all users (Admin only).
+ * POST /api/admin/push-notifications/trigger-daily
+ */
+exports.triggerDailyNotifications = asyncHandler(async (req, res) => {
+  if (!firebaseService.isFirebaseEnabled()) {
+    throw new ApiError(503, 'Push notifications are not configured');
+  }
+
+  const stats = await triggerDailyNotificationsNow();
+
+  res.json({
+    success: true,
+    message: 'Daily notifications triggered successfully',
+    data: stats,
+  });
+});
+
+/**
+ * Get daily notification stats and message pool (Admin only).
+ * GET /api/admin/push-notifications/daily-config
+ */
+exports.getDailyNotificationConfig = asyncHandler(async (req, res) => {
+  const stats = await dailyNotificationService.getDailyNotificationStats();
+  
+  res.json({
+    success: true,
+    data: {
+      schedule: process.env.DAILY_NOTIFICATION_SCHEDULE || '30 4 * * * (10:00 AM IST)',
+      stats,
+      messagePool: dailyNotificationService.NOTIFICATION_MESSAGES.map(msg => ({
+        key: msg.key,
+        title: msg.title,
+        body: msg.body,
+      })),
+      totalMessages: dailyNotificationService.NOTIFICATION_MESSAGES.length,
+    },
+  });
+});

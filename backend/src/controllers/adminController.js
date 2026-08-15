@@ -7,6 +7,7 @@ const GameProgress = require('../models/GameProgress');
 const uploadService = require('../services/uploadService');
 const tokenService = require('../services/tokenService');
 const { sortCourseLessons, slugifyLevel, colorsForLevel } = require('../constants/curriculum');
+const { notifyNewCourse, notifyCourseLessonsAdded } = require('../services/notificationHelpers');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
@@ -349,6 +350,11 @@ const createCourse = asyncHandler(async (req, res) => {
 
   await course.save();
 
+  // Send push notification about new course (async, don't wait)
+  notifyNewCourse(course).catch((err) => 
+    console.error('Failed to send new course notification:', err)
+  );
+
   res.status(201).json(new ApiResponse(201, course, 'Category created successfully'));
 });
 
@@ -426,6 +432,11 @@ const addLesson = asyncHandler(async (req, res) => {
   course.lessons.push(newLesson);
   course.lessons = sortCourseLessons(course.lessons);
   await course.save();
+
+  // Send push notification about new lesson (async, don't wait)
+  notifyCourseLessonsAdded(course, 1).catch((err) => 
+    console.error('Failed to send lesson notification:', err)
+  );
 
   res.status(201).json(new ApiResponse(201, course, 'Lesson added successfully'));
 });

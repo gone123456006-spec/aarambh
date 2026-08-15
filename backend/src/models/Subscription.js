@@ -15,9 +15,28 @@ const subscriptionSchema = new mongoose.Schema(
       default: 'Pro',
       trim: true,
     },
+    category: {
+      type: String,
+      enum: ['beginner', 'intermediate', 'advanced', 'all'],
+      default: 'all',
+      index: true,
+    },
     price: {
       type: Number,
       default: PLAN_PRICE,
+    },
+    originalPrice: {
+      type: Number,
+      default: null,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+    },
+    couponCode: {
+      type: String,
+      trim: true,
+      default: null,
     },
     currency: {
       type: String,
@@ -78,6 +97,7 @@ const subscriptionSchema = new mongoose.Schema(
 );
 
 subscriptionSchema.index({ user: 1, expiryDate: -1 });
+subscriptionSchema.index({ user: 1, status: 1, category: 1 });
 
 /** True when this record is still within its paid window. */
 subscriptionSchema.methods.isCurrentlyActive = function isCurrentlyActive() {

@@ -1,5 +1,5 @@
 const ApiError = require('../utils/ApiError');
-const { buildUploadPayload, deleteFileByUrl } = require('../config/uploads');
+const { buildUploadPayload, deleteFileByUrl, deleteFileByRelativePath } = require('../config/uploads');
 
 /**
  * Local disk uploads (videos, PDFs, avatars). No Cloudinary.
@@ -31,9 +31,26 @@ function saveLessonPdf(req) {
   return buildUploadPayload(req, subpath);
 }
 
+function saveHeroImage(req) {
+  if (!req.file) {
+    throw new ApiError(400, 'Please choose an image to upload');
+  }
+
+  const subpath = `hero/${req.file.filename}`;
+  return buildUploadPayload(req, subpath);
+}
+
 function deleteLocalAsset(fileUrl) {
   try {
     deleteFileByUrl(fileUrl);
+  } catch (error) {
+    console.error('Failed to delete local file:', error.message);
+  }
+}
+
+function deleteLocalPath(relativePath) {
+  try {
+    deleteFileByRelativePath(relativePath);
   } catch (error) {
     console.error('Failed to delete local file:', error.message);
   }
@@ -43,5 +60,7 @@ module.exports = {
   saveAvatar,
   saveLessonVideo,
   saveLessonPdf,
+  saveHeroImage,
   deleteLocalAsset,
+  deleteLocalPath,
 };

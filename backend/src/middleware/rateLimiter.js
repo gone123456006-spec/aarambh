@@ -24,7 +24,20 @@ const authLimiter = rateLimit({
   },
 });
 
+const couponLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    statusCode: 429,
+    message: 'Too many coupon attempts. Please wait a few minutes and try again.',
+  },
+});
+
 module.exports = {
   apiLimiter,
   authLimiter,
+  couponLimiter,
 };

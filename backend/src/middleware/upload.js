@@ -45,6 +45,36 @@ function imageFilter(_req, file, cb) {
   }
 }
 
+const HERO_MIME_TO_EXT = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+};
+
+function heroFilter(_req, file, cb) {
+  if (HERO_MIME_TO_EXT[file.mimetype]) {
+    cb(null, true);
+  } else {
+    cb(new ApiError(400, 'Use a JPG, PNG, WebP, or GIF image'), false);
+  }
+}
+
+function makeHeroStorage() {
+  return multer.diskStorage({
+    destination: (_req, _file, cb) => {
+      ensureUploadDirs();
+      cb(null, UPLOAD_DIRS.hero);
+    },
+    filename: (_req, file, cb) => {
+      const ext = HERO_MIME_TO_EXT[file.mimetype] || '.jpg';
+      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `home-hero-${unique}${ext}`);
+    },
+  });
+}
+
 const uploadVideo = multer({
   storage: makeDiskStorage(UPLOAD_DIRS.videos),
   fileFilter: videoFilter,
@@ -63,8 +93,15 @@ const uploadAvatar = multer({
   limits: { fileSize: MAX_FILE_SIZES.image },
 });
 
+const uploadHero = multer({
+  storage: makeHeroStorage(),
+  fileFilter: heroFilter,
+  limits: { fileSize: MAX_FILE_SIZES.hero || MAX_FILE_SIZES.image, files: 1 },
+});
+
 module.exports = {
   uploadVideo,
   uploadPdf,
   uploadAvatar,
+  uploadHero,
 };

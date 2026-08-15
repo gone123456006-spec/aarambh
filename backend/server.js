@@ -9,6 +9,9 @@ const { ensureUploadDirs } = require('./src/config/uploads');
 const { getCorsOptions } = require('./src/config/cors');
 const configureChatSocket = require('./src/sockets/chatSocket');
 const { startKeepAlive, stopKeepAlive } = require('./src/utils/keepAlive');
+const { initializeFirebase } = require('./src/services/firebaseService');
+const { startDailyNotificationScheduler, stopDailyNotificationScheduler } = require('./src/services/notificationScheduler');
+const { startAccountDeletionScheduler, stopAccountDeletionScheduler } = require('./src/services/accountDeletionScheduler');
 
 validateEnv();
 
@@ -24,6 +27,8 @@ function shutdown(signal) {
   console.log(`[server] ${signal} — closing...`);
 
   stopKeepAlive(keepAliveTimer);
+  stopDailyNotificationScheduler();
+  stopAccountDeletionScheduler();
 
   if (!httpServer) {
     process.exit(0);
@@ -47,6 +52,9 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 async function startServer() {
   ensureUploadDirs();
   await connectDB();
+  initializeFirebase();
+  startDailyNotificationScheduler();
+  startAccountDeletionScheduler();
 
   httpServer = http.createServer(app);
 

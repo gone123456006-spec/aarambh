@@ -35,12 +35,17 @@ function colorsForLevel(level, index = 0) {
   return FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 }
 
-/** Levels that are always free. Everything else requires a Pro subscription. */
+/** Levels that are free unless a paid plan is enabled for them. */
 const FREE_LEVELS = ['beginner'];
+
+function isBeginnerLike(level) {
+  const slug = slugifyLevel(level);
+  return slug === 'beginner' || slug.includes('beginner');
+}
 
 /** True when a course level (e.g. intermediate/advanced/custom) needs Pro access. */
 function isProLevel(level) {
-  return !FREE_LEVELS.includes(slugifyLevel(level));
+  return !isBeginnerLike(level);
 }
 
 module.exports = {
@@ -49,5 +54,6 @@ module.exports = {
   colorsForLevel,
   DEFAULT_CATEGORY_COLORS,
   FREE_LEVELS,
+  isBeginnerLike,
   isProLevel,
 };

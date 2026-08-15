@@ -11,6 +11,7 @@ const { privacyPolicyHtml, termsHtml } = require('./content/legalPages');
 const { getCorsOptions } = require('./config/cors');
 const errorHandler = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimiter');
+const subscriptionController = require('./controllers/subscriptionController');
 const ApiError = require('./utils/ApiError');
 
 // Route Imports
@@ -41,6 +42,13 @@ app.use(
 );
 
 app.use(cors(getCorsOptions()));
+
+// Razorpay webhooks need the raw body for HMAC verification (before JSON parser).
+app.post(
+  '/api/subscription/webhook',
+  express.raw({ type: 'application/json' }),
+  subscriptionController.handleRazorpayWebhook
+);
 
 // HTTP request logger
 if (process.env.NODE_ENV === 'development') {

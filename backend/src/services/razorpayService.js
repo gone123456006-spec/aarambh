@@ -76,7 +76,32 @@ function verifyPaymentSignature({ orderId, paymentId, signature }) {
     .digest('hex');
 
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(String(signature)));
+    const a = Buffer.from(expected, 'utf8');
+    const b = Buffer.from(String(signature), 'utf8');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+function isWebhookConfigured() {
+  return Boolean(process.env.RAZORPAY_WEBHOOK_SECRET?.trim());
+}
+
+/** Razorpay webhook HMAC of the raw request body. */
+function verifyWebhookSignature(rawBody, signature) {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET?.trim();
+  if (!secret || !signature || rawBody == null) return false;
+
+  const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody));
+  const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+
+  try {
+    const a = Buffer.from(expected, 'utf8');
+    const b = Buffer.from(String(signature), 'utf8');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   } catch {
     return false;
   }
@@ -84,7 +109,9 @@ function verifyPaymentSignature({ orderId, paymentId, signature }) {
 
 module.exports = {
   isRazorpayConfigured,
+  isWebhookConfigured,
   createOrder,
   verifyPaymentSignature,
+  verifyWebhookSignature,
   getRazorpayCredentials,
 };

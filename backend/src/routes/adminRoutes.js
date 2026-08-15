@@ -1,10 +1,13 @@
 const express = require('express');
-const { body } = require('express-validator');
+const { param, body } = require('express-validator');
 const adminController = require('../controllers/adminController');
 const gameQuestionController = require('../controllers/gameQuestionController');
+const adminPlanController = require('../controllers/adminPlanController');
 const adminNotificationController = require('../controllers/adminNotificationController');
+const notificationController = require('../controllers/notificationController');
+const homeHeroController = require('../controllers/homeHeroController');
 const { protect, adminOnly } = require('../middleware/auth');
-const { uploadVideo, uploadPdf } = require('../middleware/upload');
+const { uploadVideo, uploadPdf, uploadHero } = require('../middleware/upload');
 const validate = require('../middleware/validate');
 const { authLimiter } = require('../middleware/rateLimiter');
 
@@ -89,6 +92,10 @@ router.post('/upload/video', uploadVideo.single('video'), adminController.upload
 
 router.post('/upload/pdf', uploadPdf.single('pdf'), adminController.uploadPdf);
 
+router.get('/home-hero', homeHeroController.getAdminHero);
+router.post('/home-hero', uploadHero.single('image'), homeHeroController.uploadHero);
+router.delete('/home-hero', homeHeroController.deleteHero);
+
 router.get('/analytics', adminController.getAnalytics);
 
 // Subscription management
@@ -99,6 +106,41 @@ router.put(
   [body('status').isIn(['active', 'expired', 'cancelled', 'pending']).withMessage('Invalid status')],
   validate,
   adminController.updateSubscriptionStatus
+);
+
+router.get('/subscription-plans', adminPlanController.getSubscriptionPlans);
+router.put(
+  '/subscription-plans/:category',
+  [
+    body('price').optional().isFloat({ min: 0 }).withMessage('Price must be 0 or more'),
+    body('enabled').optional(),
+    body('durationDays').optional().isInt({ min: 1 }).withMessage('Duration must be at least 1 day'),
+  ],
+  validate,
+  adminPlanController.updateSubscriptionPlan
+);
+
+router.get('/coupons', adminPlanController.listCoupons);
+router.post(
+  '/coupons',
+  [
+    body('discountType').isIn(['percent', 'fixed']).withMessage('Discount type must be percent or fixed'),
+    body('discountValue').isFloat({ min: 0.01 }).withMessage('Discount value is required'),
+  ],
+  validate,
+  adminPlanController.createCoupon
+);
+router.put(
+  '/coupons/:id',
+  [param('id').isMongoId().withMessage('Invalid coupon id')],
+  validate,
+  adminPlanController.updateCoupon
+);
+router.delete(
+  '/coupons/:id',
+  [param('id').isMongoId().withMessage('Invalid coupon id')],
+  validate,
+  adminPlanController.deleteCoupon
 );
 
 // Game question management
@@ -166,5 +208,21 @@ router.delete('/notifications/:id', adminNotificationController.deleteAdminNotif
 router.post('/notifications/:id/send', adminNotificationController.sendAdminNotification);
 router.post('/notifications/:id/cancel', adminNotificationController.cancelAdminNotification);
 router.post('/notifications/preview-targets', adminNotificationController.previewNotificationTargets);
+
+// Push notification management (FCM)
+router.post(
+  '/push-notifications/send',
+  [
+    body('title').trim().notEmpty().withMessage('Title is required'),
+    body('body').trim().notEmpty().withMessage('Body is required'),
+    body('targetType').optional().isIn(['all', 'specific', 'test']).withMessage('Invalid target type'),
+  ],
+  validate,
+  notificationController.sendNotification
+);
+router.get('/push-notifications/history', notificationController.getNotificationHistory);
+router.get('/push-notifications/stats', notificationController.getNotificationStats);
+router.get('/push-notifications/daily-config', notificationController.getDailyNotificationConfig);
+router.post('/push-notifications/trigger-daily', notificationController.triggerDailyNotifications);
 
 module.exports = router;

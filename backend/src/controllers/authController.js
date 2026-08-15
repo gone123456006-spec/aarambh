@@ -2,6 +2,7 @@ const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const otpService = require('../services/otpService');
 const tokenService = require('../services/tokenService');
+const accountDeletionService = require('../services/accountDeletionService');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
@@ -22,7 +23,7 @@ function cookieOptions() {
   };
 }
 
-function buildAuthPayload(user, tokens, { isNewUser = false } = {}) {
+function buildAuthPayload(user, tokens, { isNewUser = false, deletionCancelled = false } = {}) {
   return {
     user: {
       id: user._id,
@@ -40,6 +41,7 @@ function buildAuthPayload(user, tokens, { isNewUser = false } = {}) {
     refreshToken: tokens.refreshToken,
     isNewUser,
     isProfileComplete: isUserProfileComplete(user),
+    deletionCancelled,
   };
 }
 
@@ -121,6 +123,7 @@ const verifyOtp = asyncHandler(async (req, res) => {
   // OTP verified! Retrieve user if they exist, otherwise create them
   let user = await User.findOne({ email: trimmedEmail });
   let isNewUser = false;
+  let deletionCancelled = false;
 
   if (!user) {
     user = new User({ email: trimmedEmail, profileCompleted: false });
@@ -128,6 +131,25 @@ const verifyOtp = asyncHandler(async (req, res) => {
     isNewUser = true;
   } else {
     user = await ensureProfileCompletedFlag(user);
+
+    // Check for pending account deletion
+    if (user.deletionPending) {
+      const now = new Date();
+      if (user.scheduledDeletionAt && user.scheduledDeletionAt <= now) {
+        // Grace period expired - permanently delete the account
+        await accountDeletionService.permanentlyDeleteAccount(user._id);
+        throw new ApiError(
+          410,
+          'Your account has been permanently deleted as scheduled. The 7-day recovery period has expired.'
+        );
+      } else {
+        // Grace period still active - cancel deletion and allow login
+        await accountDeletionService.cancelAccountDeletion(user._id);
+        deletionCancelled = true;
+        // Re-fetch user to get updated deletion fields
+        user = await User.findById(user._id);
+      }
+    }
   }
 
   // Block login when another device already holds this account
@@ -150,14 +172,18 @@ const verifyOtp = asyncHandler(async (req, res) => {
   const tokens = await tokenService.bindDeviceAndIssueTokens(user._id, normalizedDeviceId);
   await sendLoginNotifications(user, isNewUser);
 
+  const message = deletionCancelled
+    ? 'Welcome back! Your account deletion request has been cancelled. Your account is now active again.'
+    : 'Authentication successful';
+
   res
     .status(200)
     .cookie('refreshToken', tokens.refreshToken, cookieOptions())
     .json(
       new ApiResponse(
         200,
-        buildAuthPayload(user, tokens, { isNewUser }),
-        'Authentication successful'
+        buildAuthPayload(user, tokens, { isNewUser, deletionCancelled }),
+        message
       )
     );
 });
@@ -200,8 +226,33 @@ const transferDevice = asyncHandler(async (req, res) => {
   }
 
   user = await ensureProfileCompletedFlag(user);
+
+  // Check for pending account deletion
+  let deletionCancelled = false;
+  if (user.deletionPending) {
+    const now = new Date();
+    if (user.scheduledDeletionAt && user.scheduledDeletionAt <= now) {
+      // Grace period expired - permanently delete the account
+      await accountDeletionService.permanentlyDeleteAccount(user._id);
+      throw new ApiError(
+        410,
+        'Your account has been permanently deleted as scheduled. The 7-day recovery period has expired.'
+      );
+    } else {
+      // Grace period still active - cancel deletion and allow login
+      await accountDeletionService.cancelAccountDeletion(user._id);
+      deletionCancelled = true;
+      // Re-fetch user to get updated deletion fields
+      user = await User.findById(user._id);
+    }
+  }
+
   const tokens = await tokenService.bindDeviceAndIssueTokens(user._id, normalizedDeviceId);
   await sendLoginNotifications(user, false);
+
+  const message = deletionCancelled
+    ? 'Welcome back! Your account deletion request has been cancelled. Device transferred successfully.'
+    : 'Device transferred successfully. Other devices have been logged out.';
 
   res
     .status(200)
@@ -209,8 +260,8 @@ const transferDevice = asyncHandler(async (req, res) => {
     .json(
       new ApiResponse(
         200,
-        buildAuthPayload(user, tokens, { isNewUser: false }),
-        'Device transferred successfully. Other devices have been logged out.'
+        buildAuthPayload(user, tokens, { isNewUser: false, deletionCancelled }),
+        message
       )
     );
 });

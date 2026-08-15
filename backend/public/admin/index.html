@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Aarambh Admin Dashboard</title>
-    <link rel="stylesheet" href="/admin/admin.css?v=7" />
+    <link rel="stylesheet" href="/admin/admin.css?v=10" />
   </head>
   <body>
     <header>
@@ -52,7 +52,9 @@
 
           <nav class="sidebar-nav" role="tablist">
             <button type="button" class="tab active" data-tab="content">Courses &amp; videos</button>
+            <button type="button" class="tab" data-tab="home">Home page</button>
             <button type="button" class="tab" data-tab="subscriptions">Subscriptions</button>
+            <button type="button" class="tab" data-tab="coupons">Coupons</button>
             <button type="button" class="tab" data-tab="games">Game Questions</button>
             <button type="button" class="tab" data-tab="notifications">Notifications</button>
             <button type="button" class="tab" data-tab="overview">Overview</button>
@@ -95,8 +97,57 @@
             </div>
           </div>
 
+          <!-- HOME PAGE HERO -->
+          <div id="panel-home" class="tab-panel hidden">
+            <section class="card">
+              <h2>Hero image</h2>
+              <p class="hint">
+                This is the image at the top of the Home screen. Only the latest saved image is shown in the app.
+                Choose a file to preview it, then save. Saving replaces the previous hero.
+              </p>
+
+              <p class="hero-label">Currently live</p>
+              <div id="heroLiveFrame" class="hero-preview-frame">
+                <span id="heroLiveEmpty" class="hero-preview-empty">No custom hero yet — the app uses the default banners.</span>
+                <img id="heroLiveImage" alt="Current home hero" class="hidden" />
+              </div>
+              <p id="heroLiveMeta" class="hero-meta"></p>
+              <div class="row" style="margin-bottom: 1.25rem">
+                <button type="button" id="deleteHeroBtn" class="secondary" disabled>Delete current image</button>
+              </div>
+
+              <p class="hero-label">Upload a new image</p>
+              <label for="heroFileInput">Image file (JPG, PNG, or WebP)</label>
+              <input id="heroFileInput" type="file" accept="image/jpeg,image/png,image/webp,image/gif" />
+
+              <p class="hero-label">Preview before saving</p>
+              <div id="heroDraftFrame" class="hero-preview-frame">
+                <span id="heroDraftEmpty" class="hero-preview-empty">Select an image to preview it here.</span>
+                <img id="heroDraftImage" alt="New hero preview" class="hidden" />
+              </div>
+
+              <div class="row" style="margin-top: 1rem">
+                <button type="button" id="saveHeroBtn" disabled>Save to Home page</button>
+                <button type="button" id="clearHeroDraftBtn" class="ghost" disabled>Clear preview</button>
+              </div>
+              <div id="heroStatus" class="status hidden"></div>
+            </section>
+          </div>
+
           <!-- SUBSCRIPTIONS -->
           <div id="panel-subscriptions" class="tab-panel hidden">
+            <section class="card">
+              <h2>Category plans</h2>
+              <p class="hint">
+                Enable a paid subscription for <strong>Beginner</strong>, <strong>Intermediate</strong>, or
+                <strong>Advanced</strong>. Set the price in ₹. Turn a plan off to make that category free in the app immediately.
+              </p>
+              <div id="plansStatus" class="status hidden"></div>
+              <div id="plansGrid" class="plans-grid">
+                <p class="hint">Loading plans…</p>
+              </div>
+            </section>
+
             <section class="card">
               <h2>Subscription Management</h2>
               <p class="hint">
@@ -152,6 +203,83 @@
                   <button type="button" id="prevSubscriptionsBtn" class="secondary" disabled>Previous</button>
                   <button type="button" id="nextSubscriptionsBtn" class="secondary">Next</button>
                 </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- COUPONS -->
+          <div id="panel-coupons" class="tab-panel hidden">
+            <section class="card">
+              <h2>Coupon Management</h2>
+              <p class="hint">
+                Codes are generated automatically as <strong>OHMS</strong> + 3 numbers + 4 letters
+                (example: <code>OHMS482ABCD</code>). Coupons are <strong>optional</strong> — users can pay the full price or enter a code at checkout for a discount.
+              </p>
+              <div id="couponsStatus" class="status hidden"></div>
+
+              <form id="couponForm">
+                <input type="hidden" id="couponEditId" />
+                <div class="upload-row">
+                  <div class="upload-field">
+                    <label for="couponDiscountType">Discount type</label>
+                    <select id="couponDiscountType">
+                      <option value="percent">Percentage (%)</option>
+                      <option value="fixed">Fixed amount (₹)</option>
+                    </select>
+                  </div>
+                  <div class="upload-field">
+                    <label for="couponDiscountValue">Discount value</label>
+                    <input id="couponDiscountValue" type="number" min="0.01" step="0.01" placeholder="e.g. 20 or 50" required />
+                  </div>
+                  <div class="upload-field">
+                    <label for="couponMinPurchase">Min. purchase (₹, optional)</label>
+                    <input id="couponMinPurchase" type="number" min="0" step="1" placeholder="0" />
+                  </div>
+                </div>
+                <div class="upload-row">
+                  <div class="upload-field">
+                    <label for="couponExpiresAt">Expiry date (optional)</label>
+                    <input id="couponExpiresAt" type="date" />
+                  </div>
+                  <div class="upload-field">
+                    <label for="couponMaxUses">Max uses (optional)</label>
+                    <input id="couponMaxUses" type="number" min="1" step="1" placeholder="Unlimited" />
+                  </div>
+                  <div class="upload-field">
+                    <label for="couponDescription">Note (optional)</label>
+                    <input id="couponDescription" type="text" placeholder="e.g. Launch offer" />
+                  </div>
+                </div>
+                <label class="toggle-row">
+                  <input id="couponActive" type="checkbox" checked />
+                  Active (usable in the app)
+                </label>
+                <div class="row" style="gap: 0.5rem; margin-top: 0.75rem">
+                  <button type="submit" id="saveCouponBtn">Generate coupon</button>
+                  <button type="button" id="cancelCouponEditBtn" class="secondary hidden">Cancel edit</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="card">
+              <h3>All coupons</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Code</th>
+                      <th>Discount</th>
+                      <th>Status</th>
+                      <th>Uses</th>
+                      <th>Expiry</th>
+                      <th>Min. ₹</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="couponsTableBody">
+                    <tr><td colspan="7">Loading…</td></tr>
+                  </tbody>
+                </table>
               </div>
             </section>
           </div>
@@ -315,8 +443,122 @@
 
           <!-- NOTIFICATIONS -->
           <div id="panel-notifications" class="tab-panel hidden">
+            <!-- PUSH NOTIFICATIONS (FCM) -->
             <section class="card">
-              <h2>Notification Management</h2>
+              <h2>Push Notifications</h2>
+              <p class="hint">
+                Send real-time push notifications to user devices using Firebase Cloud Messaging.
+                These appear even when the app is closed.
+              </p>
+              
+              <div id="pushNotifStats" class="stats-grid" style="margin-bottom: 1rem">
+                <div class="stat-card">
+                  <div class="stat-value" id="activeDevicesCount">—</div>
+                  <div class="stat-label">Active Devices</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-value" id="usersWithNotifCount">—</div>
+                  <div class="stat-label">Users with Notifications</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-value" id="totalPushSentCount">—</div>
+                  <div class="stat-label">Total Sent</div>
+                </div>
+                <div class="stat-card">
+                  <div class="stat-value" id="fcmStatusIndicator">○</div>
+                  <div class="stat-label">FCM Status</div>
+                </div>
+              </div>
+
+              <div style="background: #f0f9ff; border: 1px solid #b3e0ff; border-radius: 8px; padding: 1rem; margin-bottom: 1rem">
+                <h4 style="margin: 0 0 0.5rem; font-size: 0.95rem; color: #0984e3">
+                  🔔 Automatic Daily Notifications
+                </h4>
+                <p style="margin: 0 0 0.75rem; font-size: 0.88rem; color: #636e72">
+                  Engaging messages sent automatically to users once per day at 10:00 AM IST
+                </p>
+                <div style="display: flex; gap: 1rem; font-size: 0.85rem; margin-bottom: 0.75rem">
+                  <span>Today: <strong id="dailyNotifSentToday">—</strong></span>
+                  <span>Total: <strong id="dailyNotifTotalAll">—</strong></span>
+                  <span>Schedule: <strong id="dailyNotifSchedule">10:00 AM IST</strong></span>
+                </div>
+                <button type="button" id="triggerDailyNotifBtn" class="secondary" style="font-size: 0.85rem">
+                  ⚡ Trigger Daily Notifications Now (Test)
+                </button>
+                <button type="button" id="viewDailyMessagesBtn" class="secondary" style="font-size: 0.85rem">
+                  📋 View Message Pool
+                </button>
+              </div>
+              
+              <button type="button" id="newPushNotifBtn">Send Push Notification</button>
+              <button type="button" id="loadPushStatsBtn" class="secondary">Refresh Stats</button>
+              
+              <div id="pushNotifStatus" class="status hidden"></div>
+            </section>
+
+            <div id="pushNotifFormSection" class="card hidden">
+              <h3>Send Push Notification</h3>
+              <form id="pushNotifForm">
+                <label for="pushTitle">Title *</label>
+                <input id="pushTitle" type="text" placeholder="New English Course Available!" required />
+                
+                <label for="pushBody">Message *</label>
+                <textarea id="pushBody" rows="3" placeholder="Start learning with our new beginner course..." required></textarea>
+                
+                <label for="pushImage">Image URL (optional)</label>
+                <input id="pushImage" type="url" placeholder="https://example.com/image.png" />
+                
+                <div class="upload-row">
+                  <div class="upload-field">
+                    <label for="pushTargetType">Target</label>
+                    <select id="pushTargetType">
+                      <option value="all">All Users</option>
+                      <option value="specific">Specific Users</option>
+                      <option value="test">Test (Current Admin)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div id="pushSpecificUsersFields" class="hidden">
+                  <label for="pushUserIds">User IDs (comma-separated)</label>
+                  <textarea id="pushUserIds" rows="2" placeholder="Enter user IDs separated by commas"></textarea>
+                  <p class="hint" style="margin-top: 0.25rem">💡 Tip: Go to the <strong>Users</strong> tab and click on any User ID to copy it</p>
+                </div>
+
+                <label for="pushDataJson">Custom Data (JSON, optional)</label>
+                <textarea id="pushDataJson" rows="3" placeholder='{"type": "course", "courseId": "123"}'></textarea>
+                <p class="hint" style="margin-top: 0.25rem">Add custom data to handle notification taps in the app</p>
+
+                <div class="row" style="margin-top: 1rem">
+                  <button type="submit" id="sendPushNotifBtn">Send Now</button>
+                  <button type="button" id="resetPushNotifBtn" class="secondary">Reset Form</button>
+                  <button type="button" id="cancelPushNotifBtn" class="secondary">Cancel</button>
+                </div>
+              </form>
+              <div id="pushNotifFormStatus" class="status hidden"></div>
+            </div>
+
+            <section id="pushNotifHistorySection" class="card">
+              <h3>Push Notification History</h3>
+              <div id="pushNotifHistoryContainer">
+                <p style="color: #636e72">Loading history…</p>
+              </div>
+            </section>
+
+            <div id="dailyMessagesModal" class="card hidden">
+              <h3>Daily Notification Message Pool</h3>
+              <p class="hint" style="margin-bottom: 1rem">
+                These messages are randomly sent to users once per day. The system avoids sending the same message twice in a row.
+              </p>
+              <div id="dailyMessagesContainer" style="max-height: 400px; overflow-y: auto">
+                <p style="color: #636e72">Loading messages…</p>
+              </div>
+              <button type="button" id="closeDailyMessagesBtn" class="secondary" style="margin-top: 1rem">Close</button>
+            </div>
+
+            <!-- IN-APP NOTIFICATIONS -->
+            <section class="card" style="margin-top: 2rem">
+              <h2>In-App Notification Management</h2>
               <p class="hint">
                 Create and send notifications to users. Target specific audiences and schedule for later.
               </p>
@@ -441,6 +683,7 @@
                     <tr>
                       <th>Name</th>
                       <th>Email</th>
+                      <th>User ID</th>
                       <th>Level</th>
                       <th>Status</th>
                       <th>Last seen</th>
@@ -448,7 +691,7 @@
                     </tr>
                   </thead>
                   <tbody id="usersTableBody">
-                    <tr><td colspan="6">Loading…</td></tr>
+                    <tr><td colspan="7">Loading…</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -477,6 +720,6 @@
     <script>
       document.getElementById('apiHost').textContent = window.location.origin;
     </script>
-    <script src="/admin/admin.js?v=7"></script>
+    <script src="/admin/admin.js?v=14"></script>
   </body>
 </html>
