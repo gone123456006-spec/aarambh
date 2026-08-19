@@ -8,18 +8,44 @@ let firebaseApp = null;
 
 const BACKEND_ROOT = path.join(__dirname, '../..');
 
+function stripWrappingQuotes(value) {
+  let key = String(value || '').trim();
+  while (
+    (key.startsWith('"') && key.endsWith('"')) ||
+    (key.startsWith("'") && key.endsWith("'"))
+  ) {
+    key = key.slice(1, -1).trim();
+  }
+  return key;
+}
+
 function normalizePrivateKey(raw) {
   if (!raw) return '';
-  let key = String(raw).trim();
-  // Remove surrounding quotes if present
-  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
-    key = key.slice(1, -1);
+  let key = stripWrappingQuotes(raw);
+
+  for (let i = 0; i < 4; i += 1) {
+    if (!key.includes('\\n') && !key.includes('\\r')) break;
+    key = key.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n');
   }
-  // Replace literal \n with actual newlines (handles both \\n and \n)
-  // First try double-escaped (from JSON string)
-  if (key.includes('\\n')) {
-    key = key.replace(/\\n/g, '\n');
+
+  key = key.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  if (key.includes('BEGIN') && !key.includes('\n')) {
+    key = key
+      .replace(/-----BEGIN ([A-Z ]+)-----/, '-----BEGIN $1-----\n')
+      .replace(/-----END ([A-Z ]+)-----/, '\n-----END $1-----');
   }
+
+  const pem = key.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/);
+  if (pem) {
+    const type = pem[1];
+    const body = pem[2].replace(/\s+/g, '');
+    const lines = body.match(/.{1,64}/g) || [];
+    key = `-----BEGIN ${type}-----\n${lines.join('\n')}\n-----END ${type}-----\n`;
+  } else if (key.includes('BEGIN') && !key.endsWith('\n')) {
+    key += '\n';
+  }
+
   return key;
 }
 
@@ -29,7 +55,7 @@ function loadServiceAccountFromSplitEnv() {
   const privateKey = normalizePrivateKey(process.env.FIREBASE_PRIVATE_KEY);
   const privateKeyId = process.env.FIREBASE_PRIVATE_KEY_ID?.trim();
 
-  if (!projectId || !clientEmail || !privateKey) {
+  if (!projectId || !clientEmail || !privateKey.includes('BEGIN')) {
     return null;
   }
 
@@ -44,27 +70,46 @@ function loadServiceAccountFromSplitEnv() {
   return credentials;
 }
 
-function loadServiceAccount() {
-  const fromSplit = loadServiceAccountFromSplitEnv();
-  if (fromSplit) return fromSplit;
-
-  const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+function loadServiceAccountFromFile() {
   const filePath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH?.trim();
+  if (!filePath) return null;
 
-  if (filePath) {
-    const resolved = path.isAbsolute(filePath)
-      ? filePath
-      : path.resolve(BACKEND_ROOT, filePath);
-    if (fs.existsSync(resolved)) {
-      return JSON.parse(fs.readFileSync(resolved, 'utf8'));
-    }
+  const resolved = path.isAbsolute(filePath)
+    ? filePath
+    : path.resolve(BACKEND_ROOT, filePath);
+  if (!fs.existsSync(resolved)) return null;
+
+  const parsed = JSON.parse(fs.readFileSync(resolved, 'utf8'));
+  if (parsed.private_key) {
+    parsed.private_key = normalizePrivateKey(parsed.private_key);
   }
+  return parsed;
+}
 
-  if (rawJson) {
-    return JSON.parse(rawJson);
+function loadServiceAccountFromJsonEnv() {
+  const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
+  if (!rawJson) return null;
+  const parsed = JSON.parse(rawJson);
+  if (parsed.private_key) {
+    parsed.private_key = normalizePrivateKey(parsed.private_key);
   }
+  return parsed;
+}
 
-  return null;
+function loadServiceAccountCandidates() {
+  return [
+    loadServiceAccountFromSplitEnv(),
+    loadServiceAccountFromFile(),
+    loadServiceAccountFromJsonEnv(),
+  ].filter(Boolean);
+}
+
+function createFirebaseCredential(credentials) {
+  const certFn = admin.credential?.cert || admin.cert;
+  if (typeof certFn !== 'function') {
+    throw new Error('firebase-admin cert() is not available');
+  }
+  return certFn.call(admin.credential || admin, credentials);
 }
 
 /**
@@ -76,24 +121,28 @@ function initializeFirebase() {
     return firebaseApp;
   }
 
-  try {
-    const credentials = loadServiceAccount();
-
-    if (!credentials) {
-      console.warn('⚠️  Firebase service account not configured. Push notifications will be disabled.');
-      return null;
-    }
-
-    firebaseApp = admin.initializeApp({
-      credential: admin.cert(credentials),
-    });
-
-    console.log('✅ Firebase Admin initialized successfully');
-    return firebaseApp;
-  } catch (error) {
-    console.error('❌ Failed to initialize Firebase Admin:', error.message);
+  const candidates = loadServiceAccountCandidates();
+  if (!candidates.length) {
+    console.warn('⚠️  Firebase service account not configured. Push notifications will be disabled.');
     return null;
   }
+
+  let lastError = null;
+  for (const credentials of candidates) {
+    try {
+      firebaseApp = admin.initializeApp({
+        credential: createFirebaseCredential(credentials),
+      });
+      console.log('✅ Firebase Admin initialized successfully');
+      return firebaseApp;
+    } catch (error) {
+      lastError = error;
+      console.warn('⚠️  Firebase credential candidate failed:', error.message);
+    }
+  }
+
+  console.error('❌ Failed to initialize Firebase Admin:', lastError?.message || 'Unknown error');
+  return null;
 }
 
 /**
@@ -104,7 +153,7 @@ function isFirebaseEnabled() {
 }
 
 function isExpoPushToken(token) {
-  return typeof token === 'string' && token.startsWith('ExponentPushToken[');
+  return typeof token === 'string' && /^ExponentPushToken\[.+\]$/.test(token);
 }
 
 function stringifyData(data = {}) {
@@ -115,6 +164,25 @@ function stringifyData(data = {}) {
   }
   out.timestamp = Date.now().toString();
   return out;
+}
+
+async function fetchExpoReceipts(ticketIds) {
+  if (!ticketIds.length) return {};
+  try {
+    const res = await fetch('https://exp.host/--/api/v2/push/getReceipts', {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ids: ticketIds }),
+    });
+    const json = await res.json();
+    return json.data || {};
+  } catch (error) {
+    console.warn('Expo receipt check failed:', error.message);
+    return {};
+  }
 }
 
 async function sendViaExpo(tokens, notification, data = {}) {
@@ -130,12 +198,16 @@ async function sendViaExpo(tokens, notification, data = {}) {
     data: stringifyData(data),
     channelId: 'default',
     priority: 'high',
+    ttl: 86400,
+    badge: 1,
     ...(notification.imageUrl ? { richContent: { image: notification.imageUrl } } : {}),
   }));
 
   let successCount = 0;
   let failureCount = 0;
   const failedTokens = [];
+  const ticketIds = [];
+  const ticketTokenMap = {};
 
   try {
     for (let i = 0; i < messages.length; i += 100) {
@@ -152,17 +224,36 @@ async function sendViaExpo(tokens, notification, data = {}) {
       const json = await res.json();
       const tickets = Array.isArray(json.data) ? json.data : [];
       tickets.forEach((ticket, idx) => {
-        if (ticket?.status === 'ok') {
+        const token = chunk[idx].to;
+        if (ticket?.status === 'ok' && ticket.id) {
+          ticketIds.push(ticket.id);
+          ticketTokenMap[ticket.id] = token;
           successCount += 1;
         } else {
           failureCount += 1;
-          failedTokens.push(chunk[idx].to);
+          failedTokens.push(token);
           console.warn('Expo push failed:', ticket?.message || ticket?.details?.error);
         }
       });
       if (!tickets.length && !res.ok) {
         failureCount += chunk.length;
         failedTokens.push(...chunk.map((m) => m.to));
+      }
+    }
+
+    if (ticketIds.length) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const receipts = await fetchExpoReceipts(ticketIds);
+      for (const [id, receipt] of Object.entries(receipts)) {
+        if (receipt?.status === 'ok') continue;
+        const token = ticketTokenMap[id];
+        if (token) failedTokens.push(token);
+        successCount = Math.max(0, successCount - 1);
+        failureCount += 1;
+        console.warn(
+          'Expo delivery failed:',
+          receipt?.message || receipt?.details?.error || receipt?.status
+        );
       }
     }
   } catch (error) {
@@ -174,7 +265,7 @@ async function sendViaExpo(tokens, notification, data = {}) {
     };
   }
 
-  return { successCount, failureCount, failedTokens };
+  return { successCount, failureCount, failedTokens: [...new Set(failedTokens)] };
 }
 
 async function sendViaFcm(tokens, notification, data = {}) {
@@ -199,6 +290,7 @@ async function sendViaFcm(tokens, notification, data = {}) {
         sound: 'default',
         channelId: 'default',
         priority: 'high',
+        defaultVibrateTimings: true,
       },
     },
     apns: {
@@ -234,9 +326,6 @@ async function sendViaFcm(tokens, notification, data = {}) {
   };
 }
 
-/**
- * Send push notification to Expo and/or FCM device tokens.
- */
 async function sendToTokens(tokens, notification, data = {}) {
   if (!tokens || tokens.length === 0) {
     return { successCount: 0, failureCount: 0, failedTokens: [] };
@@ -277,12 +366,6 @@ async function sendToTokens(tokens, notification, data = {}) {
   }
 }
 
-/**
- * Send notification to specific users.
- * @param {string[]} userIds - Array of user IDs
- * @param {Object} notification - { title, body, imageUrl? }
- * @param {Object} data - Custom data payload
- */
 async function sendToUsers(userIds, notification, data = {}) {
   const deviceTokens = await DeviceToken.find({
     userId: { $in: userIds },
@@ -298,16 +381,10 @@ async function sendToUsers(userIds, notification, data = {}) {
   return sendToTokens(tokens, notification, data);
 }
 
-/**
- * Send notification to all users (broadcast).
- * @param {Object} notification - { title, body, imageUrl? }
- * @param {Object} data - Custom data payload
- */
 async function sendToAll(notification, data = {}) {
-  const BATCH_SIZE = 500; // FCM limit is 500 tokens per request
+  const BATCH_SIZE = 500;
   let totalSuccess = 0;
   let totalFailure = 0;
-
   let skip = 0;
   let hasMore = true;
 
@@ -326,22 +403,18 @@ async function sendToAll(notification, data = {}) {
 
     totalSuccess += result.successCount;
     totalFailure += result.failureCount;
-
     skip += BATCH_SIZE;
-    
-    // Small delay between batches to avoid rate limiting
-    if (hasMore) {
+
+    if (deviceTokens.length === BATCH_SIZE) {
       await new Promise((resolve) => setTimeout(resolve, 100));
+    } else {
+      hasMore = false;
     }
   }
 
   return { successCount: totalSuccess, failureCount: totalFailure };
 }
 
-/**
- * Save a notification record and send it.
- * @param {Object} params - { title, body, imageUrl?, data?, targetType, targetUserIds?, sentBy? }
- */
 async function createAndSendNotification(params) {
   const {
     title,
@@ -353,7 +426,6 @@ async function createAndSendNotification(params) {
     sentBy,
   } = params;
 
-  // Create notification record
   const notification = new Notification({
     title,
     body,
@@ -369,7 +441,7 @@ async function createAndSendNotification(params) {
 
   try {
     let result;
-    
+
     if (targetType === 'specific' && targetUserIds.length > 0) {
       result = await sendToUsers(targetUserIds, { title, body, imageUrl }, data);
     } else if (targetType === 'all') {
@@ -378,7 +450,6 @@ async function createAndSendNotification(params) {
       result = { successCount: 0, failureCount: 0 };
     }
 
-    // Update notification record
     notification.totalSent = result.successCount + result.failureCount;
     notification.successCount = result.successCount;
     notification.failureCount = result.failureCount;
@@ -393,28 +464,19 @@ async function createAndSendNotification(params) {
   }
 }
 
-/**
- * Register a device token for a user.
- * @param {string} userId - User ID
- * @param {string} token - FCM token
- * @param {Object} deviceInfo - { platform, model, osVersion }
- */
 async function registerToken(userId, token, deviceInfo = {}) {
   if (!token) {
     throw new Error('Token is required');
   }
 
-  // Check if token already exists
   let deviceToken = await DeviceToken.findOne({ token });
 
   if (deviceToken) {
-    // Update existing token
     deviceToken.userId = userId;
     deviceToken.deviceInfo = deviceInfo;
     deviceToken.isActive = true;
     deviceToken.lastUsedAt = new Date();
   } else {
-    // Create new token
     deviceToken = new DeviceToken({
       userId,
       token,
@@ -428,19 +490,9 @@ async function registerToken(userId, token, deviceInfo = {}) {
   return deviceToken;
 }
 
-/**
- * Unregister a device token.
- * @param {string} token - FCM token to remove
- */
 async function unregisterToken(token) {
-  if (!token) {
-    return;
-  }
-
-  await DeviceToken.updateOne(
-    { token },
-    { $set: { isActive: false } }
-  );
+  if (!token) return;
+  await DeviceToken.updateOne({ token }, { $set: { isActive: false } });
 }
 
 module.exports = {
@@ -452,4 +504,5 @@ module.exports = {
   createAndSendNotification,
   registerToken,
   unregisterToken,
+  normalizePrivateKey,
 };
