@@ -4,7 +4,11 @@ const asyncHandler = require('../utils/asyncHandler');
 
 exports.getNotifications = asyncHandler(async (req, res) => {
   if (req.query.bootstrap !== '0') {
-    await notificationService.bootstrapUserNotifications(req.user._id, { name: req.user.name });
+    try {
+      await notificationService.bootstrapUserNotifications(req.user._id, { name: req.user.name });
+    } catch (error) {
+      console.warn('Notification bootstrap failed:', error.message);
+    }
   }
   const notifications = await notificationService.getNotifications(req.user._id);
   const unreadCount = await notificationService.getUnreadCount(req.user._id);

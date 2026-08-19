@@ -602,14 +602,58 @@ button.danger {
   padding: 0.45rem 0.65rem;
 }
 
+.badge.warn {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.badge.err {
+  background: #fdecea;
+  color: #c0392b;
+}
+
+.upload-queue {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid #dfe6e9;
+  border-radius: 10px;
+}
+
+.upload-job {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #ecf0f1;
+}
+
+.upload-job:last-child {
+  border-bottom: none;
+}
+
+.upload-job-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.92rem;
+}
+
+.upload-job-stage {
+  color: #636e72;
+  white-space: nowrap;
+}
+
+.upload-job.done .upload-job-stage {
+  color: #00b894;
+  font-weight: 600;
+}
+
+.upload-job.active .progress-fill {
+  background: linear-gradient(90deg, #e60000, #ff6b6b);
+}
+
 .badge.ok {
   background: #e8f8f5;
   color: #00b894;
-}
-
-.badge.warn {
-  background: #fff3e0;
-  color: #e17055;
 }
 
 .upload-hero {

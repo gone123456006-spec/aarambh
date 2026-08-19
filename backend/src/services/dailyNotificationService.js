@@ -213,16 +213,24 @@ async function sendDailyNotificationToUser(userId) {
       message.data
     );
 
+    const inAppCount = await firebaseService.fanoutInAppNotifications({
+      title: message.title,
+      body: message.body,
+      data: message.data || { type: 'system' },
+      targetType: 'specific',
+      targetUserIds: [userId],
+    });
+
     // Log the notification
     await NotificationLog.create({
       userId,
       notificationType: 'daily_engagement',
       lastSentAt: new Date(),
       messageKey: message.key,
-      delivered: result.successCount > 0,
+      delivered: result.successCount > 0 || inAppCount > 0,
     });
 
-    return result.successCount > 0;
+    return result.successCount > 0 || inAppCount > 0;
   } catch (error) {
     console.error(`Failed to send daily notification to user ${userId}:`, error);
     return false;
@@ -235,11 +243,6 @@ async function sendDailyNotificationToUser(userId) {
  * @returns {Promise<Object>} - Stats about notifications sent
  */
 async function sendDailyNotificationsToAllUsers() {
-  if (!firebaseService.isFirebaseEnabled()) {
-    console.log('Firebase not enabled, skipping daily notifications');
-    return { totalSent: 0, failed: 0, skipped: 0 };
-  }
-
   console.log('🔔 Starting daily notification broadcast...');
 
   const stats = {

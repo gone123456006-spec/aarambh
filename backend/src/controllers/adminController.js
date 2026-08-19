@@ -8,6 +8,11 @@ const uploadService = require('../services/uploadService');
 const tokenService = require('../services/tokenService');
 const { sortCourseLessons, slugifyLevel, colorsForLevel } = require('../constants/curriculum');
 const { notifyNewCourse, notifyCourseLessonsAdded } = require('../services/notificationHelpers');
+const {
+  getLessonAppStatus,
+  normalizeMediaAvailabilityOnSave,
+  assertMediaFilesExist,
+} = require('../utils/lessonMedia');
 const ApiError = require('../utils/ApiError');
 const ApiResponse = require('../utils/ApiResponse');
 const asyncHandler = require('../utils/asyncHandler');
@@ -447,7 +452,10 @@ const addLesson = asyncHandler(async (req, res) => {
 const getAdminCourses = asyncHandler(async (req, res) => {
   const courses = await Course.find({}).sort({ sortOrder: 1, createdAt: 1 }).lean();
   for (const c of courses) {
-    c.lessons = sortCourseLessons(c.lessons || []);
+    c.lessons = sortCourseLessons(c.lessons || []).map((lesson) => ({
+      ...lesson,
+      appStatus: getLessonAppStatus(lesson),
+    }));
   }
   res.status(200).json(new ApiResponse(200, courses, 'Courses retrieved successfully'));
 });
@@ -501,8 +509,6 @@ const upsertLesson = asyncHandler(async (req, res) => {
     if (pdfTitle !== undefined) lesson.pdfTitle = pdfTitle?.trim() || '';
     if (videoUrl !== undefined) lesson.videoUrl = videoUrl || undefined;
     if (pdfUrl !== undefined) lesson.pdfUrl = pdfUrl || undefined;
-    if (videoAvailableAt !== undefined) lesson.videoAvailableAt = videoAvailableAt || undefined;
-    if (pdfAvailableAt !== undefined) lesson.pdfAvailableAt = pdfAvailableAt || undefined;
   } else {
     const order = course.lessons.length;
     const key =
@@ -516,16 +522,52 @@ const upsertLesson = asyncHandler(async (req, res) => {
       pdfTitle: pdfTitle?.trim() || `${title.trim()} notes`,
       videoUrl,
       pdfUrl,
-      videoAvailableAt,
-      pdfAvailableAt,
       order,
     });
+    lesson = course.lessons[course.lessons.length - 1];
   }
+
+  const nextVideoUrl = lesson.videoUrl;
+  const nextPdfUrl = lesson.pdfUrl;
+
+  if ((type || 'video') === 'video' && !nextVideoUrl && !nextPdfUrl) {
+    throw new ApiError(400, 'Add a video or PDF file for this lesson');
+  }
+
+  try {
+    assertMediaFilesExist({ videoUrl: nextVideoUrl, pdfUrl: nextPdfUrl });
+  } catch (error) {
+    throw new ApiError(400, error.message);
+  }
+
+  const availability = normalizeMediaAvailabilityOnSave({
+    videoUrl: nextVideoUrl,
+    pdfUrl: nextPdfUrl,
+    videoAvailableAt,
+    pdfAvailableAt,
+  });
+  lesson.videoAvailableAt = availability.videoAvailableAt;
+  lesson.pdfAvailableAt = availability.pdfAvailableAt;
 
   course.lessons = sortCourseLessons(course.lessons);
   await course.save();
 
-  res.status(200).json(new ApiResponse(200, course, 'Lesson saved successfully'));
+  const savedLesson = course.lessons.id(lesson._id) || lesson;
+  const appStatus = getLessonAppStatus(savedLesson);
+
+  res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        courseId: course._id,
+        lesson: savedLesson,
+        appStatus,
+      },
+      appStatus.appReady
+        ? 'Lesson saved — visible in the app now'
+        : 'Lesson saved — still processing for the app'
+    )
+  );
 });
 
 /**
@@ -661,7 +703,7 @@ const deleteLessonMedia = asyncHandler(async (req, res) => {
 });
 
 /**
- * Upload lesson video (local disk). Available in app after 30 seconds.
+ * Upload lesson video (local disk). Immediately available in the app after lesson save.
  */
 const uploadVideo = asyncHandler(async (req, res) => {
   const payload = uploadService.saveLessonVideo(req);
@@ -674,13 +716,13 @@ const uploadVideo = asyncHandler(async (req, res) => {
         videoUrl: payload.url,
         videoAvailableAt: payload.availableAt,
       },
-      `Video uploaded. Available in app in ${payload.availableInSeconds} seconds.`
+      'Video uploaded. Click “Add lesson to app” to publish it in My Courses.'
     )
   );
 });
 
 /**
- * Upload lesson PDF (local disk). Available in app after 30 seconds.
+ * Upload lesson PDF (local disk). Immediately available in the app after lesson save.
  */
 const uploadPdf = asyncHandler(async (req, res) => {
   const payload = uploadService.saveLessonPdf(req);
@@ -693,8 +735,24 @@ const uploadPdf = asyncHandler(async (req, res) => {
         pdfUrl: payload.url,
         pdfAvailableAt: payload.availableAt,
       },
-      `PDF uploaded. Available in app in ${payload.availableInSeconds} seconds.`
+      'PDF uploaded. Click “Add lesson to app” to publish it in My Courses.'
     )
+  );
+});
+
+/**
+ * Check whether a lesson is visible/ playable in the mobile app.
+ */
+const getLessonAppStatusHandler = asyncHandler(async (req, res) => {
+  const { courseId, lessonId } = req.params;
+  const course = await Course.findById(courseId);
+  if (!course) throw new ApiError(404, 'Course not found');
+
+  const lesson = course.lessons.id(lessonId);
+  if (!lesson) throw new ApiError(404, 'Lesson not found');
+
+  res.status(200).json(
+    new ApiResponse(200, getLessonAppStatus(lesson), 'Lesson app status retrieved')
   );
 });
 
@@ -829,6 +887,7 @@ module.exports = {
   deleteLessonMedia,
   uploadVideo,
   uploadPdf,
+  getLessonAppStatusHandler,
   getAnalytics,
   getSubscriptions,
   getSubscriptionById,

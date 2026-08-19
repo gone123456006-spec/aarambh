@@ -157,23 +157,32 @@ exports.getNotificationStats = asyncHandler(async (req, res) => {
  * POST /api/app/test-notification
  */
 exports.testNotification = asyncHandler(async (req, res) => {
-  if (!firebaseService.isFirebaseEnabled()) {
-    throw new ApiError(503, 'Push notifications are not configured');
+  const title = 'Test Notification';
+  const body = "This is a test notification from Ohm's!";
+  const data = { type: 'system' };
+
+  let result = { successCount: 0, failureCount: 0 };
+  try {
+    result = await firebaseService.sendToUsers([req.user._id], { title, body }, data);
+  } catch (error) {
+    console.warn('Test push send failed:', error.message);
   }
 
-  const result = await firebaseService.sendToUsers(
-    [req.user._id],
-    {
-      title: 'Test Notification',
-      body: 'This is a test notification from Ohm\'s!',
-    },
-    { type: 'test' }
-  );
+  await firebaseService.fanoutInAppNotifications({
+    title,
+    body,
+    data,
+    targetType: 'specific',
+    targetUserIds: [req.user._id],
+  });
 
   res.json({
     success: true,
     message: 'Test notification sent',
-    data: result,
+    data: {
+      ...result,
+      firebaseEnabled: firebaseService.isFirebaseEnabled(),
+    },
   });
 });
 
@@ -182,10 +191,6 @@ exports.testNotification = asyncHandler(async (req, res) => {
  * POST /api/admin/push-notifications/trigger-daily
  */
 exports.triggerDailyNotifications = asyncHandler(async (req, res) => {
-  if (!firebaseService.isFirebaseEnabled()) {
-    throw new ApiError(503, 'Push notifications are not configured');
-  }
-
   const stats = await triggerDailyNotificationsNow();
 
   res.json({

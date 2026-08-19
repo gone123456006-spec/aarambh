@@ -5,10 +5,6 @@ const firebaseService = require('./firebaseService');
  * @param {Object} course - The newly created course
  */
 async function notifyNewCourse(course) {
-  if (!firebaseService.isFirebaseEnabled()) {
-    return;
-  }
-
   try {
     const title = 'New Course Available!';
     const body = `Start learning with our new ${course.level || ''} course: ${course.title}`;
@@ -36,7 +32,7 @@ async function notifyNewCourse(course) {
  * @param {number} newLessonsCount - Number of new lessons added
  */
 async function notifyCourseLessonsAdded(course, newLessonsCount) {
-  if (!firebaseService.isFirebaseEnabled() || !newLessonsCount) {
+  if (!newLessonsCount) {
     return;
   }
 
@@ -66,22 +62,28 @@ async function notifyCourseLessonsAdded(course, newLessonsCount) {
  * @param {Object} user - The newly registered user
  */
 async function notifyWelcome(user) {
-  if (!firebaseService.isFirebaseEnabled()) {
-    return;
-  }
-
   try {
     // Wait a bit for the user to register their device token
     setTimeout(async () => {
-      const title = 'Welcome to Ohm\'s English!';
-      const body = 'Start your English learning journey today. Explore courses, practice with others, and track your progress.';
-      
-      await firebaseService.sendToUsers([user._id], { title, body }, {
-        type: 'welcome',
-      });
-      
-      console.log(`✅ Sent welcome notification to user: ${user.name || user.email}`);
-    }, 5000); // 5 second delay
+      try {
+        const title = 'Welcome to Ohm\'s English!';
+        const body = 'Start your English learning journey today. Explore courses, practice with others, and track your progress.';
+        const data = { type: 'welcome' };
+
+        await firebaseService.sendToUsers([user._id], { title, body }, data);
+        await firebaseService.fanoutInAppNotifications({
+          title,
+          body,
+          data,
+          targetType: 'specific',
+          targetUserIds: [user._id],
+        });
+
+        console.log(`✅ Sent welcome notification to user: ${user.name || user.email}`);
+      } catch (error) {
+        console.error('Failed to send welcome notification:', error);
+      }
+    }, 5000);
   } catch (error) {
     console.error('Failed to send welcome notification:', error);
   }
@@ -94,10 +96,6 @@ async function notifyWelcome(user) {
  * @param {Object} subscription - The subscription object
  */
 async function notifySubscriptionEvent(userId, eventType, subscription) {
-  if (!firebaseService.isFirebaseEnabled()) {
-    return;
-  }
-
   try {
     let title, body;
     
@@ -118,12 +116,20 @@ async function notifySubscriptionEvent(userId, eventType, subscription) {
         return;
     }
     
-    await firebaseService.sendToUsers([userId], { title, body }, {
+    const data = {
       type: 'subscription',
       event: eventType,
       subscriptionId: subscription._id?.toString(),
+    };
+    await firebaseService.sendToUsers([userId], { title, body }, data);
+    await firebaseService.fanoutInAppNotifications({
+      title,
+      body,
+      data,
+      targetType: 'specific',
+      targetUserIds: [userId],
     });
-    
+
     console.log(`✅ Sent ${eventType} notification to user: ${userId}`);
   } catch (error) {
     console.error('Failed to send subscription notification:', error);
@@ -137,10 +143,6 @@ async function notifySubscriptionEvent(userId, eventType, subscription) {
  * @param {Object} data - Custom data
  */
 async function notifyAnnouncement(title, body, data = {}) {
-  if (!firebaseService.isFirebaseEnabled()) {
-    return;
-  }
-
   try {
     await firebaseService.createAndSendNotification({
       title,

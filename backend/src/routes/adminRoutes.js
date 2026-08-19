@@ -88,6 +88,11 @@ router.delete(
   adminController.deleteLessonMedia
 );
 
+router.get(
+  '/courses/:courseId/lessons/:lessonId/app-status',
+  adminController.getLessonAppStatusHandler
+);
+
 router.post('/upload/video', uploadVideo.single('video'), adminController.uploadVideo);
 
 router.post('/upload/pdf', uploadPdf.single('pdf'), adminController.uploadPdf);

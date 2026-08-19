@@ -6,6 +6,8 @@ let usersPage = 1;
 let usersPagination = { pages: 1 };
 let autoRefreshTimer = null;
 let cachedCourses = [];
+/** Active uploads shown at top of Courses tab */
+const uploadJobs = [];
 /** courseId -> lessonId when editing */
 const editingLesson = {};
 
@@ -346,9 +348,49 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+function lessonAppBadge(lesson) {
+  const status = lesson.appStatus;
+  if (!status) {
+    return lesson.videoUrl
+      ? '<span class="badge ok">Video ✓</span>'
+      : '<span class="badge">No video</span>';
+  }
+  if (status.videoVisibleInApp) {
+    return '<span class="badge ok">Video live in app</span>';
+  }
+  if (status.videoState === 'pending') {
+    return `<span class="badge warn">Video processing (${status.videoPendingSeconds}s)</span>`;
+  }
+  if (status.videoState === 'missing_file') {
+    return '<span class="badge err">Video missing — re-upload</span>';
+  }
+  if (status.hasVideoUrl) {
+    return '<span class="badge warn">Video saved — not in app yet</span>';
+  }
+  return '<span class="badge">No video</span>';
+}
+
+function pdfAppBadge(lesson) {
+  const status = lesson.appStatus;
+  if (!status) {
+    return lesson.pdfUrl ? '<span class="badge ok">PDF ✓</span>' : '<span class="badge">No PDF</span>';
+  }
+  if (status.pdfVisibleInApp) {
+    return '<span class="badge ok">PDF live in app</span>';
+  }
+  if (status.pdfState === 'pending') {
+    return `<span class="badge warn">PDF processing (${status.pdfPendingSeconds}s)</span>`;
+  }
+  if (status.pdfState === 'missing_file') {
+    return '<span class="badge err">PDF missing — re-upload</span>';
+  }
+  if (status.hasPdfUrl) {
+    return '<span class="badge warn">PDF saved — not in app yet</span>';
+  }
+  return '<span class="badge">No PDF</span>';
+}
+
 function lessonRowHtml(courseId, lesson) {
-  const hasVideo = !!lesson.videoUrl;
-  const hasPdf = !!lesson.pdfUrl;
   return `
     <div class="lesson-row" data-lesson-row="${lesson._id}">
       <div class="lesson-title">
@@ -357,14 +399,92 @@ function lessonRowHtml(courseId, lesson) {
         ${lesson.description ? `<p class="lesson-about-preview">${esc(lesson.description.slice(0, 120))}${lesson.description.length > 120 ? '…' : ''}</p>` : ''}
       </div>
       <div class="lesson-status">
-        ${hasVideo ? '<span class="badge ok">Video ✓</span>' : '<span class="badge">No video</span>'}
-        ${hasPdf ? '<span class="badge ok">PDF ✓</span>' : '<span class="badge">No PDF</span>'}
+        ${lessonAppBadge(lesson)}
+        ${pdfAppBadge(lesson)}
       </div>
       <div class="lesson-actions">
         <button type="button" class="ghost" data-edit-lesson="${lesson._id}" data-course-id="${courseId}">Edit</button>
         <button type="button" class="danger" data-del-lesson="${lesson._id}" data-course-id="${courseId}">Delete</button>
       </div>
     </div>`;
+}
+
+function renderUploadQueue() {
+  const root = $('uploadQueue');
+  if (!root) return;
+  if (!uploadJobs.length) {
+    root.classList.add('hidden');
+    root.innerHTML = '';
+    return;
+  }
+  root.classList.remove('hidden');
+  root.innerHTML = `
+    <h3 class="subheading">Uploads</h3>
+    ${uploadJobs
+      .map(
+        (job) => `
+      <div class="upload-job ${job.done ? 'done' : 'active'}" data-job-id="${esc(job.id)}">
+        <div class="upload-job-head">
+          <strong>${esc(job.title)}</strong>
+          <span class="upload-job-stage">${esc(job.stage)}</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" style="width:${Math.round(job.progress * 100)}%"></div></div>
+        <p class="progress-text">${esc(job.detail || '')}</p>
+      </div>`
+      )
+      .join('')}`;
+}
+
+function addUploadJob(title) {
+  const job = {
+    id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    title,
+    stage: 'Starting…',
+    detail: '',
+    progress: 0,
+    done: false,
+  };
+  uploadJobs.unshift(job);
+  renderUploadQueue();
+  return job;
+}
+
+function updateUploadJob(job, patch) {
+  Object.assign(job, patch);
+  renderUploadQueue();
+}
+
+function finishUploadJob(job, ok, message) {
+  job.done = true;
+  job.progress = 1;
+  job.stage = ok ? 'Live in app' : 'Failed';
+  job.detail = message || '';
+  renderUploadQueue();
+  setTimeout(() => {
+    const idx = uploadJobs.indexOf(job);
+    if (idx >= 0) uploadJobs.splice(idx, 1);
+    renderUploadQueue();
+  }, ok ? 8000 : 12000);
+}
+
+async function waitForLessonInApp(courseId, lessonId, { timeoutMs = 20000, expectVideo = false, expectPdf = false } = {}) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const status = await api(`/api/admin/courses/${courseId}/lessons/${lessonId}/app-status`);
+    const videoOk = !expectVideo || status?.videoVisibleInApp;
+    const pdfOk = !expectPdf || status?.pdfVisibleInApp;
+    if (videoOk && pdfOk && status?.appReady) {
+      return status;
+    }
+    if (expectVideo && status?.videoState === 'missing_file') {
+      throw new Error('Video file missing on server. Upload again from admin.');
+    }
+    if (expectPdf && status?.pdfState === 'missing_file') {
+      throw new Error('PDF file missing on server. Upload again from admin.');
+    }
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  throw new Error('Lesson saved but not visible in the app yet. Pull down to refresh in My Courses.');
 }
 
 function categorySectionHtml(course) {
@@ -623,6 +743,7 @@ async function saveLessonToApp(courseId) {
   }
 
   btn.disabled = true;
+  const job = addUploadJob(title);
   try {
     let videoUrl = editing?.videoUrl;
     let videoAvailableAt = editing?.videoAvailableAt;
@@ -632,25 +753,47 @@ async function saveLessonToApp(courseId) {
     if (videoInput?.files?.[0]) {
       const fd = new FormData();
       fd.append('video', videoInput.files[0]);
+      updateUploadJob(job, { stage: 'Uploading video', detail: videoInput.files[0].name, progress: 0.1 });
       setSectionProgress(section, 0.1, 'Uploading video…');
-      const data = await uploadWithProgress('/api/admin/upload/video', fd, (p) =>
-        setSectionProgress(section, 0.1 + p * 0.5, `Uploading video… ${Math.round(p * 100)}%`)
-      );
+      const data = await uploadWithProgress('/api/admin/upload/video', fd, (p) => {
+        const pct = 0.1 + p * 0.45;
+        updateUploadJob(job, { progress: pct, detail: `Uploading video… ${Math.round(p * 100)}%` });
+        setSectionProgress(section, pct, `Uploading video… ${Math.round(p * 100)}%`);
+      });
       videoUrl = data.url || data.videoUrl;
       videoAvailableAt = data.videoAvailableAt || data.availableAt;
+      if (!videoUrl) {
+        throw new Error('Video upload failed — server did not return a URL.');
+      }
     }
 
     if (pdfInput?.files?.[0]) {
       const fd = new FormData();
       fd.append('pdf', pdfInput.files[0]);
+      updateUploadJob(job, {
+        stage: 'Uploading PDF',
+        progress: videoInput?.files?.[0] ? 0.58 : 0.15,
+        detail: pdfInput.files[0].name,
+      });
       setSectionProgress(section, 0.65, 'Uploading PDF…');
-      const data = await uploadWithProgress('/api/admin/upload/pdf', fd, (p) =>
-        setSectionProgress(section, 0.65 + p * 0.25, `Uploading PDF… ${Math.round(p * 100)}%`)
-      );
+      const data = await uploadWithProgress('/api/admin/upload/pdf', fd, (p) => {
+        const base = videoInput?.files?.[0] ? 0.58 : 0.15;
+        const pct = base + p * (videoInput?.files?.[0] ? 0.32 : 0.65);
+        updateUploadJob(job, { progress: pct, detail: `Uploading PDF… ${Math.round(p * 100)}%` });
+        setSectionProgress(section, pct, `Uploading PDF… ${Math.round(p * 100)}%`);
+      });
       pdfUrl = data.url || data.pdfUrl;
       pdfAvailableAt = data.pdfAvailableAt || data.availableAt;
+      if (!pdfUrl) {
+        throw new Error('PDF upload failed — server did not return a URL.');
+      }
     }
 
+    updateUploadJob(job, {
+      stage: 'Saving to app',
+      progress: 0.92,
+      detail: videoUrl && pdfUrl ? 'Attaching video and PDF…' : pdfUrl ? 'Attaching PDF…' : 'Attaching video…',
+    });
     setSectionProgress(section, 0.95, 'Saving to app…');
 
     const body = {
@@ -669,22 +812,48 @@ async function saveLessonToApp(courseId) {
       body.lessonId = editing._id;
     }
 
-    await api(`/api/admin/courses/${courseId}/lessons/upsert`, {
+    const saved = await api(`/api/admin/courses/${courseId}/lessons/upsert`, {
       method: 'POST',
       body: JSON.stringify(body),
     });
 
+    const lessonId = saved?.lesson?._id;
+    const appStatus = saved?.appStatus;
+    const expectVideo = Boolean(videoUrl);
+    const expectPdf = Boolean(pdfUrl);
+
+    if (lessonId && (expectVideo || expectPdf)) {
+      updateUploadJob(job, { stage: 'Checking app', progress: 0.96, detail: 'Verifying in My Courses…' });
+      const videoReady = !expectVideo || appStatus?.videoVisibleInApp;
+      const pdfReady = !expectPdf || appStatus?.pdfVisibleInApp;
+      if (!videoReady || !pdfReady) {
+        await waitForLessonInApp(courseId, lessonId, { expectVideo, expectPdf });
+      }
+    }
+
     setSectionProgress(section, 1, 'Done!');
+    const liveParts = [];
+    if (expectVideo) liveParts.push('video');
+    if (expectPdf) liveParts.push('PDF');
+    const liveLabel = liveParts.length ? liveParts.join(' + ') : 'lesson';
+    finishUploadJob(job, true, `"${title}" ${liveLabel} is live in My Courses`);
     if (liveEl) {
       liveEl.classList.remove('hidden');
-      liveEl.textContent = `✓ "${title}" is live in My Courses! Pull down to refresh in the app.`;
+      liveEl.textContent = `✓ "${title}" is live in My Courses! Students can use the ${liveLabel} now.`;
     }
-    showStatus(statusEl, `Saved "${title}" — visible in app now`, 'ok');
+    showStatus(statusEl, `Saved "${title}" — live in the app`, 'ok');
 
     delete editingLesson[courseId];
+    if (videoInput) videoInput.value = '';
+    if (pdfInput) pdfInput.value = '';
+    section.querySelectorAll('.drop-file').forEach((el) => {
+      el.textContent = '';
+      el.classList.add('hidden');
+    });
     await loadCourses();
     renderCategorySections();
   } catch (e) {
+    finishUploadJob(job, false, e.message);
     showStatus(statusEl, e.message, 'err');
   } finally {
     btn.disabled = false;

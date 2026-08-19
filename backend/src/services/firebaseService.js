@@ -3,6 +3,8 @@ const path = require('path');
 const admin = require('firebase-admin');
 const DeviceToken = require('../models/DeviceToken');
 const Notification = require('../models/Notification');
+const InAppNotification = require('../models/InAppNotification');
+const User = require('../models/User');
 
 let firebaseApp = null;
 
@@ -415,6 +417,33 @@ async function sendToAll(notification, data = {}) {
   return { successCount: totalSuccess, failureCount: totalFailure };
 }
 
+async function fanoutInAppNotifications({ title, body, data = {}, targetType = 'all', targetUserIds = [] }) {
+  try {
+    let userIds = Array.isArray(targetUserIds) ? targetUserIds.filter(Boolean) : [];
+    if (targetType === 'all') {
+      userIds = await User.find({ role: { $ne: 'admin' } }).distinct('_id');
+    }
+    if (!userIds.length) return 0;
+
+    const allowedTypes = ['system', 'welcome', 'reward', 'course', 'game', 'points', 'leaderboard', 'subscription', 'chat', 'call', 'achievement'];
+    const docs = userIds.map((userId) => ({
+      user: userId,
+      title,
+      message: body,
+      type: allowedTypes.includes(data.type) ? data.type : 'system',
+      data: Object.keys(data).length ? data : null,
+    }));
+
+    for (let i = 0; i < docs.length; i += 500) {
+      await InAppNotification.insertMany(docs.slice(i, i + 500), { ordered: false });
+    }
+    return docs.length;
+  } catch (error) {
+    console.warn('In-app notification fanout failed:', error.message);
+    return 0;
+  }
+}
+
 async function createAndSendNotification(params) {
   const {
     title,
@@ -440,20 +469,30 @@ async function createAndSendNotification(params) {
   await notification.save();
 
   try {
-    let result;
+    let result = { successCount: 0, failureCount: 0 };
 
-    if (targetType === 'specific' && targetUserIds.length > 0) {
-      result = await sendToUsers(targetUserIds, { title, body, imageUrl }, data);
-    } else if (targetType === 'all') {
-      result = await sendToAll({ title, body, imageUrl }, data);
-    } else {
-      result = { successCount: 0, failureCount: 0 };
+    try {
+      if (targetType === 'specific' && targetUserIds.length > 0) {
+        result = await sendToUsers(targetUserIds, { title, body, imageUrl }, data);
+      } else if (targetType === 'all') {
+        result = await sendToAll({ title, body, imageUrl }, data);
+      }
+    } catch (pushError) {
+      console.warn('Push send failed, continuing with in-app fanout:', pushError.message);
     }
+
+    const inAppCount = await fanoutInAppNotifications({
+      title,
+      body,
+      data,
+      targetType,
+      targetUserIds,
+    });
 
     notification.totalSent = result.successCount + result.failureCount;
     notification.successCount = result.successCount;
     notification.failureCount = result.failureCount;
-    notification.status = result.successCount > 0 ? 'sent' : 'failed';
+    notification.status = result.successCount > 0 || inAppCount > 0 ? 'sent' : 'failed';
     await notification.save();
 
     return { notification, result };
@@ -505,4 +544,5 @@ module.exports = {
   registerToken,
   unregisterToken,
   normalizePrivateKey,
+  fanoutInAppNotifications,
 };

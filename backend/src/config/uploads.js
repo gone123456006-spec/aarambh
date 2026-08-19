@@ -72,6 +72,14 @@ function resolveUploadFilePath(relativePath) {
   return fullPath;
 }
 
+function mediaFileExists(url) {
+  if (!url) return false;
+  const relative = relativeUploadPath(url);
+  if (!relative) return false;
+  const fullPath = resolveUploadFilePath(relative);
+  return Boolean(fullPath && fs.existsSync(fullPath));
+}
+
 function deleteFileByUrl(fileUrl) {
   const relative = relativeUploadPath(fileUrl);
   if (!relative) return;
@@ -108,4 +116,5 @@ module.exports = {
   resolveUploadFilePath,
   deleteFileByUrl,
   deleteFileByRelativePath,
+  mediaFileExists,
 };
