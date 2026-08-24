@@ -1,13 +1,13 @@
-const { mediaFileExists } = require('../config/uploads');
+const { mediaFileExists, mediaFileExistsAsync } = require('../config/uploads');
 const { applyLessonMediaAvailability } = require('./mediaAvailability');
 
-function getLessonAppStatus(lesson) {
+async function getLessonAppStatus(lesson) {
   const plain = lesson?.toObject ? lesson.toObject() : { ...(lesson || {}) };
-  const visible = applyLessonMediaAvailability(plain);
+  const visible = await applyLessonMediaAvailability(plain);
   const hasVideoUrl = Boolean(plain.videoUrl);
   const hasPdfUrl = Boolean(plain.pdfUrl);
-  const videoFileOnDisk = hasVideoUrl ? mediaFileExists(plain.videoUrl) : false;
-  const pdfFileOnDisk = hasPdfUrl ? mediaFileExists(plain.pdfUrl) : false;
+  const videoFileOnDisk = hasVideoUrl ? await mediaFileExistsAsync(plain.videoUrl) : false;
+  const pdfFileOnDisk = hasPdfUrl ? await mediaFileExistsAsync(plain.pdfUrl) : false;
   const videoVisibleInApp = Boolean(visible.videoUrl);
   const pdfVisibleInApp = Boolean(visible.pdfUrl);
   const videoPendingSeconds = visible.videoAvailableIn || 0;

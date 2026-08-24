@@ -472,10 +472,13 @@ const addLesson = asyncHandler(async (req, res) => {
 const getAdminCourses = asyncHandler(async (req, res) => {
   const courses = await Course.find({}).sort({ sortOrder: 1, createdAt: 1 }).lean();
   for (const c of courses) {
-    c.lessons = sortCourseLessons(c.lessons || []).map((lesson) => ({
-      ...lesson,
-      appStatus: getLessonAppStatus(lesson),
-    }));
+    const lessons = sortCourseLessons(c.lessons || []);
+    c.lessons = await Promise.all(
+      lessons.map(async (lesson) => ({
+        ...lesson,
+        appStatus: await getLessonAppStatus(lesson),
+      }))
+    );
   }
   res.status(200).json(new ApiResponse(200, courses, 'Courses retrieved successfully'));
 });
@@ -573,7 +576,7 @@ const upsertLesson = asyncHandler(async (req, res) => {
   await course.save();
 
   const savedLesson = course.lessons.id(lesson._id) || lesson;
-  const appStatus = getLessonAppStatus(savedLesson);
+  const appStatus = await getLessonAppStatus(savedLesson);
 
   res.status(200).json(
     new ApiResponse(
@@ -772,7 +775,7 @@ const getLessonAppStatusHandler = asyncHandler(async (req, res) => {
   if (!lesson) throw new ApiError(404, 'Lesson not found');
 
   res.status(200).json(
-    new ApiResponse(200, getLessonAppStatus(lesson), 'Lesson app status retrieved')
+    new ApiResponse(200, await getLessonAppStatus(lesson), 'Lesson app status retrieved')
   );
 });
 

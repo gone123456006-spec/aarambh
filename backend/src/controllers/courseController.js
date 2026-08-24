@@ -49,7 +49,8 @@ const getCourses = asyncHandler(async (req, res) => {
   for (const course of courses) {
     const doc = course.toObject();
     doc.lessons = sortCourseLessons(doc.lessons || []);
-    withMedia.push(await applyPlanAccess(applyCourseMediaAvailability(doc), req.user._id));
+    const withAvailability = await applyCourseMediaAvailability(doc);
+    withMedia.push(await applyPlanAccess(withAvailability, req.user._id));
   }
   res.status(200).json(new ApiResponse(200, withMedia, 'Courses retrieved successfully'));
 });
@@ -76,7 +77,8 @@ const getCourseById = asyncHandler(async (req, res) => {
 
   const plain = course.toObject();
   plain.lessons = sortCourseLessons(plain.lessons || []);
-  const doc = await applyPlanAccess(applyCourseMediaAvailability(plain), req.user._id);
+  const withAvailability = await applyCourseMediaAvailability(plain);
+  const doc = await applyPlanAccess(withAvailability, req.user._id);
 
   res.status(200).json(new ApiResponse(200, doc, 'Course retrieved successfully'));
 });

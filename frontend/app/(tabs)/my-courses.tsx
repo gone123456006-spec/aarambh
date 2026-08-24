@@ -888,7 +888,9 @@ export default function MyCoursesScreen() {
           return mapped[0]?.id ?? '';
         });
       } else {
+        // Always refresh media URLs even when list shape is unchanged
         setHasLockedPlans(nextLocked);
+        setCategories(mapped);
       }
 
       void AsyncStorage.setItem(
@@ -1146,6 +1148,24 @@ export default function MyCoursesScreen() {
     if (isCategoryProLocked(id)) handleBuyCategory(id);
   }, [pauseVideo, completedLessons, syncRoadmapFocus, isCategoryProLocked, handleBuyCategory]);
 
+  const refreshLessonMedia = useCallback(async (lessonId: string) => {
+    const sessionOk = await ensureValidSession();
+    if (!sessionOk) return null;
+    const [res, sub] = await Promise.all([
+      apiFetch<{ data: ApiCourse[] }>('/api/courses'),
+      fetchSubscription().catch(() => null),
+    ]);
+    if (sub?.plans) setSubscriptionPlans(sub.plans);
+    if (sub?.access) setSubscriptionAccess(sub.access);
+    const mapped = applySubscriptionLocks(
+      mapApiCoursesToApp(res.data ?? []),
+      sub?.plans || subscriptionPlans,
+    );
+    lastCoursesSigRef.current = coursesSignature(mapped);
+    setCategories(mapped);
+    return mapped.flatMap((c) => c.lessons).find((l) => l.id === lessonId) || null;
+  }, [applySubscriptionLocks, subscriptionPlans]);
+
   const handleDownloadPdf = useCallback(async (lesson: AppLesson) => {
     const level = categories.find((l) => l.lessons.some((x) => x.id === lesson.id));
     if (level && isCategoryProLocked(level.id)) {
@@ -1159,7 +1179,17 @@ export default function MyCoursesScreen() {
       );
       return;
     }
-    if (!lesson.pdfUrl) {
+
+    let pdfUrl = lesson.pdfUrl;
+    if (!pdfUrl) {
+      try {
+        const fresh = await refreshLessonMedia(lesson.id);
+        pdfUrl = fresh?.pdfUrl || null;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!pdfUrl) {
       Alert.alert(
         'PDF unavailable',
         'This PDF is not on the server yet. Ask admin to re-upload it from the dashboard, then pull down to refresh.'
@@ -1169,7 +1199,7 @@ export default function MyCoursesScreen() {
 
     setPdfDownloadingId(lesson.id);
     try {
-      const result = await downloadLessonPdf(lesson.pdfUrl, lesson.pdfTitle || lesson.title);
+      const result = await downloadLessonPdf(pdfUrl, lesson.pdfTitle || lesson.title);
       Alert.alert(
         'PDF downloaded',
         `Saved to your ${result.locationLabel}.\n\nOpen your phone Downloads / Files app to view it.`
@@ -1180,7 +1210,7 @@ export default function MyCoursesScreen() {
     } finally {
       setPdfDownloadingId(null);
     }
-  }, [categories, isCategoryProLocked, handleBuyCategory]);
+  }, [categories, isCategoryProLocked, handleBuyCategory, refreshLessonMedia]);
 
   const handleContinueToReview = useCallback((lessonId: string) => {
     pauseVideo();
@@ -1230,7 +1260,7 @@ export default function MyCoursesScreen() {
     </View>
   );
 
-  const handlePlay = (lessonId: string) => {
+  const handlePlay = async (lessonId: string) => {
     const lessonLevel = categories.find((l) => l.lessons.some((x) => x.id === lessonId));
     if (!lessonLevel) return;
 
@@ -1240,7 +1270,7 @@ export default function MyCoursesScreen() {
       return;
     }
 
-    const lesson = lessonLevel.lessons.find((l) => l.id === lessonId);
+    let lesson = lessonLevel.lessons.find((l) => l.id === lessonId);
     if (!lesson?.videoUrl) {
       if (lessonLevel.locked || isCategoryProLocked(lessonLevel.id)) {
         handleBuyCategory(lessonLevel.id);
@@ -1253,11 +1283,21 @@ export default function MyCoursesScreen() {
         );
         return;
       }
-      Alert.alert(
-        'Video unavailable',
-        'This video is not on the server yet. Ask admin to re-upload it from the dashboard, then pull down to refresh My Courses.'
-      );
-      return;
+      try {
+        const fresh = await refreshLessonMedia(lessonId);
+        if (fresh?.videoUrl) {
+          lesson = fresh;
+        }
+      } catch {
+        /* ignore */
+      }
+      if (!lesson?.videoUrl) {
+        Alert.alert(
+          'Video unavailable',
+          'This video is not on the server yet. Ask admin to re-upload it from the dashboard, then pull down to refresh My Courses.'
+        );
+        return;
+      }
     }
 
     saveCourseProgress(completedLessons, lessonId);

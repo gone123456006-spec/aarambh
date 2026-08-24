@@ -1,6 +1,6 @@
-const { mediaFileExists, canonicalizeMediaUrl } = require('../config/uploads');
+const { mediaFileExists, mediaFileExistsAsync, canonicalizeMediaUrl } = require('../config/uploads');
 
-function applyLessonMediaAvailability(lesson) {
+async function applyLessonMediaAvailability(lesson) {
   const out = lesson.toObject ? lesson.toObject() : { ...lesson };
   const now = Date.now();
 
@@ -19,9 +19,12 @@ function applyLessonMediaAvailability(lesson) {
     }
   }
 
-  if (out.videoUrl && !mediaFileExists(out.videoUrl)) {
-    out.videoUrl = null;
-    out.videoMissingOnServer = true;
+  if (out.videoUrl) {
+    const ok = await mediaFileExistsAsync(out.videoUrl);
+    if (!ok) {
+      out.videoUrl = null;
+      out.videoMissingOnServer = true;
+    }
   }
 
   if (out.pdfAvailableAt) {
@@ -32,18 +35,21 @@ function applyLessonMediaAvailability(lesson) {
     }
   }
 
-  if (out.pdfUrl && !mediaFileExists(out.pdfUrl)) {
-    out.pdfUrl = null;
-    out.pdfMissingOnServer = true;
+  if (out.pdfUrl) {
+    const ok = await mediaFileExistsAsync(out.pdfUrl);
+    if (!ok) {
+      out.pdfUrl = null;
+      out.pdfMissingOnServer = true;
+    }
   }
 
   return out;
 }
 
-function applyCourseMediaAvailability(course) {
+async function applyCourseMediaAvailability(course) {
   const out = course.toObject ? course.toObject() : { ...course };
   if (Array.isArray(out.lessons)) {
-    out.lessons = out.lessons.map(applyLessonMediaAvailability);
+    out.lessons = await Promise.all(out.lessons.map(applyLessonMediaAvailability));
   }
   return out;
 }
@@ -51,4 +57,5 @@ function applyCourseMediaAvailability(course) {
 module.exports = {
   applyLessonMediaAvailability,
   applyCourseMediaAvailability,
+  mediaFileExists,
 };

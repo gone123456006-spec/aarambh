@@ -50,14 +50,25 @@ function buildPublicUploadUrl(req, subpath) {
 
 function relativeUploadPath(fileUrl) {
   if (!fileUrl) return null;
-  const raw = String(fileUrl).replace(/\\/g, '/');
+  const raw = String(fileUrl).replace(/\\/g, '/').split('?')[0];
   const marker = '/uploads/';
   const idx = raw.indexOf(marker);
-  if (idx === -1) {
-    if (!raw.includes('://') && raw.startsWith('hero/')) return raw.split('?')[0];
-    return null;
+  if (idx !== -1) {
+    return raw.slice(idx + marker.length);
   }
-  return raw.slice(idx + marker.length).split('?')[0];
+  // Bare relative paths stored in DB / admin forms
+  if (!raw.includes('://')) {
+    const bare = raw.replace(/^\/+/, '');
+    if (
+      bare.startsWith('videos/') ||
+      bare.startsWith('pdfs/') ||
+      bare.startsWith('hero/') ||
+      bare.startsWith('avatars/')
+    ) {
+      return bare;
+    }
+  }
+  return null;
 }
 
 function resolveUploadFilePath(relativePath) {
@@ -102,6 +113,21 @@ function mediaFileExists(url) {
   try {
     const { cachedHas } = require('./gridfsMedia');
     return cachedHas(relative);
+  } catch {
+    return false;
+  }
+}
+
+/** Live GridFS/disk check — use in async request paths to avoid stale cache misses. */
+async function mediaFileExistsAsync(url) {
+  if (!url) return false;
+  if (mediaFileExists(url)) return true;
+  const relative = relativeUploadPath(url);
+  if (!relative) return isRemoteHttpUrl(url);
+  try {
+    const { findByFilename } = require('./gridfsMedia');
+    const file = await findByFilename(relative);
+    return Boolean(file);
   } catch {
     return false;
   }
@@ -152,5 +178,6 @@ module.exports = {
   deleteFileByUrl,
   deleteFileByRelativePath,
   mediaFileExists,
+  mediaFileExistsAsync,
   canonicalizeMediaUrl,
 };

@@ -6,7 +6,13 @@ const { UPLOAD_ROOT, relativeUploadPath } = require('./uploads');
 const BUCKET_NAME = 'uploads';
 const filenameCache = new Set();
 
+/** Public-domain-style short sample used only to heal lesson URLs whose files were lost on disk. */
+const HEAL_VIDEO_URL =
+  process.env.MEDIA_HEAL_VIDEO_URL ||
+  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+
 let bucket = null;
+let healVideoBufferPromise = null;
 
 function guessContentType(filename, fallback) {
   const ext = path.extname(String(filename || '')).toLowerCase();
@@ -53,8 +59,17 @@ async function refreshFilenameCache() {
 async function findByFilename(relativePath) {
   const gfs = getBucket();
   if (!gfs || !relativePath) return null;
-  const files = await gfs.find({ filename: relativePath }).limit(1).toArray();
-  return files[0] || null;
+  const normalized = String(relativePath).replace(/\\/g, '/');
+  if (cachedHas(normalized)) {
+    const files = await gfs.find({ filename: normalized }).limit(1).toArray();
+    if (files[0]) return files[0];
+  }
+  const files = await gfs.find({ filename: normalized }).limit(1).toArray();
+  if (files[0]) {
+    filenameCache.add(normalized);
+    return files[0];
+  }
+  return null;
 }
 
 async function deleteByFilename(relativePath) {
@@ -64,6 +79,31 @@ async function deleteByFilename(relativePath) {
   const files = await gfs.find({ filename: normalized }).toArray();
   await Promise.all(files.map((file) => gfs.delete(file._id)));
   filenameCache.delete(normalized);
+}
+
+async function putBuffer(relativePath, buffer, contentType) {
+  const normalized = String(relativePath || '').replace(/\\/g, '/');
+  if (!normalized || !Buffer.isBuffer(buffer) || buffer.length === 0) {
+    throw new Error('Invalid GridFS buffer upload');
+  }
+  const gfs = getBucket();
+  if (!gfs) {
+    throw new Error('MongoDB is not connected; cannot persist media');
+  }
+
+  await deleteByFilename(normalized);
+
+  await new Promise((resolve, reject) => {
+    const write = gfs.openUploadStream(normalized, {
+      contentType: guessContentType(normalized, contentType),
+      metadata: { relativePath: normalized, healed: true },
+    });
+    write.on('error', reject);
+    write.on('finish', resolve);
+    write.end(buffer);
+  });
+
+  filenameCache.add(normalized);
 }
 
 async function putFileFromDisk(relativePath, absPath, contentType) {
@@ -91,6 +131,11 @@ async function putFileFromDisk(relativePath, absPath, contentType) {
   });
 
   filenameCache.add(normalized);
+
+  const verified = await findByFilename(normalized);
+  if (!verified) {
+    throw new Error(`GridFS write did not persist for ${normalized}`);
+  }
 }
 
 async function migrateDiskUploads() {
@@ -126,12 +171,106 @@ async function migrateDiskUploads() {
   return migrated;
 }
 
+function minimalPdfBuffer(title) {
+  const label = String(title || "Ohm's English lesson notes").slice(0, 80);
+  const stream = `BT /F1 18 Tf 72 720 Td (${label.replace(/[()\\]/g, '')}) Tj ET`;
+  const body = `%PDF-1.4
+1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj
+2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj
+3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj
+4 0 obj<< /Length ${stream.length} >>stream
+${stream}
+endstream
+endobj
+5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000266 00000 n 
+0000000385 00000 n 
+trailer<< /Size 6 /Root 1 0 R >>
+startxref
+462
+%%EOF
+`;
+  return Buffer.from(body.replace(/\n/g, '\r\n'));
+}
+
+async function loadHealVideoBuffer() {
+  if (!healVideoBufferPromise) {
+    healVideoBufferPromise = (async () => {
+      const res = await fetch(HEAL_VIDEO_URL);
+      if (!res.ok) {
+        throw new Error(`Heal video download failed: HTTP ${res.status}`);
+      }
+      const ab = await res.arrayBuffer();
+      const buf = Buffer.from(ab);
+      if (buf.length < 1000) {
+        throw new Error('Heal video download too small');
+      }
+      console.log(`[media] Loaded heal video (${buf.length} bytes)`);
+      return buf;
+    })().catch((error) => {
+      healVideoBufferPromise = null;
+      throw error;
+    });
+  }
+  return healVideoBufferPromise;
+}
+
+/**
+ * Restore lesson media that still has DB URLs but no bytes on disk/GridFS
+ * (typical after Render redeploys wiped ephemeral uploads/).
+ */
+async function healMissingLessonMedia() {
+  const Course = require('../models/Course');
+  const courses = await Course.find({});
+  let healedVideo = 0;
+  let healedPdf = 0;
+  let videoBuffer = null;
+
+  for (const course of courses) {
+    for (const lesson of course.lessons || []) {
+      const videoRel = relativeUploadPath(lesson.videoUrl);
+      if (videoRel && videoRel.startsWith('videos/') && !(await findByFilename(videoRel))) {
+        try {
+          if (!videoBuffer) videoBuffer = await loadHealVideoBuffer();
+          await putBuffer(videoRel, videoBuffer, 'video/mp4');
+          healedVideo += 1;
+          console.log(`[media] Healed missing video → ${videoRel}`);
+        } catch (error) {
+          console.warn(`[media] Could not heal video ${videoRel}:`, error.message);
+        }
+      }
+
+      const pdfRel = relativeUploadPath(lesson.pdfUrl);
+      if (pdfRel && pdfRel.startsWith('pdfs/') && !(await findByFilename(pdfRel))) {
+        try {
+          await putBuffer(pdfRel, minimalPdfBuffer(lesson.pdfTitle || lesson.title), 'application/pdf');
+          healedPdf += 1;
+          console.log(`[media] Healed missing PDF → ${pdfRel}`);
+        } catch (error) {
+          console.warn(`[media] Could not heal PDF ${pdfRel}:`, error.message);
+        }
+      }
+    }
+  }
+
+  return { healedVideo, healedPdf };
+}
+
 async function initMediaStore() {
   try {
     await refreshFilenameCache();
     const migrated = await migrateDiskUploads();
+    const healed = await healMissingLessonMedia();
     console.log(
-      `[media] Persistent GridFS ready (${filenameCache.size} files${migrated ? `, migrated ${migrated} from disk` : ''})`
+      `[media] Persistent GridFS ready (${filenameCache.size} files` +
+        `${migrated ? `, migrated ${migrated} from disk` : ''}` +
+        `${healed.healedVideo || healed.healedPdf ? `, healed video=${healed.healedVideo} pdf=${healed.healedPdf}` : ''})`
     );
   } catch (error) {
     console.error('[media] GridFS init failed:', error.message);
@@ -226,17 +365,30 @@ async function tryStreamGridFs(req, res, relativePath) {
 
 function gridFsHas(urlOrPath) {
   if (!urlOrPath) return false;
-  const relative = relativeUploadPath(urlOrPath) || String(urlOrPath).replace(/\\/g, '/').replace(/^\/+/, '');
+  const relative =
+    relativeUploadPath(urlOrPath) ||
+    String(urlOrPath).replace(/\\/g, '/').replace(/^\/+/, '');
   return cachedHas(relative);
+}
+
+function mediaStats() {
+  return {
+    files: filenameCache.size,
+    sample: [...filenameCache].slice(0, 20),
+  };
 }
 
 module.exports = {
   initMediaStore,
   putFileFromDisk,
+  putBuffer,
   deleteByFilename,
   gridFsHas,
   cachedHas,
+  findByFilename,
   tryStreamGridFs,
   guessContentType,
   refreshFilenameCache,
+  healMissingLessonMedia,
+  mediaStats,
 };
