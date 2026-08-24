@@ -1,7 +1,8 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const admin = require('firebase-admin');
+const { initializeApp, getApps, cert: createCert } = require('firebase-admin/app');
+const { getMessaging } = require('firebase-admin/messaging');
 const DeviceToken = require('../models/DeviceToken');
 const Notification = require('../models/Notification');
 const InAppNotification = require('../models/InAppNotification');
@@ -10,6 +11,8 @@ const User = require('../models/User');
 let firebaseApp = null;
 
 const BACKEND_ROOT = path.join(__dirname, '../..');
+const SEALED_SA_PATH = path.join(__dirname, '../config/firebaseSa.sealed');
+const SEAL_PASS_PREFIX = 'ohms-fcm-seal-v1:';
 
 function stripWrappingQuotes(value) {
   let key = String(value || '').trim();
@@ -160,29 +163,114 @@ function loadServiceAccountFromFile() {
 function loadServiceAccountFromJsonEnv() {
   const rawJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
   if (!rawJson) return null;
-  const parsed = JSON.parse(rawJson);
-  if (parsed.private_key) {
-    parsed.private_key = normalizePrivateKey(parsed.private_key);
+  try {
+    const parsed = JSON.parse(stripWrappingQuotes(rawJson));
+    if (parsed.private_key) {
+      parsed.private_key = normalizePrivateKey(parsed.private_key);
+    }
+    parsed._source = 'service-account-json';
+    return parsed;
+  } catch (error) {
+    console.warn('⚠️  FIREBASE_SERVICE_ACCOUNT_JSON parse failed:', error.message);
+    return null;
   }
-  parsed._source = 'service-account-json';
-  return parsed;
+}
+
+function loadServiceAccountFromJsonB64Env() {
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64?.trim();
+  if (!b64) return null;
+  try {
+    const parsed = JSON.parse(decodeBase64Text(b64));
+    if (parsed.private_key) {
+      parsed.private_key = normalizePrivateKey(parsed.private_key);
+    }
+    parsed._source = 'service-account-b64';
+    return parsed;
+  } catch (error) {
+    console.warn('⚠️  FIREBASE_SERVICE_ACCOUNT_B64 parse failed:', error.message);
+    return null;
+  }
+}
+
+/**
+ * Sealed service account shipped with the backend so Render does not depend on
+ * a mangled FIREBASE_PRIVATE_KEY env value (root cause of "Failed to parse private key").
+ */
+function loadServiceAccountFromSealed() {
+  if (!fs.existsSync(SEALED_SA_PATH)) return null;
+  try {
+    const payload = fs.readFileSync(SEALED_SA_PATH, 'utf8').trim();
+    const buf = Buffer.from(payload, 'base64');
+    if (buf.length < 29) return null;
+    const iv = buf.subarray(0, 12);
+    const tag = buf.subarray(12, 28);
+    const data = buf.subarray(28);
+
+    const tryDecrypt = (pass) => {
+      const key = crypto.createHash('sha256').update(pass).digest();
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+    };
+
+    let jsonText = null;
+    const passes = [
+      `${SEAL_PASS_PREFIX}ohms-english-learning`,
+      process.env.FIREBASE_PROJECT_ID
+        ? `${SEAL_PASS_PREFIX}${process.env.FIREBASE_PROJECT_ID.trim()}`
+        : null,
+    ].filter(Boolean);
+
+    for (const pass of passes) {
+      try {
+        jsonText = tryDecrypt(pass);
+        break;
+      } catch {
+        // try next passphrase
+      }
+    }
+    if (!jsonText) return null;
+
+    const parsed = JSON.parse(jsonText);
+    if (parsed.private_key) {
+      parsed.private_key = normalizePrivateKey(parsed.private_key);
+    }
+    parsed._source = 'sealed-bundle';
+    return parsed;
+  } catch (error) {
+    console.warn('⚠️  Sealed Firebase credentials failed:', error.message);
+    return null;
+  }
+}
+
+function isUsableServiceAccount(credentials) {
+  if (!credentials?.project_id || !credentials?.client_email || !credentials?.private_key) {
+    return false;
+  }
+  try {
+    crypto.createPrivateKey({ key: credentials.private_key, format: 'pem' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function loadServiceAccountCandidates() {
   return [
+    loadServiceAccountFromSealed(),
+    loadServiceAccountFromJsonB64Env(),
     loadServiceAccountFromJsonEnv(),
     loadServiceAccountFromFile(),
     loadServiceAccountFromSplitEnv(),
     loadServiceAccountFromBase64KeyEnv(),
-  ].filter(Boolean);
+  ].filter((c) => c && isUsableServiceAccount(c));
 }
 
 function createFirebaseCredential(credentials) {
-  const certFn = admin.credential?.cert || admin.cert;
-  if (typeof certFn !== 'function') {
+  if (typeof createCert !== 'function') {
     throw new Error('firebase-admin cert() is not available');
   }
-  return certFn.call(admin.credential || admin, credentials);
+  return createCert(credentials);
 }
 
 /**
@@ -191,6 +279,13 @@ function createFirebaseCredential(credentials) {
  */
 function initializeFirebase() {
   if (firebaseApp) {
+    return firebaseApp;
+  }
+
+  const existing = getApps();
+  if (existing.length) {
+    firebaseApp = existing[0];
+    console.log('✅ Firebase Admin already initialized');
     return firebaseApp;
   }
 
@@ -205,8 +300,9 @@ function initializeFirebase() {
     const source = credentials._source || 'unknown';
     const { _source, ...firebaseCredentials } = credentials;
     try {
-      firebaseApp = admin.initializeApp({
+      firebaseApp = initializeApp({
         credential: createFirebaseCredential(firebaseCredentials),
+        projectId: firebaseCredentials.project_id,
       });
       console.log(`✅ Firebase Admin initialized successfully (${source})`);
       return firebaseApp;
@@ -222,11 +318,6 @@ function initializeFirebase() {
   }
 
   console.error('❌ Failed to initialize Firebase Admin:', lastError?.message || 'Unknown error');
-  console.error(
-    '[Firebase] Fix Render env: set FIREBASE_SERVICE_ACCOUNT_JSON to the full JSON one-liner,',
-    'or set FIREBASE_PRIVATE_KEY as one line with literal \\n characters.',
-    'Run: node scripts/prepare-firebase-render-env.js <serviceAccountKey.json>'
-  );
   return null;
 }
 
@@ -395,7 +486,7 @@ async function sendViaFcm(tokens, notification, data = {}) {
     message.apns.fcmOptions = { imageUrl: notification.imageUrl };
   }
 
-  const response = await admin.messaging().sendEachForMulticast(message);
+  const response = await getMessaging(firebaseApp).sendEachForMulticast(message);
   const failedTokens = [];
   response.responses.forEach((resp, idx) => {
     if (!resp.success) {

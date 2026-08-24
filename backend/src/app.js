@@ -106,11 +106,13 @@ app.use('/api', apiLimiter);
 
 // Health Check Endpoint
 app.get('/health', (req, res) => {
+  const { isFirebaseEnabled } = require('./services/firebaseService');
   res.status(200).json({
     success: true,
     status: 'UP',
     timestamp: new Date(),
     uptime: process.uptime(),
+    firebase: isFirebaseEnabled() ? 'enabled' : 'disabled',
   });
 });
 
