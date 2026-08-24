@@ -6,7 +6,7 @@ const { UPLOAD_ROOT, relativeUploadPath } = require('./uploads');
 const BUCKET_NAME = 'uploads';
 const filenameCache = new Set();
 
-/** Public-domain-style short sample used only to heal lesson URLs whose files were lost on disk. */
+/** Remote sample video — used when local bytes were wiped (Render disk). App plays this HTTPS URL directly. */
 const HEAL_VIDEO_URL =
   process.env.MEDIA_HEAL_VIDEO_URL ||
   'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
@@ -221,9 +221,28 @@ async function loadHealVideoBuffer() {
   return healVideoBufferPromise;
 }
 
+function publicUploadUrl(relativePath) {
+  const { getPublicBaseUrl } = require('./env');
+  const base =
+    getPublicBaseUrl() ||
+    process.env.RENDER_EXTERNAL_URL ||
+    'https://aarambh-api.onrender.com';
+  return `${String(base).replace(/\/$/, '')}/uploads/${relativePath}`;
+}
+
+function lessonNeedsVideo(lesson) {
+  const type = String(lesson.type || 'video').toLowerCase();
+  return type === 'video' || Boolean(lesson.videoUrl) || Boolean(lesson.title);
+}
+
+function lessonNeedsPdf(lesson) {
+  return Boolean(lesson.pdfUrl) || Boolean(lesson.pdfTitle);
+}
+
 /**
- * Restore lesson media that still has DB URLs but no bytes on disk/GridFS
- * (typical after Render redeploys wiped ephemeral uploads/).
+ * Restore lesson media wiped by Render redeploys.
+ * Videos: point at a stable remote sample (or keep GridFS file if present).
+ * PDFs: write a real PDF into GridFS under the lesson path.
  */
 async function healMissingLessonMedia() {
   const Course = require('../models/Course');
@@ -233,29 +252,76 @@ async function healMissingLessonMedia() {
   let videoBuffer = null;
 
   for (const course of courses) {
+    let dirty = false;
+
     for (const lesson of course.lessons || []) {
-      const videoRel = relativeUploadPath(lesson.videoUrl);
-      if (videoRel && videoRel.startsWith('videos/') && !(await findByFilename(videoRel))) {
-        try {
-          if (!videoBuffer) videoBuffer = await loadHealVideoBuffer();
-          await putBuffer(videoRel, videoBuffer, 'video/mp4');
-          healedVideo += 1;
-          console.log(`[media] Healed missing video → ${videoRel}`);
-        } catch (error) {
-          console.warn(`[media] Could not heal video ${videoRel}:`, error.message);
+      // Unstick bad future “processing” gates from older uploads
+      if (lesson.videoAvailableAt && new Date(lesson.videoAvailableAt).getTime() > Date.now() + 60_000) {
+        lesson.videoAvailableAt = new Date();
+        dirty = true;
+      }
+      if (lesson.pdfAvailableAt && new Date(lesson.pdfAvailableAt).getTime() > Date.now() + 60_000) {
+        lesson.pdfAvailableAt = new Date();
+        dirty = true;
+      }
+
+      if (lessonNeedsVideo(lesson)) {
+        const videoRel = relativeUploadPath(lesson.videoUrl);
+        const hasLocalVideo = videoRel ? Boolean(await findByFilename(videoRel)) : false;
+        const isRemoteOk =
+          /^https?:\/\//i.test(String(lesson.videoUrl || '')) &&
+          !/localhost|127\.0\.0\.1|\/uploads\//i.test(String(lesson.videoUrl || ''));
+
+        if (!hasLocalVideo && !isRemoteOk) {
+          // Prefer remote URL so playback works even if GridFS download/upload fails
+          try {
+            if (videoRel && videoRel.startsWith('videos/')) {
+              try {
+                if (!videoBuffer) videoBuffer = await loadHealVideoBuffer();
+                await putBuffer(videoRel, videoBuffer, 'video/mp4');
+                lesson.videoUrl = publicUploadUrl(videoRel);
+              } catch (gridErr) {
+                console.warn(`[media] GridFS video heal failed, using remote:`, gridErr.message);
+                lesson.videoUrl = HEAL_VIDEO_URL;
+              }
+            } else {
+              lesson.videoUrl = HEAL_VIDEO_URL;
+            }
+            lesson.videoAvailableAt = new Date();
+            healedVideo += 1;
+            dirty = true;
+            console.log(`[media] Healed lesson video → ${lesson.title} (${lesson.videoUrl})`);
+          } catch (error) {
+            console.warn(`[media] Could not heal video for ${lesson.title}:`, error.message);
+          }
         }
       }
 
-      const pdfRel = relativeUploadPath(lesson.pdfUrl);
-      if (pdfRel && pdfRel.startsWith('pdfs/') && !(await findByFilename(pdfRel))) {
-        try {
-          await putBuffer(pdfRel, minimalPdfBuffer(lesson.pdfTitle || lesson.title), 'application/pdf');
-          healedPdf += 1;
-          console.log(`[media] Healed missing PDF → ${pdfRel}`);
-        } catch (error) {
-          console.warn(`[media] Could not heal PDF ${pdfRel}:`, error.message);
+      if (lessonNeedsPdf(lesson)) {
+        let pdfRel = relativeUploadPath(lesson.pdfUrl);
+        const hasPdf = pdfRel ? Boolean(await findByFilename(pdfRel)) : false;
+        if (!hasPdf) {
+          try {
+            if (!pdfRel || !pdfRel.startsWith('pdfs/')) {
+              const id = String(lesson._id || lesson.lessonKey || Date.now());
+              pdfRel = `pdfs/healed-${id}.pdf`;
+            }
+            await putBuffer(pdfRel, minimalPdfBuffer(lesson.pdfTitle || lesson.title), 'application/pdf');
+            lesson.pdfUrl = publicUploadUrl(pdfRel);
+            lesson.pdfAvailableAt = new Date();
+            healedPdf += 1;
+            dirty = true;
+            console.log(`[media] Healed lesson PDF → ${pdfRel}`);
+          } catch (error) {
+            console.warn(`[media] Could not heal PDF for ${lesson.title}:`, error.message);
+          }
         }
       }
+    }
+
+    if (dirty) {
+      course.markModified('lessons');
+      await course.save();
     }
   }
 

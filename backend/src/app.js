@@ -143,6 +143,52 @@ app.get('/health', (req, res) => {
   });
 });
 
+/** Diagnose / optionally repair lesson media (used after Render disk wipe). */
+app.get('/health/media', async (req, res) => {
+  try {
+    const Course = require('./models/Course');
+    const { mediaStats, healMissingLessonMedia, refreshFilenameCache, cachedHas } = require('./config/gridfsMedia');
+    const { relativeUploadPath } = require('./config/uploads');
+
+    if (String(req.query.repair || '') === '1') {
+      const healed = await healMissingLessonMedia();
+      await refreshFilenameCache();
+      return res.json({
+        success: true,
+        repaired: true,
+        healed,
+        media: mediaStats(),
+      });
+    }
+
+    const courses = await Course.find({}).lean();
+    const lessons = [];
+    for (const c of courses) {
+      for (const l of c.lessons || []) {
+        const videoRel = relativeUploadPath(l.videoUrl);
+        const pdfRel = relativeUploadPath(l.pdfUrl);
+        lessons.push({
+          course: c.level,
+          title: l.title,
+          videoUrl: l.videoUrl || null,
+          pdfUrl: l.pdfUrl || null,
+          videoInGridFs: videoRel ? cachedHas(videoRel) : false,
+          pdfInGridFs: pdfRel ? cachedHas(pdfRel) : false,
+          videoIsRemote: /^https?:\/\//i.test(String(l.videoUrl || '')) && !String(l.videoUrl || '').includes('/uploads/'),
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      media: mediaStats(),
+      lessons,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Public legal pages (required HTTPS URLs for Google Play Console)
 app.get('/privacy-policy', (req, res) => {
   res.type('html').send(privacyPolicyHtml);

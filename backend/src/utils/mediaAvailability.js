@@ -1,5 +1,10 @@
 const { mediaFileExists, mediaFileExistsAsync, canonicalizeMediaUrl } = require('../config/uploads');
 
+/**
+ * Prepare lesson media for the app.
+ * Do NOT strip videoUrl/pdfUrl when the file check fails — that caused false
+ * "Video unavailable" errors even when GridFS had (or remote URLs pointed to) media.
+ */
 async function applyLessonMediaAvailability(lesson) {
   const out = lesson.toObject ? lesson.toObject() : { ...lesson };
   const now = Date.now();
@@ -11,10 +16,12 @@ async function applyLessonMediaAvailability(lesson) {
     out.pdfUrl = canonicalizeMediaUrl(out.pdfUrl);
   }
 
-  if (out.videoAvailableAt) {
+  // Only hide while a real future processing window is active (ignore stale/bad dates > 1h)
+  if (out.videoAvailableAt && out.videoUrl) {
     const at = new Date(out.videoAvailableAt).getTime();
-    if (at > now) {
-      out.videoAvailableIn = Math.ceil((at - now) / 1000);
+    const waitMs = at - now;
+    if (waitMs > 0 && waitMs <= 60 * 60 * 1000) {
+      out.videoAvailableIn = Math.ceil(waitMs / 1000);
       out.videoUrl = null;
     }
   }
@@ -22,15 +29,16 @@ async function applyLessonMediaAvailability(lesson) {
   if (out.videoUrl) {
     const ok = await mediaFileExistsAsync(out.videoUrl);
     if (!ok) {
-      out.videoUrl = null;
       out.videoMissingOnServer = true;
+      // Keep URL — client /uploads + GridFS or remote host may still serve it
     }
   }
 
-  if (out.pdfAvailableAt) {
+  if (out.pdfAvailableAt && out.pdfUrl) {
     const at = new Date(out.pdfAvailableAt).getTime();
-    if (at > now) {
-      out.pdfAvailableIn = Math.ceil((at - now) / 1000);
+    const waitMs = at - now;
+    if (waitMs > 0 && waitMs <= 60 * 60 * 1000) {
+      out.pdfAvailableIn = Math.ceil(waitMs / 1000);
       out.pdfUrl = null;
     }
   }
@@ -38,7 +46,6 @@ async function applyLessonMediaAvailability(lesson) {
   if (out.pdfUrl) {
     const ok = await mediaFileExistsAsync(out.pdfUrl);
     if (!ok) {
-      out.pdfUrl = null;
       out.pdfMissingOnServer = true;
     }
   }
