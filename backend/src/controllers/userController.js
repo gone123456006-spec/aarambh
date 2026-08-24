@@ -50,7 +50,7 @@ const updateProfile = asyncHandler(async (req, res) => {
  * Upload and update user avatar image (local disk)
  */
 const updateAvatar = asyncHandler(async (req, res) => {
-  const uploadResult = uploadService.saveAvatar(req);
+  const uploadResult = await uploadService.saveAvatar(req);
 
   const user = await User.findById(req.user._id);
   if (user.avatar) {

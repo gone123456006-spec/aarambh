@@ -8,6 +8,7 @@ const uploadService = require('../services/uploadService');
 const tokenService = require('../services/tokenService');
 const { sortCourseLessons, slugifyLevel, colorsForLevel } = require('../constants/curriculum');
 const { notifyNewCourse, notifyCourseLessonsAdded } = require('../services/notificationHelpers');
+const { canonicalizeMediaUrl } = require('../config/uploads');
 const {
   getLessonAppStatus,
   normalizeMediaAvailabilityOnSave,
@@ -426,13 +427,32 @@ const addLesson = asyncHandler(async (req, res) => {
     description: description?.trim() || '',
     type: type || 'video',
     pdfTitle: pdfTitle?.trim() || (title.trim() + ' notes'),
-    videoUrl,
-    pdfUrl,
+    videoUrl: videoUrl ? canonicalizeMediaUrl(videoUrl) : videoUrl,
+    pdfUrl: pdfUrl ? canonicalizeMediaUrl(pdfUrl) : pdfUrl,
     videoAvailableAt,
     pdfAvailableAt,
     lessonKey,
     order,
   };
+
+  if ((newLesson.type || 'video') === 'video' && !newLesson.videoUrl && !newLesson.pdfUrl) {
+    throw new ApiError(400, 'Add a video or PDF file for this lesson');
+  }
+
+  try {
+    assertMediaFilesExist({ videoUrl: newLesson.videoUrl, pdfUrl: newLesson.pdfUrl });
+  } catch (error) {
+    throw new ApiError(400, error.message);
+  }
+
+  const availability = normalizeMediaAvailabilityOnSave({
+    videoUrl: newLesson.videoUrl,
+    pdfUrl: newLesson.pdfUrl,
+    videoAvailableAt,
+    pdfAvailableAt,
+  });
+  newLesson.videoAvailableAt = availability.videoAvailableAt;
+  newLesson.pdfAvailableAt = availability.pdfAvailableAt;
 
   course.lessons.push(newLesson);
   course.lessons = sortCourseLessons(course.lessons);
@@ -507,8 +527,8 @@ const upsertLesson = asyncHandler(async (req, res) => {
     if (description !== undefined) lesson.description = description?.trim() || '';
     lesson.type = type || 'video';
     if (pdfTitle !== undefined) lesson.pdfTitle = pdfTitle?.trim() || '';
-    if (videoUrl !== undefined) lesson.videoUrl = videoUrl || undefined;
-    if (pdfUrl !== undefined) lesson.pdfUrl = pdfUrl || undefined;
+    if (videoUrl !== undefined) lesson.videoUrl = videoUrl ? canonicalizeMediaUrl(videoUrl) : undefined;
+    if (pdfUrl !== undefined) lesson.pdfUrl = pdfUrl ? canonicalizeMediaUrl(pdfUrl) : undefined;
   } else {
     const order = course.lessons.length;
     const key =
@@ -520,8 +540,8 @@ const upsertLesson = asyncHandler(async (req, res) => {
       description: description?.trim() || '',
       type: type || 'video',
       pdfTitle: pdfTitle?.trim() || `${title.trim()} notes`,
-      videoUrl,
-      pdfUrl,
+      videoUrl: videoUrl ? canonicalizeMediaUrl(videoUrl) : undefined,
+      pdfUrl: pdfUrl ? canonicalizeMediaUrl(pdfUrl) : undefined,
       order,
     });
     lesson = course.lessons[course.lessons.length - 1];
@@ -601,14 +621,14 @@ const updateLesson = asyncHandler(async (req, res) => {
     if (videoUrl && lesson.videoUrl && lesson.videoUrl !== videoUrl) {
       uploadService.deleteLocalAsset(lesson.videoUrl);
     }
-    lesson.videoUrl = videoUrl || undefined;
+    lesson.videoUrl = videoUrl ? canonicalizeMediaUrl(videoUrl) : undefined;
     if (videoAvailableAt !== undefined) lesson.videoAvailableAt = videoAvailableAt || undefined;
   }
   if (pdfUrl !== undefined) {
     if (pdfUrl && lesson.pdfUrl && lesson.pdfUrl !== pdfUrl) {
       uploadService.deleteLocalAsset(lesson.pdfUrl);
     }
-    lesson.pdfUrl = pdfUrl || undefined;
+    lesson.pdfUrl = pdfUrl ? canonicalizeMediaUrl(pdfUrl) : undefined;
     if (pdfAvailableAt !== undefined) lesson.pdfAvailableAt = pdfAvailableAt || undefined;
   }
 
@@ -703,10 +723,10 @@ const deleteLessonMedia = asyncHandler(async (req, res) => {
 });
 
 /**
- * Upload lesson video (local disk). Immediately available in the app after lesson save.
+ * Upload lesson video to persistent MongoDB storage. Immediately available in the app after lesson save.
  */
 const uploadVideo = asyncHandler(async (req, res) => {
-  const payload = uploadService.saveLessonVideo(req);
+  const payload = await uploadService.saveLessonVideo(req);
 
   res.status(200).json(
     new ApiResponse(
@@ -722,10 +742,10 @@ const uploadVideo = asyncHandler(async (req, res) => {
 });
 
 /**
- * Upload lesson PDF (local disk). Immediately available in the app after lesson save.
+ * Upload lesson PDF to persistent MongoDB storage. Immediately available in the app after lesson save.
  */
 const uploadPdf = asyncHandler(async (req, res) => {
-  const payload = uploadService.saveLessonPdf(req);
+  const payload = await uploadService.saveLessonPdf(req);
 
   res.status(200).json(
     new ApiResponse(

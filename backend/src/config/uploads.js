@@ -72,18 +72,53 @@ function resolveUploadFilePath(relativePath) {
   return fullPath;
 }
 
+function isRemoteHttpUrl(url) {
+  return /^https?:\/\//i.test(String(url || '')) && !/localhost|127\.0\.0\.1/i.test(String(url));
+}
+
+function canonicalizeMediaUrl(url) {
+  if (!url) return url;
+  const relative = relativeUploadPath(url);
+  if (!relative) return url;
+
+  const { getPublicBaseUrl, isProduction } = require('./env');
+  const publicBase = getPublicBaseUrl();
+  const isLocal = /localhost|127\.0\.0\.1/i.test(String(url));
+
+  if ((isProduction() || isLocal) && publicBase) {
+    return `${publicBase.replace(/\/$/, '')}/uploads/${relative}`;
+  }
+  return url;
+}
+
 function mediaFileExists(url) {
   if (!url) return false;
   const relative = relativeUploadPath(url);
-  if (!relative) return false;
+  if (!relative) {
+    return isRemoteHttpUrl(url);
+  }
   const fullPath = resolveUploadFilePath(relative);
-  return Boolean(fullPath && fs.existsSync(fullPath));
+  if (fullPath && fs.existsSync(fullPath)) return true;
+  try {
+    const { cachedHas } = require('./gridfsMedia');
+    return cachedHas(relative);
+  } catch {
+    return false;
+  }
 }
 
 function deleteFileByUrl(fileUrl) {
   const relative = relativeUploadPath(fileUrl);
   if (!relative) return;
   deleteFileByRelativePath(relative);
+  try {
+    const { deleteByFilename } = require('./gridfsMedia');
+    deleteByFilename(relative).catch((error) => {
+      console.warn('[media] GridFS delete failed:', error.message);
+    });
+  } catch {
+    // GridFS not available
+  }
 }
 
 function deleteFileByRelativePath(relativePath) {
@@ -117,4 +152,5 @@ module.exports = {
   deleteFileByUrl,
   deleteFileByRelativePath,
   mediaFileExists,
+  canonicalizeMediaUrl,
 };

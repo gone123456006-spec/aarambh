@@ -12,6 +12,7 @@ const { startKeepAlive, stopKeepAlive } = require('./src/utils/keepAlive');
 const { initializeFirebase } = require('./src/services/firebaseService');
 const { startDailyNotificationScheduler, stopDailyNotificationScheduler } = require('./src/services/notificationScheduler');
 const { startAccountDeletionScheduler, stopAccountDeletionScheduler } = require('./src/services/accountDeletionScheduler');
+const { initMediaStore } = require('./src/config/gridfsMedia');
 
 validateEnv();
 
@@ -52,6 +53,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 async function startServer() {
   ensureUploadDirs();
   await connectDB();
+  await initMediaStore();
   initializeFirebase();
   startDailyNotificationScheduler();
   startAccountDeletionScheduler();

@@ -1,13 +1,15 @@
-const fs = require('fs');
-const { relativeUploadPath, resolveUploadFilePath, mediaFileExists } = require('../config/uploads');
+const { mediaFileExists, canonicalizeMediaUrl } = require('../config/uploads');
 
-/**
- * Hide video/PDF URLs until availableAt (short delay after upload).
- * Also hide URLs when the file is missing on disk.
- */
 function applyLessonMediaAvailability(lesson) {
   const out = lesson.toObject ? lesson.toObject() : { ...lesson };
   const now = Date.now();
+
+  if (out.videoUrl) {
+    out.videoUrl = canonicalizeMediaUrl(out.videoUrl);
+  }
+  if (out.pdfUrl) {
+    out.pdfUrl = canonicalizeMediaUrl(out.pdfUrl);
+  }
 
   if (out.videoAvailableAt) {
     const at = new Date(out.videoAvailableAt).getTime();

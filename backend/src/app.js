@@ -4,7 +4,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
-const { UPLOAD_ROOT, ensureUploadDirs } = require('./config/uploads');
+const fs = require('fs');
+const { UPLOAD_ROOT, ensureUploadDirs, resolveUploadFilePath } = require('./config/uploads');
 
 const { getPublicBaseUrl } = require('./config/env');
 const { privacyPolicyHtml, termsHtml } = require('./content/legalPages');
@@ -90,16 +91,35 @@ app.use(
   })
 );
 
-// Local uploads (videos, PDFs) — no Cloudinary
-app.use(
-  '/uploads',
-  (req, res, next) => {
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    next();
-  },
-  express.static(UPLOAD_ROOT)
-);
+// Persistent uploads: disk cache first, then MongoDB GridFS (survives Render deploys)
+app.use('/uploads', async (req, res, next) => {
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Accept-Ranges', 'bytes');
+
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
+    return res.status(204).end();
+  }
+
+  const relative = decodeURIComponent(String(req.path || ''))
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
+  const diskPath = resolveUploadFilePath(relative);
+  if (diskPath && fs.existsSync(diskPath)) {
+    return next();
+  }
+
+  try {
+    const { tryStreamGridFs } = require('./config/gridfsMedia');
+    const streamed = await tryStreamGridFs(req, res, relative);
+    if (streamed) return;
+  } catch (error) {
+    console.warn('[media] GridFS stream failed:', error.message);
+  }
+  next();
+}, express.static(UPLOAD_ROOT));
 
 // Apply global rate limiting for general API calls
 app.use('/api', apiLimiter);

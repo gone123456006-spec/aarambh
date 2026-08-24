@@ -53,7 +53,7 @@ const uploadHero = asyncHandler(async (req, res) => {
     throw new ApiError(400, 'Please choose an image to upload');
   }
 
-  const payload = uploadService.saveHeroImage(req);
+  const payload = await uploadService.saveHeroImage(req);
 
   try {
     const previous = await HomeHero.findOneAndUpdate(
