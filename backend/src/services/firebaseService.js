@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const admin = require('firebase-admin');
@@ -21,9 +22,42 @@ function stripWrappingQuotes(value) {
   return key;
 }
 
+function stripEnvKeyPrefix(value) {
+  return String(value || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/^FIREBASE_PRIVATE_KEY\s*=\s*/i, '')
+    .trim();
+}
+
+function decodeBase64Text(value) {
+  if (!value) return '';
+  try {
+    return Buffer.from(String(value).replace(/\s/g, ''), 'base64').toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
+function canonicalizePrivateKeyPem(pem) {
+  if (!pem) return null;
+  try {
+    const keyObject = crypto.createPrivateKey({ key: pem, format: 'pem' });
+    return keyObject.export({ type: 'pkcs8', format: 'pem' });
+  } catch {
+    return null;
+  }
+}
+
 function normalizePrivateKey(raw) {
   if (!raw) return '';
-  let key = stripWrappingQuotes(raw);
+  let key = stripEnvKeyPrefix(stripWrappingQuotes(raw));
+
+  if (!key.includes('BEGIN') && /^[A-Za-z0-9+/=\s]+$/.test(key) && key.length > 200) {
+    const decoded = decodeBase64Text(key);
+    if (decoded.includes('BEGIN')) {
+      key = decoded;
+    }
+  }
 
   for (let i = 0; i < 4; i += 1) {
     if (!key.includes('\\n') && !key.includes('\\r')) break;
@@ -41,14 +75,26 @@ function normalizePrivateKey(raw) {
   const pem = key.match(/-----BEGIN ([A-Z ]+)-----([\s\S]*?)-----END \1-----/);
   if (pem) {
     const type = pem[1];
-    const body = pem[2].replace(/\s+/g, '');
-    const lines = body.match(/.{1,64}/g) || [];
-    key = `-----BEGIN ${type}-----\n${lines.join('\n')}\n-----END ${type}-----\n`;
+    const body = pem[2].replace(/[^A-Za-z0-9+/=]/g, '');
+    if (body) {
+      const lines = body.match(/.{1,64}/g) || [];
+      key = `-----BEGIN ${type}-----\n${lines.join('\n')}\n-----END ${type}-----\n`;
+    }
   } else if (key.includes('BEGIN') && !key.endsWith('\n')) {
     key += '\n';
   }
 
-  return key;
+  return canonicalizePrivateKeyPem(key) || key;
+}
+
+function describePrivateKeyState(privateKey) {
+  const key = String(privateKey || '');
+  return {
+    length: key.length,
+    hasBegin: key.includes('BEGIN PRIVATE KEY'),
+    hasEnd: key.includes('END PRIVATE KEY'),
+    newlineCount: (key.match(/\n/g) || []).length,
+  };
 }
 
 function loadServiceAccountFromSplitEnv() {
@@ -66,8 +112,30 @@ function loadServiceAccountFromSplitEnv() {
     project_id: projectId,
     client_email: clientEmail,
     private_key: privateKey,
+    _source: 'split-env',
   };
 
+  if (privateKeyId) credentials.private_key_id = privateKeyId;
+  return credentials;
+}
+
+function loadServiceAccountFromBase64KeyEnv() {
+  const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL?.trim();
+  const privateKeyId = process.env.FIREBASE_PRIVATE_KEY_ID?.trim();
+  const b64 = process.env.FIREBASE_PRIVATE_KEY_B64?.trim();
+  if (!projectId || !clientEmail || !b64) return null;
+
+  const privateKey = normalizePrivateKey(decodeBase64Text(b64));
+  if (!privateKey.includes('BEGIN')) return null;
+
+  const credentials = {
+    type: 'service_account',
+    project_id: projectId,
+    client_email: clientEmail,
+    private_key: privateKey,
+    _source: 'private-key-b64',
+  };
   if (privateKeyId) credentials.private_key_id = privateKeyId;
   return credentials;
 }
@@ -85,6 +153,7 @@ function loadServiceAccountFromFile() {
   if (parsed.private_key) {
     parsed.private_key = normalizePrivateKey(parsed.private_key);
   }
+  parsed._source = 'file';
   return parsed;
 }
 
@@ -95,14 +164,16 @@ function loadServiceAccountFromJsonEnv() {
   if (parsed.private_key) {
     parsed.private_key = normalizePrivateKey(parsed.private_key);
   }
+  parsed._source = 'service-account-json';
   return parsed;
 }
 
 function loadServiceAccountCandidates() {
   return [
-    loadServiceAccountFromSplitEnv(),
-    loadServiceAccountFromFile(),
     loadServiceAccountFromJsonEnv(),
+    loadServiceAccountFromFile(),
+    loadServiceAccountFromSplitEnv(),
+    loadServiceAccountFromBase64KeyEnv(),
   ].filter(Boolean);
 }
 
@@ -131,19 +202,31 @@ function initializeFirebase() {
 
   let lastError = null;
   for (const credentials of candidates) {
+    const source = credentials._source || 'unknown';
+    const { _source, ...firebaseCredentials } = credentials;
     try {
       firebaseApp = admin.initializeApp({
-        credential: createFirebaseCredential(credentials),
+        credential: createFirebaseCredential(firebaseCredentials),
       });
-      console.log('✅ Firebase Admin initialized successfully');
+      console.log(`✅ Firebase Admin initialized successfully (${source})`);
       return firebaseApp;
     } catch (error) {
       lastError = error;
-      console.warn('⚠️  Firebase credential candidate failed:', error.message);
+      const keyState = describePrivateKeyState(firebaseCredentials.private_key);
+      console.warn(
+        `⚠️  Firebase credential candidate failed (${source}):`,
+        error.message,
+        JSON.stringify(keyState)
+      );
     }
   }
 
   console.error('❌ Failed to initialize Firebase Admin:', lastError?.message || 'Unknown error');
+  console.error(
+    '[Firebase] Fix Render env: set FIREBASE_SERVICE_ACCOUNT_JSON to the full JSON one-liner,',
+    'or set FIREBASE_PRIVATE_KEY as one line with literal \\n characters.',
+    'Run: node scripts/prepare-firebase-render-env.js <serviceAccountKey.json>'
+  );
   return null;
 }
 

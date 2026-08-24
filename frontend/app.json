@@ -2,7 +2,7 @@
   "expo": {
     "name": "Ohm's",
     "slug": "ohms",
-    "version": "1.0.10",
+    "version": "1.0.12",
     "orientation": "default",
     "icon": "./assets/images/ohms-icon.png",
     "scheme": "ohms",
@@ -27,7 +27,7 @@
     },
       "android": {
       "package": "com.ohms.english",
-      "versionCode": 11,
+      "versionCode": 13,
       "softwareKeyboardLayoutMode": "resize",
       "allowBackup": false,
       "adaptiveIcon": {
@@ -125,6 +125,7 @@
       ],
       "./plugins/withAndroidWindowsLongPaths",
       "./plugins/withAndroidReleaseSigning",
+      "./plugins/withGoogleServicesFcm",
       "@config-plugins/react-native-webrtc",
       "expo-font",
       [

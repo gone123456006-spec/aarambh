@@ -24,6 +24,7 @@ import {
 import { isProfileCompleteUser } from '@/utils/profile';
 import { saveAuthSession, isLoggedInLocally } from '@/utils/authStorage';
 import { bootstrapNotifications } from '@/utils/notificationApi';
+import { initializePushNotifications } from '@/services/notificationService';
 import { queueAppTourForNewUser } from '@/components/AppTourOverlay';
 import { syncUserDataFromServer } from '@/utils/userDataSync';
 import { warmApiServer } from '@/utils/checkApiHealth';
@@ -114,9 +115,11 @@ export default function LoginScreen() {
       if (profileComplete) {
         await syncUserDataFromServer();
         void bootstrapNotifications(true);
+        void initializePushNotifications();
         router.replace('/(tabs)');
       } else {
         void bootstrapNotifications(true);
+        void initializePushNotifications();
         router.replace('/create-profile');
       }
     },

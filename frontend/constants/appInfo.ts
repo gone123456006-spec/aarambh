@@ -4,7 +4,7 @@ export const APP_INFO = {
   companyName: "Ohm's",
   productLine: 'English Learning',
   tagline: 'Practice English with confidence',
-  version: '1.0.9',
+  version: '1.0.12',
   mobile: '6204111878',
   whatsapp: '6204111878',
   email: 'aarambhfoundation111@gmail.com',
@@ -34,3 +34,4 @@ export function whatsappUri(phone: string = APP_INFO.whatsapp): string {
   const full = d.length === 10 ? `91${d}` : d.startsWith('91') ? d : `91${d}`;
   return `https://wa.me/${full}`;
 }
+

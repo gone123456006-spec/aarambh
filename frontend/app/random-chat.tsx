@@ -19,6 +19,7 @@ import {
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter, Stack, useLocalSearchParams } from 'expo-router';
 import * as SystemUI from 'expo-system-ui';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardStickyView, useKeyboardHandler } from 'react-native-keyboard-controller';
 import Animated, { FadeIn, FadeOut, runOnJS } from 'react-native-reanimated';
@@ -52,6 +53,7 @@ import { validateChatMessage, isChatMessageBlocked } from '@/utils/chatMessageVa
 import { getNavBarTopPadding } from '@/utils/safeAreaInsets';
 import { useWebRTC } from '@/utils/useWebRTC';
 import { WebRTCVideo } from '@/components/WebRTCVideo';
+import { DraggableLocalVideo } from '@/components/DraggableLocalVideo';
 import { requestCallPermissions, type CallMode } from '@/utils/mediaPermissions';
 import { isWebRTCAvailable, WEBRTC_REBUILD_HINT } from '@/utils/webrtcNative';
 import { OUTGOING_CALL_TIMEOUT_MS } from '@/utils/webrtcConfig';
@@ -205,6 +207,15 @@ export default function RandomChatScreen() {
   }, [resetCallState]);
 
   const isInCallUi = isVideoCallActive || outgoingCallPending;
+  const shouldKeepScreenOn = isInCallUi || incomingCall !== null;
+
+  useEffect(() => {
+    if (!shouldKeepScreenOn) return;
+    void activateKeepAwakeAsync('ohms-call');
+    return () => {
+      void deactivateKeepAwake('ohms-call');
+    };
+  }, [shouldKeepScreenOn]);
 
   useEffect(() => {
     if (!isInCallUi) return;
@@ -1345,12 +1356,7 @@ export default function RandomChatScreen() {
         )}
 
         {callMode === 'video' && localStream ? (
-          <WebRTCVideo
-            streamURL={localStream.toURL()}
-            style={[styles.localVideo, { bottom: 110 + Math.max(insets.bottom, 8) }]}
-            objectFit="cover"
-            mirror
-          />
+          <DraggableLocalVideo streamURL={localStream.toURL()} />
         ) : null}
       </View>
 
@@ -2158,18 +2164,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     width: '100%',
     height: '100%',
-  },
-  localVideo: {
-    position: 'absolute',
-    right: 16,
-    width: 110,
-    height: 160,
-    borderRadius: 14,
-    overflow: 'hidden',
-    backgroundColor: '#222',
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.25)',
-    ...cardShadow,
   },
   callingText: {
     color: '#fff',

@@ -10,3 +10,22 @@ node_modules/
 # Accidental downloads / large local media (never commit)
 frontend/assets/images/Downloads/
 *.mp4
+
+# Firebase private keys — never commit
+backend/secrets/
+backend/secrets/**
+*firebase-adminsdk*.json
+firebase-service-account.json
+serviceAccountKey.json
+
+# Local Gradle cache (never commit)
+.gradle-home/
+
+
+.tmp-build/
+
+frontend/android/.gradle/
+
+frontend/android/app/build/
+
+frontend/android/build/

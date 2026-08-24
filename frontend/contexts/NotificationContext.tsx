@@ -4,9 +4,9 @@ import {
   initializePushNotifications,
   addNotificationReceivedListener,
   addNotificationResponseListener,
-  unregisterDeviceToken,
   getStoredToken,
 } from '@/services/notificationService';
+import { isLoggedInLocally } from '@/utils/authStorage';
 
 interface NotificationContextType {
   isInitialized: boolean;
@@ -35,25 +35,28 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   const [hasPermission, setHasPermission] = useState(false);
   const [lastNotification, setLastNotification] = useState<Notifications.Notification | null>(null);
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
-  
+
   const notificationListener = useRef<Notifications.Subscription>();
   const responseListener = useRef<Notifications.Subscription>();
 
   const initialize = useCallback(async () => {
     try {
-      // Load stored token first
+      const loggedIn = await isLoggedInLocally();
+      if (!loggedIn) {
+        setIsInitialized(true);
+        return;
+      }
+
       const storedToken = await getStoredToken();
       if (storedToken) {
         setExpoPushToken(storedToken);
       }
 
-      // Initialize push notifications
       const success = await initializePushNotifications();
       setHasPermission(success);
       setIsInitialized(true);
 
       if (success) {
-        // Get fresh token
         const token = await getStoredToken();
         setExpoPushToken(token);
       }
@@ -64,10 +67,8 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
   }, []);
 
   useEffect(() => {
-    // Initialize notifications
     void initialize();
 
-    // Set up notification listeners
     notificationListener.current = addNotificationReceivedListener((notification) => {
       console.log('📩 Notification received:', notification);
       setLastNotification(notification);
@@ -75,30 +76,23 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
 
     responseListener.current = addNotificationResponseListener((response) => {
       console.log('👆 Notification tapped:', response);
-      const data = response.notification.request.content.data;
-      
-      // Handle notification tap based on data
-      // You can add navigation logic here
-      // For example, navigate to a specific screen based on notification type
-      if (data?.type === 'course') {
-        // Navigate to course screen
-        console.log('Navigate to course:', data.courseId);
-      } else if (data?.type === 'update') {
-        // Navigate to updates screen
-        console.log('Navigate to updates');
-      }
     });
 
-    // Cleanup on unmount
+    const retryTimer = setInterval(() => {
+      void (async () => {
+        const loggedIn = await isLoggedInLocally();
+        if (loggedIn && !hasPermission) {
+          await initialize();
+        }
+      })();
+    }, 8000);
+
     return () => {
-      if (notificationListener.current) {
-        notificationListener.current.remove();
-      }
-      if (responseListener.current) {
-        responseListener.current.remove();
-      }
+      clearInterval(retryTimer);
+      notificationListener.current?.remove();
+      responseListener.current?.remove();
     };
-  }, [initialize]);
+  }, [initialize, hasPermission]);
 
   const value: NotificationContextType = {
     isInitialized,

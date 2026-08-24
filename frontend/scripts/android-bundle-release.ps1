@@ -28,24 +28,36 @@ if ($longPaths -ne 1) {
 # Stop any other Gradle holding .gradle locks (fixes executionHistory.lock timeout).
 & (Join-Path $PSScriptRoot 'android-stop-gradle.ps1')
 
+# Free disk space (build needs several GB; Gradle cache on full C: fails ExtractAarTransform).
+& (Join-Path $PSScriptRoot 'free-disk-for-build.ps1')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 # Keep Java/Gradle/BundleTool temp off full C: drive
 # (fixes :app:packageReleaseBundle "There is not enough space on the disk").
 $buildTmp = 'D:\aarambh\.tmp-build'
+$gradleHome = 'D:\aarambh\.gradle-home'
 New-Item -ItemType Directory -Force -Path $buildTmp | Out-Null
+New-Item -ItemType Directory -Force -Path $gradleHome | Out-Null
 $env:TEMP = $buildTmp
 $env:TMP = $buildTmp
 $env:JAVA_TOOL_OPTIONS = "-Djava.io.tmpdir=$($buildTmp -replace '\\','/')"
-if (-not $env:GRADLE_USER_HOME) {
-    $env:GRADLE_USER_HOME = Join-Path $env:USERPROFILE '.gradle'
-}
+$env:GRADLE_USER_HOME = $gradleHome
 
 $cFreeGb = [math]::Round((Get-PSDrive C).Free / 1GB, 2)
-Write-Host "C: free space: $cFreeGb GB" -ForegroundColor DarkGray
-if ((Get-PSDrive C).Free -lt 2GB) {
+$dFreeGb = if (Test-Path D:) { [math]::Round((Get-PSDrive D).Free / 1GB, 2) } else { 0 }
+Write-Host "C: free space: $cFreeGb GB | D: free space: $dFreeGb GB" -ForegroundColor DarkGray
+if ((Get-PSDrive C).Free -lt 3GB) {
     Write-Host 'C: is low — clearing Java/Gradle leftovers in Local\Temp...' -ForegroundColor Yellow
     Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'Temp') -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '^(hsperfdata_|java_pid|gradle-|bundletool|R8-|tmp)' } |
+        Where-Object { $_.Name -match '^(hsperfdata_|java_pid|gradle-|bundletool|R8-|tmp|transforms)' } |
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path (Join-Path $env:USERPROFILE '.gradle\caches\transforms')) {
+        Remove-Item -Recurse -Force (Join-Path $env:USERPROFILE '.gradle\caches\transforms') -ErrorAction SilentlyContinue
+    }
+}
+if ((Get-PSDrive D).Free -lt 5GB) {
+    Write-Host 'D: is low — free at least 8 GB before building the AAB.' -ForegroundColor Red
+    exit 1
 }
 
 Write-Host "Using build temp: $buildTmp" -ForegroundColor DarkGray

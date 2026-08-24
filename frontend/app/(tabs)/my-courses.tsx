@@ -22,7 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Video, ResizeMode, Audio } from 'expo-av';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import * as WebBrowser from 'expo-web-browser';
+import { downloadLessonPdf } from '@/utils/downloadPdf';
 import {
   AppCategory,
   AppLesson,
@@ -264,6 +264,7 @@ function PlaylistLessonRow({
   onPlay,
   onMenu,
   onDownloadPdf,
+  isPdfDownloading = false,
   onNextLesson,
   onContinueToReview,
   onMarkComplete,
@@ -282,6 +283,7 @@ function PlaylistLessonRow({
   onPlay: () => void;
   onMenu: () => void;
   onDownloadPdf: () => void;
+  isPdfDownloading?: boolean;
   onNextLesson: () => void;
   onContinueToReview: () => void;
   onMarkComplete: () => void;
@@ -389,9 +391,10 @@ function PlaylistLessonRow({
           <Text style={styles.reviewDescription}>{lesson.description}</Text>
 
           <TouchableOpacity
-            style={styles.pdfDownloadBtn}
+            style={[styles.pdfDownloadBtn, isPdfDownloading && styles.pdfDownloadBtnBusy]}
             onPress={onDownloadPdf}
             activeOpacity={0.7}
+            disabled={isPdfDownloading}
           >
             <View style={styles.pdfIconWrap}>
               <Image
@@ -404,12 +407,18 @@ function PlaylistLessonRow({
               </View>
             </View>
             <View style={styles.pdfDownloadTextWrap}>
-              <Text style={styles.pdfDownloadTitle}>Download PDF</Text>
+              <Text style={styles.pdfDownloadTitle}>
+                {isPdfDownloading ? 'Downloading…' : 'Download PDF'}
+              </Text>
               <Text style={styles.pdfDownloadSub} numberOfLines={1}>
                 {lesson.pdfTitle}
               </Text>
             </View>
-            <Feather name="download" size={20} color="#1A73E8" />
+            {isPdfDownloading ? (
+              <ActivityIndicator size="small" color="#1A73E8" />
+            ) : (
+              <Feather name="download" size={20} color="#1A73E8" />
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -474,6 +483,7 @@ function CoursePlaylistView({
   onPlay,
   onClosePlayer,
   onDownloadPdf,
+  pdfDownloadingId = null,
   onNextLesson,
   onContinueToReview,
   onMarkComplete,
@@ -500,6 +510,7 @@ function CoursePlaylistView({
   onPlay: (lessonId: string) => void;
   onClosePlayer: () => void;
   onDownloadPdf: (lesson: AppLesson) => void;
+  pdfDownloadingId?: string | null;
   onNextLesson: (lessonId: string) => void;
   onContinueToReview: (lessonId: string) => void;
   onMarkComplete: (lessonId: string) => void;
@@ -589,6 +600,7 @@ function CoursePlaylistView({
           }}
           onMenu={() => openLessonMenu(lesson, index)}
           onDownloadPdf={() => onDownloadPdf(lesson)}
+          isPdfDownloading={pdfDownloadingId === lesson.id}
           onNextLesson={() => onNextLesson(lesson.id)}
           onContinueToReview={() => onContinueToReview(lesson.id)}
           onMarkComplete={() => onMarkComplete(lesson.id)}
@@ -728,6 +740,7 @@ export default function MyCoursesScreen() {
   const [categories, setCategories] = useState<AppCategory[]>([]);
   const [coursesError, setCoursesError] = useState<string | null>(null);
   const [refreshingCourses, setRefreshingCourses] = useState(false);
+  const [pdfDownloadingId, setPdfDownloadingId] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [roadmapFocusIndex, setRoadmapFocusIndex] = useState(0);
   const [lessonReviewId, setLessonReviewId] = useState<string | null>(null);
@@ -1139,14 +1152,33 @@ export default function MyCoursesScreen() {
       handleBuyCategory(level.id);
       return;
     }
+    if (lesson.pdfAvailableIn && lesson.pdfAvailableIn > 0) {
+      Alert.alert(
+        'PDF processing',
+        `This PDF will be ready in about ${lesson.pdfAvailableIn} seconds. Pull down to refresh My Courses.`
+      );
+      return;
+    }
+    if (!lesson.pdfUrl) {
+      Alert.alert(
+        'PDF unavailable',
+        'This PDF is not on the server yet. Ask admin to re-upload it from the dashboard, then pull down to refresh.'
+      );
+      return;
+    }
+
+    setPdfDownloadingId(lesson.id);
     try {
-      if (!lesson.pdfUrl) {
-        alert('PDF not available for this lesson yet.');
-        return;
-      }
-      await WebBrowser.openBrowserAsync(lesson.pdfUrl);
-    } catch {
-      alert(`Could not open PDF for ${lesson.pdfTitle}`);
+      const result = await downloadLessonPdf(lesson.pdfUrl, lesson.pdfTitle || lesson.title);
+      Alert.alert(
+        'PDF downloaded',
+        `Saved to your ${result.locationLabel}.\n\nOpen your phone Downloads / Files app to view it.`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not download PDF';
+      Alert.alert('Download failed', message);
+    } finally {
+      setPdfDownloadingId(null);
     }
   }, [categories, isCategoryProLocked, handleBuyCategory]);
 
@@ -1214,9 +1246,16 @@ export default function MyCoursesScreen() {
         handleBuyCategory(lessonLevel.id);
         return;
       }
+      if (lesson?.videoAvailableIn && lesson.videoAvailableIn > 0) {
+        Alert.alert(
+          'Video processing',
+          `This video will be ready in about ${lesson.videoAvailableIn} seconds. Pull down to refresh My Courses.`
+        );
+        return;
+      }
       Alert.alert(
         'Video unavailable',
-        'Video not available yet. Ask admin to upload from the dashboard.'
+        'This video is not on the server yet. Ask admin to re-upload it from the dashboard, then pull down to refresh My Courses.'
       );
       return;
     }
@@ -1637,6 +1676,7 @@ export default function MyCoursesScreen() {
             onPlay={handlePlay}
             onClosePlayer={closePlayer}
             onDownloadPdf={handleDownloadPdf}
+            pdfDownloadingId={pdfDownloadingId}
             onNextLesson={handleNextLesson}
             onContinueToReview={handleContinueToReview}
             onMarkComplete={toggleCompletion}
@@ -2286,6 +2326,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FFCDD2',
     marginBottom: 14,
+  },
+  pdfDownloadBtnBusy: {
+    opacity: 0.75,
   },
   pdfIconWrap: {
     width: 52,
