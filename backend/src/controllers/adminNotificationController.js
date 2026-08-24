@@ -1,6 +1,6 @@
 const AdminNotification = require('../models/AdminNotification');
-const Notification = require('../models/Notification');
 const User = require('../models/User');
+const firebaseService = require('../services/firebaseService');
 const ApiResponse = require('../utils/ApiResponse');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
@@ -283,38 +283,59 @@ const previewNotificationTargets = asyncHandler(async (req, res) => {
 });
 
 /**
- * Helper: Send notification to all target users
+ * Helper: deliver in-app + production push (FCM / Expo) to target users.
  */
 async function sendNotificationToUsers(adminNotification) {
   const query = adminNotification.buildUserQuery();
   const users = await User.find(query).select('_id').lean();
-
   const userIds = users.map((u) => u._id);
 
-  const notifications = userIds.map((userId) => ({
-    user: userId,
-    title: adminNotification.title,
-    message: adminNotification.message,
-    type: adminNotification.type,
-    data: adminNotification.data,
-    read: false,
-  }));
+  let pushResult = { successCount: 0, failureCount: 0 };
+  if (userIds.length > 0) {
+    try {
+      pushResult = await firebaseService.sendToUsers(
+        userIds,
+        {
+          title: adminNotification.title,
+          body: adminNotification.message,
+        },
+        {
+          type: adminNotification.type || 'system',
+          ...(adminNotification.data && typeof adminNotification.data === 'object'
+            ? adminNotification.data
+            : {}),
+        }
+      );
+    } catch (error) {
+      console.warn('Admin notification push failed:', error.message);
+    }
 
-  let sentCount = 0;
-  if (notifications.length > 0) {
-    const result = await Notification.insertMany(notifications, { ordered: false });
-    sentCount = result.length;
+    await firebaseService.fanoutInAppNotifications({
+      title: adminNotification.title,
+      body: adminNotification.message,
+      data: {
+        type: adminNotification.type || 'system',
+        ...(adminNotification.data && typeof adminNotification.data === 'object'
+          ? adminNotification.data
+          : {}),
+      },
+      targetType: 'specific',
+      targetUserIds: userIds,
+    });
   }
 
   adminNotification.recipientCount = userIds.length;
-  adminNotification.sentCount = sentCount;
+  adminNotification.sentCount = pushResult.successCount || userIds.length;
   adminNotification.status = 'sent';
   adminNotification.sentAt = new Date();
   await adminNotification.save();
 
   return {
     recipientCount: userIds.length,
-    sentCount,
+    sentCount: adminNotification.sentCount,
+    pushSuccessCount: pushResult.successCount || 0,
+    pushFailureCount: pushResult.failureCount || 0,
+    firebaseEnabled: firebaseService.isFirebaseEnabled(),
   };
 }
 

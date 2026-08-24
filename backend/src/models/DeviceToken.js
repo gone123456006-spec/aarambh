@@ -18,10 +18,18 @@ const deviceTokenSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    tokenType: {
+      type: String,
+      enum: ['fcm', 'expo', 'unknown'],
+      default: 'unknown',
+      index: true,
+    },
     deviceInfo: {
       platform: { type: String }, // 'ios' | 'android'
       model: { type: String },
       osVersion: { type: String },
+      appOwnership: { type: String },
+      executionEnvironment: { type: String },
     },
     isActive: {
       type: Boolean,

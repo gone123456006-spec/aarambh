@@ -1,15 +1,13 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { apiFetch } from '@/utils/api';
 
 const FCM_TOKEN_KEY = '@fcm_token';
+const EXPO_PROJECT_ID = '7ff2aadf-dae7-4b7c-9024-1bd25662363e';
 
-/**
- * Configure how notifications are handled when the app is in the foreground.
- */
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -18,10 +16,15 @@ Notifications.setNotificationHandler({
   }),
 });
 
-/**
- * Request notification permissions from the user.
- * @returns {Promise<boolean>} - True if permission granted
- */
+function isExpoGo(): boolean {
+  return Constants.appOwnership === 'expo';
+}
+
+function isProductionApp(): boolean {
+  // Installed APK / Play build / dev-client — not Expo Go
+  return !isExpoGo();
+}
+
 export async function requestNotificationPermissions(): Promise<boolean> {
   if (!Device.isDevice) {
     console.warn('Push notifications only work on physical devices');
@@ -45,7 +48,6 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       return false;
     }
 
-    // Configure Android notification channel
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('default', {
         name: 'Default',
@@ -64,8 +66,7 @@ export async function requestNotificationPermissions(): Promise<boolean> {
 }
 
 /**
- * Get a native FCM token on Android production builds.
- * Expo push tokens often show "ok" without reaching Play Store / local AAB installs.
+ * Native FCM (Android) / APNs (iOS) token for production installs.
  */
 export async function getNativePushToken(): Promise<string | null> {
   try {
@@ -73,54 +74,79 @@ export async function getNativePushToken(): Promise<string | null> {
     const deviceToken = await Notifications.getDevicePushTokenAsync();
     const token = typeof deviceToken?.data === 'string' ? deviceToken.data : null;
     if (token && token.length > 20 && !token.startsWith('ExponentPushToken[')) {
+      console.log('[push] Native device token acquired', token.slice(0, 24) + '…');
       return token;
     }
     return null;
   } catch (error) {
-    console.warn('Native FCM token unavailable, will use Expo token:', error);
+    console.warn('[push] Native FCM/APNs token unavailable:', error);
     return null;
   }
 }
 
-/**
- * Get the Expo push token for this device.
- * @returns {Promise<string | null>} - The push token or null if failed
- */
 export async function getExpoPushToken(): Promise<string | null> {
   try {
-    if (!Device.isDevice) {
-      console.warn('Push notifications only work on physical devices');
-      return null;
-    }
-
-    const token = await Notifications.getExpoPushTokenAsync({
-      projectId: '7ff2aadf-dae7-4b7c-9024-1bd25662363e',
-    });
-
+    if (!Device.isDevice) return null;
+    const projectId =
+      Constants.easConfig?.projectId ||
+      Constants.expoConfig?.extra?.eas?.projectId ||
+      EXPO_PROJECT_ID;
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
     return token.data;
   } catch (error) {
-    console.error('Error getting push token:', error);
+    console.error('[push] Expo push token error:', error);
     return null;
   }
+}
+
+export type PushTokenEntry = {
+  token: string;
+  tokenType: 'fcm' | 'expo';
+};
+
+/**
+ * Production APK/AAB must use native FCM. Expo Go uses Expo push tokens.
+ */
+export async function getPushTokenEntries(): Promise<PushTokenEntry[]> {
+  const entries: PushTokenEntry[] = [];
+
+  if (isExpoGo()) {
+    const expoToken = await getExpoPushToken();
+    if (expoToken) entries.push({ token: expoToken, tokenType: 'expo' });
+    return entries;
+  }
+
+  // Prefer native FCM/APNs for installed production apps
+  let nativeToken: string | null = null;
+  for (let attempt = 0; attempt < 3 && !nativeToken; attempt += 1) {
+    nativeToken = await getNativePushToken();
+    if (!nativeToken) {
+      await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+    }
+  }
+
+  if (nativeToken) {
+    entries.push({ token: nativeToken, tokenType: 'fcm' });
+  } else {
+    console.warn(
+      '[push] Production build has no native FCM token. Ensure google-services.json is in the APK and rebuild.'
+    );
+  }
+
+  // Optional Expo token as secondary only (does not replace FCM for production delivery)
+  if (Platform.OS === 'ios') {
+    const expoToken = await getExpoPushToken();
+    if (expoToken && expoToken !== nativeToken) {
+      entries.push({ token: expoToken, tokenType: 'expo' });
+    }
+  }
+
+  return entries;
 }
 
 export async function getPushTokens(): Promise<string[]> {
-  const tokens: string[] = [];
-  const isExpoGo = Constants.appOwnership === 'expo';
-
-  if (isExpoGo) {
-    const expoToken = await getExpoPushToken();
-    if (expoToken) tokens.push(expoToken);
-    return tokens;
-  }
-
-  const nativeToken = await getNativePushToken();
-  if (nativeToken) tokens.push(nativeToken);
-
-  const expoToken = await getExpoPushToken();
-  if (expoToken && expoToken !== nativeToken) tokens.push(expoToken);
-
-  return tokens;
+  const entries = await getPushTokenEntries();
+  return entries.map((e) => e.token);
 }
 
 export async function getPushToken(): Promise<string | null> {
@@ -128,17 +154,18 @@ export async function getPushToken(): Promise<string | null> {
   return tokens[0] || null;
 }
 
-/**
- * Register the device token with the backend.
- * @param {string} token - The FCM/Expo push token
- * @returns {Promise<boolean>} - True if registration successful
- */
-export async function registerDeviceToken(token: string): Promise<boolean> {
+export async function registerDeviceToken(
+  token: string,
+  tokenType: 'fcm' | 'expo' = 'fcm'
+): Promise<boolean> {
   try {
     const deviceInfo = {
       platform: Platform.OS,
       model: Device.modelName || undefined,
       osVersion: Device.osVersion || undefined,
+      tokenType,
+      appOwnership: Constants.appOwnership || undefined,
+      executionEnvironment: Constants.executionEnvironment || undefined,
     };
 
     await apiFetch('/api/app/device-token', {
@@ -147,10 +174,13 @@ export async function registerDeviceToken(token: string): Promise<boolean> {
       body: JSON.stringify({ token, ...deviceInfo }),
     });
 
-    // Save token locally
-    await AsyncStorage.setItem(FCM_TOKEN_KEY, token);
+    // Prefer keeping FCM in local storage for diagnostics
+    const existing = await AsyncStorage.getItem(FCM_TOKEN_KEY);
+    if (tokenType === 'fcm' || !existing || existing.startsWith('ExponentPushToken[')) {
+      await AsyncStorage.setItem(FCM_TOKEN_KEY, token);
+    }
 
-    console.log('✅ Device token registered successfully');
+    console.log(`✅ Device token registered (${tokenType})`);
     return true;
   } catch (error) {
     console.error('Failed to register device token:', error);
@@ -158,10 +188,6 @@ export async function registerDeviceToken(token: string): Promise<boolean> {
   }
 }
 
-/**
- * Unregister the device token from the backend.
- * @param {string} token - The FCM/Expo push token
- */
 export async function unregisterDeviceToken(token: string): Promise<void> {
   try {
     await apiFetch('/api/app/device-token', {
@@ -169,18 +195,12 @@ export async function unregisterDeviceToken(token: string): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     });
-
     await AsyncStorage.removeItem(FCM_TOKEN_KEY);
-    console.log('Device token unregistered');
   } catch (error) {
     console.error('Failed to unregister device token:', error);
   }
 }
 
-/**
- * Get the locally stored FCM token.
- * @returns {Promise<string | null>}
- */
 export async function getStoredToken(): Promise<string | null> {
   try {
     return await AsyncStorage.getItem(FCM_TOKEN_KEY);
@@ -189,28 +209,30 @@ export async function getStoredToken(): Promise<string | null> {
   }
 }
 
-/**
- * Initialize push notifications.
- * Requests permissions, gets token, and registers with backend.
- * @returns {Promise<boolean>} - True if initialization successful
- */
 export async function initializePushNotifications(): Promise<boolean> {
   try {
     const hasPermission = await requestNotificationPermissions();
-    if (!hasPermission) {
-      return false;
-    }
+    if (!hasPermission) return false;
 
-    const tokens = await getPushTokens();
-    if (!tokens.length) {
+    const entries = await getPushTokenEntries();
+    if (!entries.length) {
+      console.warn('[push] No push tokens available for this build');
       return false;
     }
 
     let registeredAny = false;
-    for (const token of tokens) {
-      const registered = await registerDeviceToken(token);
+    for (const entry of entries) {
+      const registered = await registerDeviceToken(entry.token, entry.tokenType);
       if (registered) registeredAny = true;
     }
+
+    if (isProductionApp() && Platform.OS === 'android') {
+      const hasFcm = entries.some((e) => e.tokenType === 'fcm');
+      if (!hasFcm) {
+        console.warn('[push] Production Android registered without FCM — rebuild APK with google-services.json');
+      }
+    }
+
     return registeredAny;
   } catch (error) {
     console.error('Failed to initialize push notifications:', error);
@@ -218,40 +240,34 @@ export async function initializePushNotifications(): Promise<boolean> {
   }
 }
 
-/**
- * Add a notification received listener.
- * Called when a notification is received while the app is in the foreground.
- * @param {Function} callback - Callback function
- * @returns {Subscription} - Subscription object to remove the listener
- */
 export function addNotificationReceivedListener(
   callback: (notification: Notifications.Notification) => void
 ) {
   return Notifications.addNotificationReceivedListener(callback);
 }
 
-/**
- * Add a notification response listener.
- * Called when the user taps on a notification.
- * @param {Function} callback - Callback function
- * @returns {Subscription} - Subscription object to remove the listener
- */
 export function addNotificationResponseListener(
   callback: (response: Notifications.NotificationResponse) => void
 ) {
   return Notifications.addNotificationResponseReceivedListener(callback);
 }
 
-/**
- * Send a test notification to the current user.
- */
 export async function sendTestNotification(): Promise<void> {
   try {
     await apiFetch('/api/app/test-notification', {
       method: 'POST',
     });
-    console.log('Test notification sent');
   } catch (error) {
     console.error('Failed to send test notification:', error);
   }
+}
+
+/** Re-register when app returns to foreground (token rotation / login race). */
+export function startPushTokenRefreshOnForeground(): () => void {
+  const sub = AppState.addEventListener('change', (state) => {
+    if (state === 'active') {
+      void initializePushNotifications();
+    }
+  });
+  return () => sub.remove();
 }

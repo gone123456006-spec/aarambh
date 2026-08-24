@@ -332,6 +332,13 @@ function isExpoPushToken(token) {
   return typeof token === 'string' && /^ExponentPushToken\[.+\]$/.test(token);
 }
 
+function detectTokenType(token, hint) {
+  if (hint === 'fcm' || hint === 'expo') return hint;
+  if (isExpoPushToken(token)) return 'expo';
+  if (typeof token === 'string' && token.length > 80 && !token.includes('[')) return 'fcm';
+  return 'unknown';
+}
+
 function stringifyData(data = {}) {
   const out = {};
   for (const [key, value] of Object.entries(data)) {
@@ -522,10 +529,17 @@ async function sendToTokens(tokens, notification, data = {}) {
     }
 
     if (fcmTokens.length) {
-      const fcmResult = await sendViaFcm(fcmTokens, notification, data);
-      successCount += fcmResult.successCount;
-      failureCount += fcmResult.failureCount;
-      failedTokens.push(...fcmResult.failedTokens);
+      if (!isFirebaseEnabled()) {
+        console.warn(
+          `[push] ${fcmTokens.length} FCM token(s) skipped — Firebase Admin is not initialized`
+        );
+        failureCount += fcmTokens.length;
+      } else {
+        const fcmResult = await sendViaFcm(fcmTokens, notification, data);
+        successCount += fcmResult.successCount;
+        failureCount += fcmResult.failureCount;
+        failedTokens.push(...fcmResult.failedTokens);
+      }
     }
 
     if (failedTokens.length > 0) {
@@ -534,6 +548,10 @@ async function sendToTokens(tokens, notification, data = {}) {
         { $set: { isActive: false } }
       );
     }
+
+    console.log(
+      `[push] delivered success=${successCount} failure=${failureCount} expo=${expoTokens.length} fcm=${fcmTokens.length}`
+    );
 
     return { successCount, failureCount, failedTokens };
   } catch (error) {
@@ -677,22 +695,25 @@ async function createAndSendNotification(params) {
   }
 }
 
-async function registerToken(userId, token, deviceInfo = {}) {
+async function registerToken(userId, token, deviceInfo = {}, tokenTypeHint) {
   if (!token) {
     throw new Error('Token is required');
   }
 
+  const tokenType = detectTokenType(token, tokenTypeHint);
   let deviceToken = await DeviceToken.findOne({ token });
 
   if (deviceToken) {
     deviceToken.userId = userId;
-    deviceToken.deviceInfo = deviceInfo;
+    deviceToken.deviceInfo = { ...(deviceToken.deviceInfo || {}), ...deviceInfo };
+    deviceToken.tokenType = tokenType;
     deviceToken.isActive = true;
     deviceToken.lastUsedAt = new Date();
   } else {
     deviceToken = new DeviceToken({
       userId,
       token,
+      tokenType,
       deviceInfo,
       isActive: true,
       lastUsedAt: new Date(),
@@ -700,6 +721,9 @@ async function registerToken(userId, token, deviceInfo = {}) {
   }
 
   await deviceToken.save();
+  console.log(
+    `[push] Registered ${tokenType} token for user ${userId} (${deviceInfo.platform || 'unknown'})`
+  );
   return deviceToken;
 }
 

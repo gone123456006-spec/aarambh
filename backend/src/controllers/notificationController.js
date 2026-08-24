@@ -12,14 +12,26 @@ const asyncHandler = require('../utils/asyncHandler');
  * Body: { token, platform?, model?, osVersion? }
  */
 exports.registerDeviceToken = asyncHandler(async (req, res) => {
-  const { token, platform, model, osVersion } = req.body;
+  const { token, platform, model, osVersion, tokenType, appOwnership, executionEnvironment } =
+    req.body;
 
-  if (!token || typeof token !== 'string') {
-    throw new ApiError(400, 'Valid FCM token is required');
+  if (!token || typeof token !== 'string' || token.trim().length < 20) {
+    throw new ApiError(400, 'Valid push token is required');
   }
 
-  const deviceInfo = { platform, model, osVersion };
-  const deviceToken = await firebaseService.registerToken(req.user._id, token, deviceInfo);
+  const deviceInfo = {
+    platform,
+    model,
+    osVersion,
+    appOwnership,
+    executionEnvironment,
+  };
+  const deviceToken = await firebaseService.registerToken(
+    req.user._id,
+    token.trim(),
+    deviceInfo,
+    tokenType
+  );
 
   res.json({
     success: true,
@@ -27,6 +39,7 @@ exports.registerDeviceToken = asyncHandler(async (req, res) => {
     data: {
       tokenId: deviceToken._id,
       isActive: deviceToken.isActive,
+      tokenType: deviceToken.tokenType,
     },
   });
 });
@@ -135,8 +148,14 @@ exports.getNotificationStats = asyncHandler(async (req, res) => {
     dailyNotificationService.getDailyNotificationStats(),
   ]);
 
-  // Count unique users with active tokens
   const uniqueUsers = await DeviceToken.distinct('userId', { isActive: true });
+  const [expoTokens, fcmTokens] = await Promise.all([
+    DeviceToken.countDocuments({ isActive: true, tokenType: 'expo' }),
+    DeviceToken.countDocuments({
+      isActive: true,
+      $or: [{ tokenType: 'fcm' }, { tokenType: 'unknown', token: { $not: /^ExponentPushToken/ } }],
+    }),
+  ]);
 
   res.json({
     success: true,
@@ -147,6 +166,8 @@ exports.getNotificationStats = asyncHandler(async (req, res) => {
       totalNotificationsSent: totalNotifications,
       last7Days: recentNotifications,
       firebaseEnabled: firebaseService.isFirebaseEnabled(),
+      expoTokens,
+      fcmTokens,
       dailyNotifications: dailyStats,
     },
   });

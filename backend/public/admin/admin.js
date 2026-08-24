@@ -1392,8 +1392,8 @@ async function loadPushNotificationStats() {
     
     showStatus($('pushNotifStatus'), 
       stats.firebaseEnabled 
-        ? `Ready to send notifications to ${stats.activeDevices} devices` 
-        : 'Push notifications not configured. Add FIREBASE_SERVICE_ACCOUNT_JSON to .env', 
+        ? `Ready — ${stats.activeDevices || 0} devices (FCM ${stats.fcmTokens || 0}, Expo ${stats.expoTokens || 0})` 
+        : 'Firebase Admin not enabled — production APK pushes will fail. Expo Go may still work.', 
       stats.firebaseEnabled ? 'ok' : 'warn'
     );
   } catch (err) {

@@ -5,6 +5,7 @@ import {
   addNotificationReceivedListener,
   addNotificationResponseListener,
   getStoredToken,
+  startPushTokenRefreshOnForeground,
 } from '@/services/notificationService';
 import { isLoggedInLocally } from '@/utils/authStorage';
 
@@ -38,8 +39,11 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
 
   const notificationListener = useRef<Notifications.Subscription>();
   const responseListener = useRef<Notifications.Subscription>();
+  const initInFlight = useRef(false);
 
   const initialize = useCallback(async () => {
+    if (initInFlight.current) return;
+    initInFlight.current = true;
     try {
       const loggedIn = await isLoggedInLocally();
       if (!loggedIn) {
@@ -63,6 +67,8 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
     } catch (error) {
       console.error('Failed to initialize notifications:', error);
       setIsInitialized(true);
+    } finally {
+      initInFlight.current = false;
     }
   }, []);
 
@@ -78,6 +84,8 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
       console.log('👆 Notification tapped:', response);
     });
 
+    const stopForegroundRefresh = startPushTokenRefreshOnForeground();
+
     const retryTimer = setInterval(() => {
       void (async () => {
         const loggedIn = await isLoggedInLocally();
@@ -89,6 +97,7 @@ export function NotificationProvider({ children }: NotificationProviderProps) {
 
     return () => {
       clearInterval(retryTimer);
+      stopForegroundRefresh();
       notificationListener.current?.remove();
       responseListener.current?.remove();
     };
