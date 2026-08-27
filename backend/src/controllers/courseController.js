@@ -14,11 +14,13 @@ const planService = require('../services/planService');
  * Admin can disable a category subscription to make it free immediately.
  */
 async function applyPlanAccess(courseDoc, userId) {
-  const plan = await planService.getPlan(courseDoc.level);
+  const title = courseDoc.title;
+  const { isProLevel } = require('../constants/curriculum');
+  const plan = await planService.getPlan(courseDoc.level, title);
   const requiresPayment = plan
     ? planService.isPaidCategory(plan)
-    : require('../constants/curriculum').isProLevel(courseDoc.level);
-  const hasAccess = await hasAccessToCategory(userId, courseDoc.level);
+    : isProLevel(courseDoc.level, title);
+  const hasAccess = await hasAccessToCategory(userId, courseDoc.level, title);
   const locked = Boolean(requiresPayment && !hasAccess);
   const out = { ...courseDoc, isPro: Boolean(requiresPayment), locked };
 

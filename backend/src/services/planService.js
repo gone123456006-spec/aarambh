@@ -1,4 +1,4 @@
-const { slugifyLevel } = require('../constants/curriculum');
+const { slugifyLevel, resolveCategorySlug } = require('../constants/curriculum');
 const SubscriptionPlan = require('../models/SubscriptionPlan');
 const { CATEGORIES } = SubscriptionPlan;
 
@@ -23,14 +23,17 @@ async function listPlans() {
   return SubscriptionPlan.find({}).sort({ category: 1 }).lean();
 }
 
-async function getPlan(category) {
+async function getPlan(category, title) {
   await ensureDefaultPlans();
-  let slug = slugifyLevel(category);
+  let slug = resolveCategorySlug(category, title);
   if (!CATEGORIES.includes(slug)) {
-    if (slug.includes('beginner')) slug = 'beginner';
-    else if (slug.includes('intermediate')) slug = 'intermediate';
-    else if (slug.includes('advanced')) slug = 'advanced';
-    else return null;
+    slug = slugifyLevel(category);
+    if (!CATEGORIES.includes(slug)) {
+      if (slug.includes('beginner')) slug = 'beginner';
+      else if (slug.includes('intermediate')) slug = 'intermediate';
+      else if (slug.includes('advanced')) slug = 'advanced';
+      else return null;
+    }
   }
   return SubscriptionPlan.findOne({ category: slug });
 }
@@ -39,8 +42,8 @@ function isPaidCategory(plan) {
   return Boolean(plan && plan.enabled && Number(plan.price) > 0);
 }
 
-async function updatePlan(category, updates) {
-  const plan = await getPlan(category);
+async function updatePlan(category, updates, title) {
+  const plan = await getPlan(category, title);
   if (!plan) {
     const err = new Error('Subscription plan not found');
     err.statusCode = 404;

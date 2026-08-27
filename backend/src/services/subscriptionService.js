@@ -61,8 +61,8 @@ async function hasActiveSubscription(userId) {
 }
 
 /** Whether this course category is unlocked for the user. */
-async function hasAccessToCategory(userId, level) {
-  const plan = await planService.getPlan(level);
+async function hasAccessToCategory(userId, level, title) {
+  const plan = await planService.getPlan(level, title);
 
   if (plan) {
     if (!planService.isPaidCategory(plan)) return true;
@@ -72,7 +72,7 @@ async function hasAccessToCategory(userId, level) {
 
   // Custom categories: free if beginner-like, otherwise any active paid plan.
   const { isProLevel } = require('../constants/curriculum');
-  if (!isProLevel(level)) return true;
+  if (!isProLevel(level, title)) return true;
   return await hasActiveSubscription(userId);
 }
 

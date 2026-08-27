@@ -38,14 +38,35 @@ function colorsForLevel(level, index = 0) {
 /** Levels that are free unless a paid plan is enabled for them. */
 const FREE_LEVELS = ['beginner'];
 
-function isBeginnerLike(level) {
+function isBeginnerLike(level, title) {
   const slug = slugifyLevel(level);
-  return slug === 'beginner' || slug.includes('beginner');
+  const combined = `${slug} ${slugifyLevel(title)}`.replace(/-/g, ' ');
+  return slug === 'beginner' || slug.includes('beginner') || combined.includes('beginner');
+}
+
+function isIntermediateLike(level, title) {
+  const slug = slugifyLevel(level);
+  const combined = `${slug} ${slugifyLevel(title)}`.replace(/-/g, ' ');
+  return slug === 'intermediate' || slug.includes('intermediate') || combined.includes('intermediate');
+}
+
+function isAdvancedLike(level, title) {
+  const slug = slugifyLevel(level);
+  const combined = `${slug} ${slugifyLevel(title)}`.replace(/-/g, ' ');
+  return slug === 'advanced' || slug.includes('advanced') || combined.includes('advanced');
+}
+
+/** Map course level + title to subscription slug (beginner | intermediate | advanced). */
+function resolveCategorySlug(level, title) {
+  if (isBeginnerLike(level, title)) return 'beginner';
+  if (isIntermediateLike(level, title)) return 'intermediate';
+  if (isAdvancedLike(level, title)) return 'advanced';
+  return slugifyLevel(level);
 }
 
 /** True when a course level (e.g. intermediate/advanced/custom) needs Pro access. */
-function isProLevel(level) {
-  return !isBeginnerLike(level);
+function isProLevel(level, title) {
+  return !isBeginnerLike(level, title);
 }
 
 module.exports = {
@@ -55,5 +76,8 @@ module.exports = {
   DEFAULT_CATEGORY_COLORS,
   FREE_LEVELS,
   isBeginnerLike,
+  isIntermediateLike,
+  isAdvancedLike,
+  resolveCategorySlug,
   isProLevel,
 };

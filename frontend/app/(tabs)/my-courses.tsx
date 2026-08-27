@@ -51,7 +51,7 @@ import { useGameTabBar } from '@/contexts/game-tab-bar-context';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PLAYLIST_PLAYER_HEIGHT = SCREEN_WIDTH * (9 / 16);
-const COURSES_CACHE_KEY = '@my_courses_ui_cache';
+const COURSES_CACHE_KEY = '@my_courses_ui_cache_v2';
 
 /** Matches Rewards / Games screen background */
 const UI = {
