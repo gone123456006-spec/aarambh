@@ -1,52 +1,80 @@
 const ApiError = require('../utils/ApiError');
 const { buildUploadPayload, deleteFileByUrl, deleteFileByRelativePath } = require('../config/uploads');
-const { putFileFromDisk } = require('../config/gridfsMedia');
+const { putFileFromDisk, assertGridFsReady } = require('../config/gridfsMedia');
 
 async function persistToGridFs(subpath, req) {
+  assertGridFsReady();
   const absPath = req.file?.path;
   if (!absPath) {
-    throw new ApiError(500, 'Uploaded file was not saved');
+    throw new ApiError(500, 'Uploaded file was not saved to disk');
   }
-  await putFileFromDisk(subpath, absPath, req.file.mimetype);
+  const stored = await putFileFromDisk(subpath, absPath, req.file.mimetype);
+  return stored;
 }
 
 /**
- * Persist videos, PDFs, and images to MongoDB GridFS so they survive Render deploys.
+ * Production media: multer temp disk → MongoDB GridFS (permanent) → public URL.
  */
-function saveAvatar(req) {
+async function saveAvatar(req) {
   if (!req.file) {
     throw new ApiError(400, 'Please provide an image file');
   }
 
   const subpath = `avatars/${req.file.filename}`;
-  return persistToGridFs(subpath, req).then(() => buildUploadPayload(req, subpath));
+  const stored = await persistToGridFs(subpath, req);
+  return {
+    ...buildUploadPayload(req, subpath),
+    storage: 'gridfs',
+    verified: true,
+    bytes: stored.length,
+  };
 }
 
-function saveLessonVideo(req) {
+async function saveLessonVideo(req) {
   if (!req.file) {
     throw new ApiError(400, 'Please upload a video file');
   }
 
   const subpath = `videos/${req.file.filename}`;
-  return persistToGridFs(subpath, req).then(() => buildUploadPayload(req, subpath));
+  const stored = await persistToGridFs(subpath, req);
+  return {
+    ...buildUploadPayload(req, subpath),
+    storage: 'gridfs',
+    verified: true,
+    bytes: stored.length,
+    contentType: stored.contentType || req.file.mimetype,
+  };
 }
 
-function saveLessonPdf(req) {
+async function saveLessonPdf(req) {
   if (!req.file) {
     throw new ApiError(400, 'Please upload a PDF file');
   }
 
   const subpath = `pdfs/${req.file.filename}`;
-  return persistToGridFs(subpath, req).then(() => buildUploadPayload(req, subpath));
+  const stored = await persistToGridFs(subpath, req);
+  return {
+    ...buildUploadPayload(req, subpath),
+    storage: 'gridfs',
+    verified: true,
+    bytes: stored.length,
+    contentType: stored.contentType || 'application/pdf',
+  };
 }
 
-function saveHeroImage(req) {
+async function saveHeroImage(req) {
   if (!req.file) {
     throw new ApiError(400, 'Please choose an image to upload');
   }
 
   const subpath = `hero/${req.file.filename}`;
-  return persistToGridFs(subpath, req).then(() => buildUploadPayload(req, subpath));
+  const stored = await persistToGridFs(subpath, req);
+  return {
+    ...buildUploadPayload(req, subpath),
+    storage: 'gridfs',
+    verified: true,
+    bytes: stored.length,
+  };
 }
 
 function deleteLocalAsset(fileUrl) {

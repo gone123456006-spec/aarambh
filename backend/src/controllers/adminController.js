@@ -440,7 +440,7 @@ const addLesson = asyncHandler(async (req, res) => {
   }
 
   try {
-    assertMediaFilesExist({ videoUrl: newLesson.videoUrl, pdfUrl: newLesson.pdfUrl });
+    await assertMediaFilesExist({ videoUrl: newLesson.videoUrl, pdfUrl: newLesson.pdfUrl });
   } catch (error) {
     throw new ApiError(400, error.message);
   }
@@ -558,7 +558,7 @@ const upsertLesson = asyncHandler(async (req, res) => {
   }
 
   try {
-    assertMediaFilesExist({ videoUrl: nextVideoUrl, pdfUrl: nextPdfUrl });
+    await assertMediaFilesExist({ videoUrl: nextVideoUrl, pdfUrl: nextPdfUrl });
   } catch (error) {
     throw new ApiError(400, error.message);
   }
@@ -739,7 +739,7 @@ const uploadVideo = asyncHandler(async (req, res) => {
         videoUrl: payload.url,
         videoAvailableAt: payload.availableAt,
       },
-      'Video uploaded. Click “Add lesson to app” to publish it in My Courses.'
+      'Video stored in MongoDB GridFS. Click “Add lesson to app” to publish it in My Courses.'
     )
   );
 });
@@ -758,7 +758,7 @@ const uploadPdf = asyncHandler(async (req, res) => {
         pdfUrl: payload.url,
         pdfAvailableAt: payload.availableAt,
       },
-      'PDF uploaded. Click “Add lesson to app” to publish it in My Courses.'
+      'PDF stored in MongoDB GridFS. Click “Add lesson to app” to publish it in My Courses.'
     )
   );
 });

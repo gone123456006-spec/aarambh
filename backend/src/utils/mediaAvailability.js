@@ -1,9 +1,14 @@
-const { mediaFileExists, mediaFileExistsAsync, canonicalizeMediaUrl } = require('../config/uploads');
+const {
+  mediaFileExists,
+  mediaFileExistsAsync,
+  canonicalizeMediaUrl,
+  relativeUploadPath,
+} = require('../config/uploads');
 
 /**
- * Prepare lesson media for the app.
- * Do NOT strip videoUrl/pdfUrl when the file check fails — that caused false
- * "Video unavailable" errors even when GridFS had (or remote URLs pointed to) media.
+ * Production media visibility for My Courses.
+ * - Own /uploads/* URLs must exist on disk or GridFS
+ * - External HTTPS URLs (CDN) are allowed as-is
  */
 async function applyLessonMediaAvailability(lesson) {
   const out = lesson.toObject ? lesson.toObject() : { ...lesson };
@@ -16,7 +21,6 @@ async function applyLessonMediaAvailability(lesson) {
     out.pdfUrl = canonicalizeMediaUrl(out.pdfUrl);
   }
 
-  // Only hide while a real future processing window is active (ignore stale/bad dates > 1h)
   if (out.videoAvailableAt && out.videoUrl) {
     const at = new Date(out.videoAvailableAt).getTime();
     const waitMs = at - now;
@@ -27,10 +31,14 @@ async function applyLessonMediaAvailability(lesson) {
   }
 
   if (out.videoUrl) {
+    const rel = relativeUploadPath(out.videoUrl);
     const ok = await mediaFileExistsAsync(out.videoUrl);
     if (!ok) {
       out.videoMissingOnServer = true;
-      // Keep URL — client /uploads + GridFS or remote host may still serve it
+      // Hide broken self-hosted uploads so the app shows a clear re-upload state
+      if (rel) {
+        out.videoUrl = null;
+      }
     }
   }
 
@@ -44,9 +52,13 @@ async function applyLessonMediaAvailability(lesson) {
   }
 
   if (out.pdfUrl) {
+    const rel = relativeUploadPath(out.pdfUrl);
     const ok = await mediaFileExistsAsync(out.pdfUrl);
     if (!ok) {
       out.pdfMissingOnServer = true;
+      if (rel) {
+        out.pdfUrl = null;
+      }
     }
   }
 

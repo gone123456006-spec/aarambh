@@ -62,11 +62,12 @@ function normalizeMediaAvailabilityOnSave({ videoUrl, pdfUrl, videoAvailableAt, 
   };
 }
 
-function assertMediaFilesExist({ videoUrl, pdfUrl }) {
-  if (videoUrl && !mediaFileExists(videoUrl)) {
+async function assertMediaFilesExist({ videoUrl, pdfUrl }) {
+  const { mediaFileExistsAsync } = require('../config/uploads');
+  if (videoUrl && !(await mediaFileExistsAsync(videoUrl))) {
     throw new Error('Video file was not saved on the server. Please upload the video again.');
   }
-  if (pdfUrl && !mediaFileExists(pdfUrl)) {
+  if (pdfUrl && !(await mediaFileExistsAsync(pdfUrl))) {
     throw new Error('PDF file was not saved on the server. Please upload the PDF again.');
   }
 }

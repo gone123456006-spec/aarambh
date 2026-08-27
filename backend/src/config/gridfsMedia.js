@@ -6,13 +6,13 @@ const { UPLOAD_ROOT, relativeUploadPath } = require('./uploads');
 const BUCKET_NAME = 'uploads';
 const filenameCache = new Set();
 
-/** Remote sample video — used when local bytes were wiped (Render disk). App plays this HTTPS URL directly. */
+/** Emergency only — never used in production unless MEDIA_SAMPLE_HEAL=true */
+const ALLOW_SAMPLE_HEAL = /^(1|true|yes)$/i.test(String(process.env.MEDIA_SAMPLE_HEAL || ''));
 const HEAL_VIDEO_URL =
   process.env.MEDIA_HEAL_VIDEO_URL ||
   'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
 
 let bucket = null;
-let healVideoBufferPromise = null;
 
 function guessContentType(filename, fallback) {
   const ext = path.extname(String(filename || '')).toLowerCase();
@@ -42,6 +42,14 @@ function getBucket() {
   return bucket;
 }
 
+function assertGridFsReady() {
+  const gfs = getBucket();
+  if (!gfs) {
+    throw new Error('MongoDB GridFS is not ready — cannot store media');
+  }
+  return gfs;
+}
+
 function cachedHas(relativePath) {
   return filenameCache.has(String(relativePath || '').replace(/\\/g, '/'));
 }
@@ -60,15 +68,12 @@ async function findByFilename(relativePath) {
   const gfs = getBucket();
   if (!gfs || !relativePath) return null;
   const normalized = String(relativePath).replace(/\\/g, '/');
-  if (cachedHas(normalized)) {
-    const files = await gfs.find({ filename: normalized }).limit(1).toArray();
-    if (files[0]) return files[0];
-  }
   const files = await gfs.find({ filename: normalized }).limit(1).toArray();
   if (files[0]) {
     filenameCache.add(normalized);
     return files[0];
   }
+  filenameCache.delete(normalized);
   return null;
 }
 
@@ -81,29 +86,30 @@ async function deleteByFilename(relativePath) {
   filenameCache.delete(normalized);
 }
 
-async function putBuffer(relativePath, buffer, contentType) {
+async function putBuffer(relativePath, buffer, contentType, metadata = {}) {
   const normalized = String(relativePath || '').replace(/\\/g, '/');
   if (!normalized || !Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new Error('Invalid GridFS buffer upload');
   }
-  const gfs = getBucket();
-  if (!gfs) {
-    throw new Error('MongoDB is not connected; cannot persist media');
-  }
+  const gfs = assertGridFsReady();
 
   await deleteByFilename(normalized);
 
   await new Promise((resolve, reject) => {
     const write = gfs.openUploadStream(normalized, {
       contentType: guessContentType(normalized, contentType),
-      metadata: { relativePath: normalized, healed: true },
+      metadata: { relativePath: normalized, ...metadata },
     });
     write.on('error', reject);
     write.on('finish', resolve);
     write.end(buffer);
   });
 
-  filenameCache.add(normalized);
+  const verified = await findByFilename(normalized);
+  if (!verified) {
+    throw new Error(`GridFS write did not persist for ${normalized}`);
+  }
+  return verified;
 }
 
 async function putFileFromDisk(relativePath, absPath, contentType) {
@@ -111,9 +117,10 @@ async function putFileFromDisk(relativePath, absPath, contentType) {
   if (!normalized || !absPath || !fs.existsSync(absPath)) {
     throw new Error('Upload file is missing on disk');
   }
-  const gfs = getBucket();
-  if (!gfs) {
-    throw new Error('MongoDB is not connected; cannot persist media');
+  const gfs = assertGridFsReady();
+  const stat = fs.statSync(absPath);
+  if (!stat.size) {
+    throw new Error('Uploaded file is empty');
   }
 
   await deleteByFilename(normalized);
@@ -122,7 +129,11 @@ async function putFileFromDisk(relativePath, absPath, contentType) {
     const read = fs.createReadStream(absPath);
     const write = gfs.openUploadStream(normalized, {
       contentType: guessContentType(normalized, contentType),
-      metadata: { relativePath: normalized },
+      metadata: {
+        relativePath: normalized,
+        originalBytes: stat.size,
+        storedAt: new Date().toISOString(),
+      },
     });
     read.on('error', reject);
     write.on('error', reject);
@@ -130,12 +141,16 @@ async function putFileFromDisk(relativePath, absPath, contentType) {
     read.pipe(write);
   });
 
-  filenameCache.add(normalized);
-
   const verified = await findByFilename(normalized);
   if (!verified) {
     throw new Error(`GridFS write did not persist for ${normalized}`);
   }
+  if (verified.length !== stat.size) {
+    console.warn(
+      `[media] Size mismatch for ${normalized}: disk=${stat.size} gridfs=${verified.length}`
+    );
+  }
+  return verified;
 }
 
 async function migrateDiskUploads() {
@@ -171,56 +186,6 @@ async function migrateDiskUploads() {
   return migrated;
 }
 
-function minimalPdfBuffer(title) {
-  const label = String(title || "Ohm's English lesson notes").slice(0, 80);
-  const stream = `BT /F1 18 Tf 72 720 Td (${label.replace(/[()\\]/g, '')}) Tj ET`;
-  const body = `%PDF-1.4
-1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj
-2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj
-3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj
-4 0 obj<< /Length ${stream.length} >>stream
-${stream}
-endstream
-endobj
-5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj
-xref
-0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000266 00000 n 
-0000000385 00000 n 
-trailer<< /Size 6 /Root 1 0 R >>
-startxref
-462
-%%EOF
-`;
-  return Buffer.from(body.replace(/\n/g, '\r\n'));
-}
-
-async function loadHealVideoBuffer() {
-  if (!healVideoBufferPromise) {
-    healVideoBufferPromise = (async () => {
-      const res = await fetch(HEAL_VIDEO_URL);
-      if (!res.ok) {
-        throw new Error(`Heal video download failed: HTTP ${res.status}`);
-      }
-      const ab = await res.arrayBuffer();
-      const buf = Buffer.from(ab);
-      if (buf.length < 1000) {
-        throw new Error('Heal video download too small');
-      }
-      console.log(`[media] Loaded heal video (${buf.length} bytes)`);
-      return buf;
-    })().catch((error) => {
-      healVideoBufferPromise = null;
-      throw error;
-    });
-  }
-  return healVideoBufferPromise;
-}
-
 function publicUploadUrl(relativePath) {
   const { getPublicBaseUrl } = require('./env');
   const base =
@@ -230,32 +195,33 @@ function publicUploadUrl(relativePath) {
   return `${String(base).replace(/\/$/, '')}/uploads/${relativePath}`;
 }
 
-function lessonNeedsVideo(lesson) {
-  const type = String(lesson.type || 'video').toLowerCase();
-  return type === 'video' || Boolean(lesson.videoUrl) || Boolean(lesson.title);
-}
-
-function lessonNeedsPdf(lesson) {
-  return Boolean(lesson.pdfUrl) || Boolean(lesson.pdfTitle);
+function isEmergencySampleUrl(url) {
+  return /gtv-videos-bucket|w3\.org\/WAI\/ER\/tests\/xhtml\/testfiles\/resources\/pdf/i.test(
+    String(url || '')
+  );
 }
 
 /**
- * Restore lesson media wiped by Render redeploys.
- * Videos: point at a stable remote sample (or keep GridFS file if present).
- * PDFs: write a real PDF into GridFS under the lesson path.
+ * Production media repair:
+ * - migrate any leftover disk files into GridFS
+ * - canonicalize lesson URLs to the public host
+ * - clear stuck future availableAt gates
+ * - report missing /uploads files (admin must re-upload)
+ * - sample heal only if MEDIA_SAMPLE_HEAL=true (not for real production content)
  */
 async function healMissingLessonMedia() {
   const Course = require('../models/Course');
   const courses = await Course.find({});
   let healedVideo = 0;
   let healedPdf = 0;
-  let videoBuffer = null;
+  let missingVideo = 0;
+  let missingPdf = 0;
+  let canonicalized = 0;
 
   for (const course of courses) {
     let dirty = false;
 
     for (const lesson of course.lessons || []) {
-      // Unstick bad future “processing” gates from older uploads
       if (lesson.videoAvailableAt && new Date(lesson.videoAvailableAt).getTime() > Date.now() + 60_000) {
         lesson.videoAvailableAt = new Date();
         dirty = true;
@@ -265,55 +231,50 @@ async function healMissingLessonMedia() {
         dirty = true;
       }
 
-      if (lessonNeedsVideo(lesson)) {
-        const videoRel = relativeUploadPath(lesson.videoUrl);
-        const hasLocalVideo = videoRel ? Boolean(await findByFilename(videoRel)) : false;
-        const isRemoteOk =
-          /^https?:\/\//i.test(String(lesson.videoUrl || '')) &&
-          !/localhost|127\.0\.0\.1|\/uploads\//i.test(String(lesson.videoUrl || ''));
-
-        if (!hasLocalVideo && !isRemoteOk) {
-          // Prefer remote URL so playback works even if GridFS download/upload fails
-          try {
-            if (videoRel && videoRel.startsWith('videos/')) {
-              try {
-                if (!videoBuffer) videoBuffer = await loadHealVideoBuffer();
-                await putBuffer(videoRel, videoBuffer, 'video/mp4');
-                lesson.videoUrl = publicUploadUrl(videoRel);
-              } catch (gridErr) {
-                console.warn(`[media] GridFS video heal failed, using remote:`, gridErr.message);
-                lesson.videoUrl = HEAL_VIDEO_URL;
-              }
-            } else {
-              lesson.videoUrl = HEAL_VIDEO_URL;
-            }
-            lesson.videoAvailableAt = new Date();
-            healedVideo += 1;
+      if (lesson.videoUrl) {
+        const before = lesson.videoUrl;
+        const rel = relativeUploadPath(lesson.videoUrl);
+        if (rel) {
+          const next = publicUploadUrl(rel);
+          if (next !== before) {
+            lesson.videoUrl = next;
+            canonicalized += 1;
             dirty = true;
-            console.log(`[media] Healed lesson video → ${lesson.title} (${lesson.videoUrl})`);
-          } catch (error) {
-            console.warn(`[media] Could not heal video for ${lesson.title}:`, error.message);
+          }
+          const exists = Boolean(await findByFilename(rel));
+          if (!exists) {
+            missingVideo += 1;
+            if (ALLOW_SAMPLE_HEAL && rel.startsWith('videos/')) {
+              try {
+                const res = await fetch(HEAL_VIDEO_URL);
+                const buf = Buffer.from(await res.arrayBuffer());
+                await putBuffer(rel, buf, 'video/mp4', { sampleHeal: true });
+                lesson.videoUrl = publicUploadUrl(rel);
+                lesson.videoAvailableAt = new Date();
+                healedVideo += 1;
+                missingVideo -= 1;
+                dirty = true;
+              } catch (error) {
+                console.warn(`[media] Sample video heal failed for ${rel}:`, error.message);
+              }
+            }
           }
         }
       }
 
-      if (lessonNeedsPdf(lesson)) {
-        let pdfRel = relativeUploadPath(lesson.pdfUrl);
-        const hasPdf = pdfRel ? Boolean(await findByFilename(pdfRel)) : false;
-        if (!hasPdf) {
-          try {
-            if (!pdfRel || !pdfRel.startsWith('pdfs/')) {
-              const id = String(lesson._id || lesson.lessonKey || Date.now());
-              pdfRel = `pdfs/healed-${id}.pdf`;
-            }
-            await putBuffer(pdfRel, minimalPdfBuffer(lesson.pdfTitle || lesson.title), 'application/pdf');
-            lesson.pdfUrl = publicUploadUrl(pdfRel);
-            lesson.pdfAvailableAt = new Date();
-            healedPdf += 1;
+      if (lesson.pdfUrl) {
+        const before = lesson.pdfUrl;
+        const rel = relativeUploadPath(lesson.pdfUrl);
+        if (rel) {
+          const next = publicUploadUrl(rel);
+          if (next !== before) {
+            lesson.pdfUrl = next;
+            canonicalized += 1;
             dirty = true;
-            console.log(`[media] Healed lesson PDF → ${pdfRel}`);
-          } catch (error) {
-            console.warn(`[media] Could not heal PDF for ${lesson.title}:`, error.message);
+          }
+          const exists = Boolean(await findByFilename(rel));
+          if (!exists) {
+            missingPdf += 1;
           }
         }
       }
@@ -325,18 +286,26 @@ async function healMissingLessonMedia() {
     }
   }
 
-  return { healedVideo, healedPdf };
+  if (missingVideo || missingPdf) {
+    console.warn(
+      `[media] Production media gaps: missingVideo=${missingVideo} missingPdf=${missingPdf}. Re-upload from admin.`
+    );
+  }
+
+  return { healedVideo, healedPdf, missingVideo, missingPdf, canonicalized };
 }
 
 async function initMediaStore() {
   try {
+    assertGridFsReady();
     await refreshFilenameCache();
     const migrated = await migrateDiskUploads();
     const healed = await healMissingLessonMedia();
     console.log(
-      `[media] Persistent GridFS ready (${filenameCache.size} files` +
-        `${migrated ? `, migrated ${migrated} from disk` : ''}` +
-        `${healed.healedVideo || healed.healedPdf ? `, healed video=${healed.healedVideo} pdf=${healed.healedPdf}` : ''})`
+      `[media] Production GridFS ready (${filenameCache.size} files` +
+        `${migrated ? `, migrated ${migrated}` : ''}` +
+        `${healed.canonicalized ? `, canonicalized ${healed.canonicalized}` : ''}` +
+        `${healed.missingVideo || healed.missingPdf ? `, missing v=${healed.missingVideo} p=${healed.missingPdf}` : ''})`
     );
   } catch (error) {
     console.error('[media] GridFS init failed:', error.message);
@@ -439,7 +408,10 @@ function gridFsHas(urlOrPath) {
 
 function mediaStats() {
   return {
+    storage: 'gridfs',
+    bucket: BUCKET_NAME,
     files: filenameCache.size,
+    sampleHealEnabled: ALLOW_SAMPLE_HEAL,
     sample: [...filenameCache].slice(0, 20),
   };
 }
@@ -457,4 +429,7 @@ module.exports = {
   refreshFilenameCache,
   healMissingLessonMedia,
   mediaStats,
+  assertGridFsReady,
+  publicUploadUrl,
+  isEmergencySampleUrl,
 };

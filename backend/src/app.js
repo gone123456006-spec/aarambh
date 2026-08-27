@@ -127,7 +127,7 @@ app.use('/api', apiLimiter);
 // Health Check Endpoint
 app.get('/health', (req, res) => {
   const { isFirebaseEnabled } = require('./services/firebaseService');
-  let media = { files: 0 };
+  let media = { files: 0, storage: 'unknown' };
   try {
     media = require('./config/gridfsMedia').mediaStats();
   } catch {
@@ -139,6 +139,7 @@ app.get('/health', (req, res) => {
     timestamp: new Date(),
     uptime: process.uptime(),
     firebase: isFirebaseEnabled() ? 'enabled' : 'disabled',
+    mediaStorage: media.storage || 'gridfs',
     mediaFiles: media.files,
   });
 });
