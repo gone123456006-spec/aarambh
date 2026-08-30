@@ -37,7 +37,7 @@ import {
   saveCourseProgress,
   syncLessonToServer,
 } from '@/utils/courseProgress';
-import { apiFetch, ensureValidSession } from '@/utils/api';
+import { apiFetch, ensureValidSession, ApiRequestError } from '@/utils/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   CategorySlug,
@@ -306,34 +306,15 @@ function PlaylistLessonRow({
             <View style={styles.playlistDragLine} />
           </View>
 
-          <View style={styles.playlistThumbWrap}>
-            <View style={[styles.playlistThumb, styles.videoFrameFallback]}>
-              {unlocked ? <Ionicons name="play" size={18} color="#fff" /> : null}
-            </View>
-            {!unlocked && (
-              <View style={styles.playlistThumbLock}>
-                <Feather name="lock" size={16} color="#fff" />
-              </View>
-            )}
-            {unlocked && showNowPlayingIcon && (
-              <View style={styles.playlistNowPlayingBadge}>
-                <MaterialCommunityIcons name="equalizer" size={14} color="#fff" />
-              </View>
-            )}
-            {unlocked && !showNowPlayingIcon && isDone && (
-              <View style={styles.playlistCompleteThumbBadge}>
-                <Feather name="check-circle" size={16} color="#fff" />
-              </View>
-            )}
-            {unlocked && !showNowPlayingIcon && !isDone && (
-              <View style={styles.playlistThumbDuration}>
-                <Text style={styles.durationText}>{displayDuration}</Text>
-              </View>
-            )}
-            {!unlocked && (
-              <View style={styles.playlistThumbDuration}>
-                <Text style={styles.durationText}>{displayDuration}</Text>
-              </View>
+          <View style={styles.playlistIconWrap}>
+            {!unlocked ? (
+              <Feather name="lock" size={18} color="#9CA3AF" />
+            ) : showNowPlayingIcon ? (
+              <MaterialCommunityIcons name="equalizer" size={20} color="#1A73E8" />
+            ) : isDone ? (
+              <Feather name="check-circle" size={20} color="#1A73E8" />
+            ) : (
+              <Ionicons name="play-circle-outline" size={24} color="#606060" />
             )}
           </View>
 
@@ -342,7 +323,7 @@ function PlaylistLessonRow({
               {lesson.title}
             </Text>
             <Text style={styles.playlistRowChannel} numberOfLines={1}>
-              Ohm&apos;s English
+              Ohm&apos;s English · {displayDuration}
             </Text>
             <Text style={styles.playlistRowMeta} numberOfLines={1}>
               {unlocked
@@ -718,7 +699,7 @@ export default function MyCoursesScreen() {
   const [categories, setCategories] = useState<AppCategory[]>([]);
   const [coursesError, setCoursesError] = useState<string | null>(null);
   const [refreshingCourses, setRefreshingCourses] = useState(false);
-  const [pdfDownloadingId, setPdfDownloadingId] = useState<string | null>(null);
+  const [videoLoadError, setVideoLoadError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [roadmapFocusIndex, setRoadmapFocusIndex] = useState(0);
   const [lessonReviewId, setLessonReviewId] = useState<string | null>(null);
@@ -882,12 +863,17 @@ export default function MyCoursesScreen() {
       );
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Failed to load courses';
-      if (/unable to refresh session|please sign in|session revoked|sign in again/i.test(message)) {
+      if (e instanceof ApiRequestError && e.status === 429) {
+        setCoursesError('Server busy. Pull down to refresh in about 1 minute.');
+      } else if (/unable to refresh session|please sign in|session revoked|sign in again/i.test(message)) {
         setCoursesError(message);
         return;
+      } else {
+        console.warn('Failed to load courses', e);
+        if (categories.length === 0) {
+          setCoursesError(message);
+        }
       }
-      console.warn('Failed to load courses', e);
-      setCoursesError(message);
     } finally {
       if (firstCoursesLoadRef.current) {
         firstCoursesLoadRef.current = false;
@@ -899,7 +885,7 @@ export default function MyCoursesScreen() {
         }).start();
       }
     }
-  }, [applySubscriptionLocks, contentOpacity, subscriptionPlans]);
+  }, [applySubscriptionLocks, categories.length, contentOpacity, subscriptionPlans]);
 
   const refreshCourses = useCallback(async () => {
     setRefreshingCourses(true);
@@ -939,7 +925,7 @@ export default function MyCoursesScreen() {
       loadServerCourses();
       const interval = setInterval(() => {
         void loadServerCourses();
-      }, 15000);
+      }, 60000);
 
       return () => clearInterval(interval);
     }, [loadServerCourses])
@@ -1097,6 +1083,7 @@ export default function MyCoursesScreen() {
   const closePlayer = useCallback(() => {
     pauseVideo();
     setPlayingLessonId(null);
+    setVideoLoadError(null);
     setIsFullscreen(false);
     setIsPaused(true);
     setIsVideoLoaded(false);
@@ -1298,6 +1285,7 @@ export default function MyCoursesScreen() {
     if (idx >= 0) setRoadmapFocusIndex(idx);
 
     setPlayingLessonId(lessonId);
+    setVideoLoadError(null);
     setIsPaused(false);
     setCurrentTime(0);
     setDuration(0);
@@ -1362,7 +1350,11 @@ export default function MyCoursesScreen() {
 
   const handlePlaybackStatusUpdate = useCallback((status: any) => {
     if (!status.isLoaded) {
-      if (status.error) setIsBuffering(false);
+      if (status.error) {
+        setIsBuffering(false);
+        setIsVideoLoaded(true);
+        setVideoLoadError('Video could not load. Pull down to refresh My Courses and try again.');
+      }
       return;
     }
 
@@ -1521,29 +1513,47 @@ export default function MyCoursesScreen() {
 
     return (
       <View style={isFull ? styles.fullPlayerContainer : styles.playlistPlayerVideoWrap}>
+        {videoLoadError ? (
+          <View style={styles.playerLoading}>
+            <Feather name="video-off" size={28} color="#fff" style={{ marginBottom: 10 }} />
+            <Text style={styles.playerLoadingText}>{videoLoadError}</Text>
+          </View>
+        ) : (
         <Video
           key={playingLessonId ?? 'video'}
           ref={videoRef}
           source={videoSource}
-          style={isFull ? styles.fullThumbnail : styles.playlistPlayerVideo}
+          style={[
+            isFull ? styles.fullPlayerVideo : styles.playlistPlayerVideo,
+            (!isVideoLoaded || isBuffering) && !videoLoadError && styles.hiddenVideo,
+          ]}
           resizeMode={isFull ? ResizeMode.CONTAIN : ResizeMode.COVER}
-          shouldPlay={!isPaused}
+          shouldPlay={!isPaused && !videoLoadError}
           isMuted={isMuted}
           isLooping={false}
           useNativeControls={false}
           progressUpdateIntervalMillis={250}
           preferredForwardBufferDuration={45}
-          onReadyForDisplay={() => setIsVideoLoaded(true)}
+          onReadyForDisplay={() => {
+            setIsVideoLoaded(true);
+            setVideoLoadError(null);
+          }}
+          onError={() => {
+            setIsBuffering(false);
+            setIsVideoLoaded(true);
+            setVideoLoadError('Video could not load. Pull down to refresh My Courses and try again.');
+          }}
           onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         />
+        )}
 
-        {!isVideoLoaded && (
+        {!videoLoadError && !isVideoLoaded && (
           <View style={styles.playerLoading} pointerEvents="none">
             <ActivityIndicator size="large" color="#FFFFFF" />
           </View>
         )}
 
-        {isBuffering && isVideoLoaded && !isPaused && !cinemaMode && (
+        {isBuffering && isVideoLoaded && !isPaused && !cinemaMode && !videoLoadError && (
           <View style={styles.playerBuffering} pointerEvents="none">
             <ActivityIndicator size="small" color="#FFFFFF" />
             <Text style={styles.playerBufferingText}>Buffering…</Text>
@@ -1909,21 +1919,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  videoFrameFallback: {
-    backgroundColor: '#1a1a1a',
-  },
-  playlistPlayerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.25)',
-  },
-  playlistPlayerPlay: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingLeft: 4,
+  hiddenVideo: {
+    opacity: 0,
   },
   playlistSheet: {
     flex: 1,
@@ -2056,46 +2053,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     padding: 2,
   },
-  playlistCompleteThumbBadge: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: '#1A73E8',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    justifyContent: 'center',
+  playlistIconWrap: {
+    width: 32,
     alignItems: 'center',
-  },
-  playlistThumbWrap: {
-    width: 120,
-    height: 68,
-    borderRadius: 8,
-    overflow: 'hidden',
-    backgroundColor: '#E8EAED',
-    position: 'relative',
-  },
-  playlistThumb: {
-    width: '100%',
-    height: '100%',
     justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#111',
-  },
-  playlistThumbLock: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  playlistThumbDuration: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    paddingHorizontal: 4,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingTop: 4,
   },
   playlistRowText: {
     flex: 1,
@@ -2812,7 +2774,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     justifyContent: 'center',
   },
-  fullThumbnail: {
+  fullPlayerVideo: {
     width: '100%',
     height: '100%',
   },
