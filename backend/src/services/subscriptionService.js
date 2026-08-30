@@ -61,19 +61,19 @@ async function hasActiveSubscription(userId) {
 }
 
 /** Whether this course category is unlocked for the user. */
-async function hasAccessToCategory(userId, level, title) {
-  const plan = await planService.getPlan(level, title);
+async function hasAccessToCategory(userId, level) {
+  const { slugifyLevel } = require('../constants/curriculum');
+  const { CATEGORIES } = require('../models/SubscriptionPlan');
+  const levelSlug = slugifyLevel(level);
 
-  if (plan) {
-    if (!planService.isPaidCategory(plan)) return true;
-    const active = await listActiveSubscriptions(userId);
-    return active.some((sub) => coversCategory(sub, plan.category));
+  if (!CATEGORIES.includes(levelSlug)) {
+    return true;
   }
 
-  // Custom categories: free if beginner-like, otherwise any active paid plan.
-  const { isProLevel } = require('../constants/curriculum');
-  if (!isProLevel(level, title)) return true;
-  return await hasActiveSubscription(userId);
+  const plan = await planService.getPlan(levelSlug);
+  if (!plan || !planService.isPaidCategory(plan)) return true;
+  const active = await listActiveSubscriptions(userId);
+  return active.some((sub) => coversCategory(sub, plan.category));
 }
 
 function formatPlan(plan) {

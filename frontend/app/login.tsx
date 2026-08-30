@@ -174,9 +174,15 @@ export default function LoginScreen() {
     setLoading(true);
     setError('');
     try {
-      await sendOtpEmail(trimmedEmail);
+      const result = await sendOtpEmail(trimmedEmail);
       setStep('OTP_INPUT');
       setOtp('');
+      if (__DEV__ && result.devOtp) {
+        Alert.alert(
+          'Dev OTP (email blocked)',
+          `Brevo blocked email from this PC.\n\nYour code: ${result.devOtp}\n\nFor real emails, disable Brevo Authorized IPs.`
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not send OTP. Please try again.');
     } finally {

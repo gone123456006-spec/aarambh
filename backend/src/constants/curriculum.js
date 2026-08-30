@@ -64,9 +64,13 @@ function resolveCategorySlug(level, title) {
   return slugifyLevel(level);
 }
 
-/** True when a course level (e.g. intermediate/advanced/custom) needs Pro access. */
+/**
+ * Paid only when the course maps to Intermediate or Advanced.
+ * Custom categories (e.g. english-grammer) stay free so admin uploads
+ * play for every user unless you add a matching paid plan later.
+ */
 function isProLevel(level, title) {
-  return !isBeginnerLike(level, title);
+  return isIntermediateLike(level, title) || isAdvancedLike(level, title);
 }
 
 module.exports = {

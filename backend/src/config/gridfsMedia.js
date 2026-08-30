@@ -13,6 +13,17 @@ const HEAL_VIDEO_URL =
   'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
 
 let bucket = null;
+let bucketDbName = null;
+
+function normalizeGridFsName(relativePath) {
+  const raw = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!raw) return '';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
 
 function guessContentType(filename, fallback) {
   const ext = path.extname(String(filename || '')).toLowerCase();
@@ -36,8 +47,10 @@ function guessContentType(filename, fallback) {
 function getBucket() {
   const db = mongoose.connection?.db;
   if (!db) return null;
-  if (!bucket) {
+  const dbName = db.databaseName || '';
+  if (!bucket || bucketDbName !== dbName) {
     bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: BUCKET_NAME });
+    bucketDbName = dbName;
   }
   return bucket;
 }
@@ -51,7 +64,7 @@ function assertGridFsReady() {
 }
 
 function cachedHas(relativePath) {
-  return filenameCache.has(String(relativePath || '').replace(/\\/g, '/'));
+  return filenameCache.has(normalizeGridFsName(relativePath));
 }
 
 async function refreshFilenameCache() {
@@ -67,7 +80,8 @@ async function refreshFilenameCache() {
 async function findByFilename(relativePath) {
   const gfs = getBucket();
   if (!gfs || !relativePath) return null;
-  const normalized = String(relativePath).replace(/\\/g, '/');
+  const normalized = normalizeGridFsName(relativePath);
+  if (!normalized) return null;
   const files = await gfs.find({ filename: normalized }).limit(1).toArray();
   if (files[0]) {
     filenameCache.add(normalized);
@@ -78,7 +92,7 @@ async function findByFilename(relativePath) {
 }
 
 async function deleteByFilename(relativePath) {
-  const normalized = String(relativePath || '').replace(/\\/g, '/');
+  const normalized = normalizeGridFsName(relativePath);
   const gfs = getBucket();
   if (!gfs || !normalized) return;
   const files = await gfs.find({ filename: normalized }).toArray();

@@ -2,12 +2,14 @@
 
 ## API (recommended)
 
-No SMTP IP whitelist issues. In `backend/.env`:
+In `backend/.env`:
 
 ```env
 BREVO_API_KEY=your_xkeysib_key
 SMTP_FROM=your_verified_sender@gmail.com
 ```
+
+**Important:** If Brevo has **Authorized IPs** enabled, both the API and SMTP will fail until you either disable that restriction or add your server IP at https://app.brevo.com/security/authorised_ips (required for Render/production).
 
 Test:
 
@@ -17,7 +19,17 @@ npm run test:brevo
 node scripts/test-brevo-api.js recipient@gmail.com
 ```
 
-Restart backend after changing `.env`. OTP uses the API when `BREVO_API_KEY` is set.
+Restart backend after changing `.env`. OTP tries Brevo API first, then SMTP fallback.
+
+### Local dev when email is blocked
+
+If Brevo blocks your IP, in `NODE_ENV=development` the OTP is printed in the backend terminal so you can still sign in:
+
+```
+[DEV] OTP for user@gmail.com: 123456 (email delivery failed — fix Brevo IP whitelist or check .env)
+```
+
+Set `OTP_DEV_CONSOLE=false` to disable this and force real email delivery.
 
 ---
 

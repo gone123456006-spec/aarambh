@@ -75,7 +75,7 @@ export function mapApiCoursesToApp(courses: ApiCourse[]): AppCategory[] {
       title: course.title,
       subtitle: course.subtitle || '',
       color: colorPair,
-      isPro: course.isPro ?? !/beginner/i.test(`${course.level || ''} ${course.title || ''}`),
+        isPro: course.isPro ?? false,
       locked: Boolean(course.locked) && Boolean(course.isPro),
       lessons: (course.lessons || []).map((lesson) => ({
         id: lesson.lessonKey || lesson._id || '',

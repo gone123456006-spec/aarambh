@@ -50,53 +50,128 @@ const buildOtpHtml = (otpCode) => `
   </div>
 `;
 
+function isIpBlockedError(error) {
+  const body = error?.response?.body;
+  const combined = [
+    body?.message,
+    body?.code,
+    error?.message,
+    error?.code,
+    error?.response,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return (
+    combined.includes('unrecognised ip') ||
+    combined.includes('unrecognized ip') ||
+    combined.includes('unauthorized ip') ||
+    combined.includes('authorised_ips') ||
+    combined.includes('authorized_ips') ||
+    /525\s*5\.7\.1/.test(combined)
+  );
+}
+
+function brevoIpBlockedMessage() {
+  return (
+    'Failed to send OTP email. Brevo blocked this server IP. ' +
+    'In Brevo open Security → Authorized IPs, turn off "Authorize only listed IPs", ' +
+    'or add your server IP: https://app.brevo.com/security/authorised_ips'
+  );
+}
+
+async function sendViaBrevoApi(email, subject, htmlContent, textBody) {
+  await transactionalEmailsApi.sendTransacEmail({
+    sender: { email: senderEmail, name: senderName },
+    to: [{ email }],
+    subject,
+    htmlContent,
+    textContent: textBody,
+  });
+}
+
+async function sendViaSmtp(email, subject, htmlContent, textBody) {
+  await transporter.sendMail({
+    from: `"${senderName}" <${smtpFrom}>`,
+    to: email,
+    subject,
+    text: textBody,
+    html: htmlContent,
+  });
+}
+
+function logEmailAttemptFailure(channel, error) {
+  const quietDev =
+    process.env.NODE_ENV === 'development' &&
+    !/^(0|false|no)$/i.test(String(process.env.OTP_DEV_CONSOLE || 'true').trim());
+
+  if (quietDev && isIpBlockedError(error)) {
+    return;
+  }
+
+  if (channel === 'brevo') {
+    console.error('Brevo API Email Error:', error?.response?.body || error);
+    return;
+  }
+
+  console.error('SMTP Email Error:', error);
+}
+
 const sendOtpEmail = async (email, otpCode) => {
   const subject = 'OTP Verification';
   const htmlContent = buildOtpHtml(otpCode);
   const textBody = `Your OTP Code: ${otpCode}\nValid for ${OTP_EXPIRY_MINUTES} minutes.`;
+  const errors = [];
 
   if (brevoConfigured && senderEmail) {
     try {
-      await transactionalEmailsApi.sendTransacEmail({
-        sender: { email: senderEmail, name: senderName },
-        to: [{ email }],
-        subject,
-        htmlContent,
-        textContent: textBody,
-      });
-      return;
+      await sendViaBrevoApi(email, subject, htmlContent, textBody);
+      return { delivered: true, devFallback: false };
     } catch (error) {
-      console.error('Brevo API Email Error:', error?.response?.body || error);
-      throw new ApiError(
-        500,
-        'Failed to send OTP email. Check BREVO_API_KEY and verified sender (SMTP_FROM) in backend/.env.'
-      );
+      logEmailAttemptFailure('brevo', error);
+      errors.push(error);
     }
   }
 
-  if (!smtpConfigured) {
+  if (smtpConfigured) {
+    try {
+      await sendViaSmtp(email, subject, htmlContent, textBody);
+      return { delivered: true, devFallback: false };
+    } catch (error) {
+      logEmailAttemptFailure('smtp', error);
+      errors.push(error);
+    }
+  }
+
+  if (!brevoConfigured && !smtpConfigured) {
     throw new ApiError(
       500,
       'Email service is not configured. Set BREVO_API_KEY or SMTP_USER and SMTP_PASS in backend/.env.'
     );
   }
 
-  try {
-    await transporter.sendMail({
-      from: `"${senderName}" <${smtpFrom}>`,
-      to: email,
-      subject,
-      text: textBody,
-      html: htmlContent,
-    });
-  } catch (error) {
-    console.error('SMTP Email Error:', error);
-    const hint =
-      error.code === 'EAUTH'
-        ? 'SMTP login failed. Prefer BREVO_API_KEY (no IP whitelist) or fix Brevo SMTP credentials.'
-        : 'Check SMTP_* or BREVO_API_KEY in backend/.env.';
-    throw new ApiError(500, `Failed to send OTP email. ${hint}`);
+  const devConsoleOk =
+    process.env.NODE_ENV === 'development' &&
+    !/^(0|false|no)$/i.test(String(process.env.OTP_DEV_CONSOLE || 'true').trim());
+
+  if (devConsoleOk) {
+    console.warn(
+      `[DEV] OTP for ${email}: ${otpCode} — Brevo blocked this IP. ` +
+        'Use the code above to sign in, or fix: https://app.brevo.com/security/authorised_ips'
+    );
+    return { delivered: false, devFallback: true };
   }
+
+  if (errors.some(isIpBlockedError)) {
+    throw new ApiError(500, brevoIpBlockedMessage());
+  }
+
+  const last = errors[errors.length - 1];
+  const hint =
+    last?.code === 'EAUTH'
+      ? 'SMTP login failed. Check Brevo SMTP credentials in backend/.env.'
+      : 'Check BREVO_API_KEY, SMTP_* and verified sender (SMTP_FROM) in backend/.env.';
+  throw new ApiError(500, `Failed to send OTP email. ${hint}`);
 };
 
 /**

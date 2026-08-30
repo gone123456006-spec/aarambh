@@ -4,23 +4,24 @@ const ApiResponse = require('../utils/ApiResponse');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
 const { applyCourseMediaAvailability } = require('../utils/mediaAvailability');
-const { sortCourseLessons } = require('../constants/curriculum');
+const { sortCourseLessons, slugifyLevel } = require('../constants/curriculum');
 const { ownedBy } = require('../utils/ownership');
 const { hasAccessToCategory } = require('../services/subscriptionService');
 const planService = require('../services/planService');
+const { CATEGORIES } = require('../models/SubscriptionPlan');
 
 /**
  * Flag paid categories and strip lesson media for users without access.
- * Admin can disable a category subscription to make it free immediately.
+ * Only beginner / intermediate / advanced use subscription plans.
+ * Custom categories (admin-created) stay free so videos/PDFs play for everyone.
  */
 async function applyPlanAccess(courseDoc, userId) {
-  const title = courseDoc.title;
-  const { isProLevel } = require('../constants/curriculum');
-  const plan = await planService.getPlan(courseDoc.level, title);
-  const requiresPayment = plan
-    ? planService.isPaidCategory(plan)
-    : isProLevel(courseDoc.level, title);
-  const hasAccess = await hasAccessToCategory(userId, courseDoc.level, title);
+  const levelSlug = slugifyLevel(courseDoc.level);
+  const plan = CATEGORIES.includes(levelSlug)
+    ? await planService.getPlan(levelSlug)
+    : null;
+  const requiresPayment = planService.isPaidCategory(plan);
+  const hasAccess = await hasAccessToCategory(userId, courseDoc.level, courseDoc.title);
   const locked = Boolean(requiresPayment && !hasAccess);
   const out = { ...courseDoc, isPro: Boolean(requiresPayment), locked };
 

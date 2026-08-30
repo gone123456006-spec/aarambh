@@ -50,7 +50,12 @@ function buildPublicUploadUrl(req, subpath) {
 
 function relativeUploadPath(fileUrl) {
   if (!fileUrl) return null;
-  const raw = String(fileUrl).replace(/\\/g, '/').split('?')[0];
+  let raw = String(fileUrl).replace(/\\/g, '/').split('?')[0];
+  try {
+    raw = decodeURIComponent(raw);
+  } catch {
+    /* keep raw */
+  }
   const marker = '/uploads/';
   const idx = raw.indexOf(marker);
   if (idx !== -1) {

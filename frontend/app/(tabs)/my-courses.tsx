@@ -74,7 +74,7 @@ function asCategorySlug(id: string, title?: string): CategorySlug | null {
   return null;
 }
 
-/** Free when admin disabled the plan or set ₹0 — never paywall these in My Courses. */
+/** Free when admin disabled the plan, set ₹0, or this is a custom category. */
 function isCategoryFree(
   levelId: string,
   title: string | undefined,
@@ -84,7 +84,7 @@ function isCategoryFree(
   const slug = asCategorySlug(levelId, title);
   const plan = slug ? plans.find((p) => p.category === slug) : undefined;
   if (plan) return !plan.requiresPayment;
-  if (slug === 'beginner' || /beginner/i.test(`${levelId} ${title || ''}`)) return true;
+  if (!slug || slug === 'beginner' || /beginner/i.test(`${levelId} ${title || ''}`)) return true;
   return Boolean(cat && !cat.isPro && !cat.locked);
 }
 

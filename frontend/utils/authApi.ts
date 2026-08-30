@@ -35,8 +35,8 @@ export async function fetchMyProfile(): Promise<UserProfile> {
   return res.data;
 }
 
-export async function sendOtpEmail(email: string) {
-  return apiFetch(
+export async function sendOtpEmail(email: string): Promise<{ devOtp?: string }> {
+  const res = await apiFetch<{ data?: { devOtp?: string } | null }>(
     '/api/auth/send-otp',
     {
       method: 'POST',
@@ -44,6 +44,7 @@ export async function sendOtpEmail(email: string) {
     },
     false
   );
+  return { devOtp: res.data?.devOtp };
 }
 
 export async function verifyOtpCode(email: string, code: string): Promise<VerifyOtpData> {

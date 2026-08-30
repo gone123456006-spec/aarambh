@@ -88,14 +88,19 @@ const sendOtp = asyncHandler(async (req, res) => {
   const otpCode = otpService.generateOtpCode();
 
   // Send email via SMTP (Brevo)
-  await otpService.sendOtpEmail(trimmedEmail, otpCode);
+  const delivery = await otpService.sendOtpEmail(trimmedEmail, otpCode);
 
   // Save OTP code hashed in database (valid for 5 mins)
   await otpService.saveOtp(trimmedEmail, otpCode);
 
+  const devPayload =
+    delivery.devFallback && process.env.NODE_ENV === 'development'
+      ? { devOtp: otpCode, emailDelivery: 'console' }
+      : null;
+
   res
     .status(200)
-    .json(new ApiResponse(200, null, `OTP code successfully sent to ${trimmedEmail}`));
+    .json(new ApiResponse(200, devPayload, `OTP code successfully sent to ${trimmedEmail}`));
 });
 
 /**
