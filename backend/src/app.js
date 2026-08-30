@@ -4,8 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
-const fs = require('fs');
-const { UPLOAD_ROOT, ensureUploadDirs, resolveUploadFilePath } = require('./config/uploads');
+const { UPLOAD_ROOT, ensureUploadDirs } = require('./config/uploads');
 
 const { getPublicBaseUrl } = require('./config/env');
 const { privacyPolicyHtml, termsHtml } = require('./content/legalPages');
@@ -91,7 +90,7 @@ app.use(
   })
 );
 
-// Persistent uploads: disk cache first, then MongoDB GridFS (survives Render deploys)
+// Persistent uploads: disk cache first, then MongoDB GridFS with warm-cache streaming
 app.use('/uploads', async (req, res, next) => {
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -99,27 +98,41 @@ app.use('/uploads', async (req, res, next) => {
 
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type, If-Range');
     return res.status(204).end();
   }
 
-  const relative = decodeURIComponent(String(req.path || ''))
-    .replace(/\\/g, '/')
-    .replace(/^\/+/, '');
-  const diskPath = resolveUploadFilePath(relative);
-  if (diskPath && fs.existsSync(diskPath)) {
-    return next();
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return res.status(405).end();
   }
 
+  const relative = String(req.path || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
+
   try {
-    const { tryStreamGridFs } = require('./config/gridfsMedia');
-    const streamed = await tryStreamGridFs(req, res, relative);
+    const { streamUpload } = require('./config/mediaStream');
+    const streamed = await streamUpload(req, res, relative);
     if (streamed) return;
   } catch (error) {
-    console.warn('[media] GridFS stream failed:', error.message);
+    console.warn('[media] Stream failed:', error.message);
   }
+
   next();
-}, express.static(UPLOAD_ROOT));
+}, express.static(UPLOAD_ROOT, {
+  acceptRanges: true,
+  cacheControl: true,
+  maxAge: '1d',
+  setHeaders(res, filePath) {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Connection', 'keep-alive');
+    if (/\.(mp4|webm|mov|m4v)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    }
+  },
+}));
 
 // Apply global rate limiting for general API calls
 app.use('/api', apiLimiter);

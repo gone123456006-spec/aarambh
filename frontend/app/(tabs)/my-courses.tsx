@@ -48,6 +48,8 @@ import {
 import SubscriptionCheckoutModal from '@/components/SubscriptionCheckoutModal';
 import { Icons3D } from '@/constants/homeIcons';
 import { useGameTabBar } from '@/contexts/game-tab-bar-context';
+import { resolveMediaUrl } from '@/utils/mediaUrl';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const PLAYLIST_PLAYER_HEIGHT = SCREEN_WIDTH * (9 / 16);
@@ -305,10 +307,9 @@ function PlaylistLessonRow({
           </View>
 
           <View style={styles.playlistThumbWrap}>
-            <Image
-              source={{ uri: `https://picsum.photos/seed/${lesson.id}/240/135` }}
-              style={styles.playlistThumb}
-            />
+            <View style={[styles.playlistThumb, styles.videoFrameFallback]}>
+              {unlocked ? <Ionicons name="play" size={18} color="#fff" /> : null}
+            </View>
             {!unlocked && (
               <View style={styles.playlistThumbLock}>
                 <Feather name="lock" size={16} color="#fff" />
@@ -618,33 +619,10 @@ function CoursePlaylistView({
     >
       {inPlayerMode && (
         <View style={[styles.playlistPlayerWrap, { height: PLAYLIST_PLAYER_HEIGHT }]}>
-          {isPlaying ? (
-            renderPlayer(false)
+          {isFullscreen ? (
+            <View style={styles.playlistPlayerPlaceholder} />
           ) : (
-            <TouchableOpacity
-              style={styles.playlistPlayerPlaceholder}
-              activeOpacity={0.9}
-              onPress={() => activeLesson && canPlayInLevel && onPlay(activeLesson.id)}
-              disabled={!canPlayInLevel}
-            >
-              {activeLesson && (
-                <>
-                  <Image
-                    source={{ uri: `https://picsum.photos/seed/${activeLesson.id}/800/450` }}
-                    style={styles.playlistPlayerImage}
-                  />
-                  <View style={styles.playlistPlayerOverlay} />
-                  <View style={styles.playlistPlayerPlay}>
-                    <Ionicons name="play" size={36} color="#1F1F1F" />
-                  </View>
-                  <View style={styles.durationBadge}>
-                    <Text style={styles.durationText}>
-                      {detectedDurations[activeLesson.id] || activeLesson.duration}
-                    </Text>
-                  </View>
-                </>
-              )}
-            </TouchableOpacity>
+            renderPlayer(false)
           )}
         </View>
       )}
@@ -780,7 +758,7 @@ export default function MyCoursesScreen() {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: false,
           playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
+          shouldDuckAndroid: false,
           staysActiveInBackground: false,
           playThroughEarpieceAndroid: false,
         });
@@ -1077,8 +1055,12 @@ export default function MyCoursesScreen() {
     if (!lesson || lesson.locked) return null;
     const levelId = getLessonLevelId(lessonId || '');
     if (levelId && isCategoryProLocked(levelId)) return null;
-    if (lesson.videoUrl) return { uri: lesson.videoUrl };
-    return null;
+    const uri = resolveMediaUrl(lesson.videoUrl);
+    if (!uri) return null;
+    return {
+      uri,
+      overrideFileExtensionAndroid: 'mp4' as const,
+    };
   };
 
   const pauseVideo = useCallback(() => {
@@ -1379,7 +1361,10 @@ export default function MyCoursesScreen() {
   };
 
   const handlePlaybackStatusUpdate = useCallback((status: any) => {
-    if (!status.isLoaded) return;
+    if (!status.isLoaded) {
+      if (status.error) setIsBuffering(false);
+      return;
+    }
 
     if (!isVideoLoaded) setIsVideoLoaded(true);
 
@@ -1475,6 +1460,16 @@ export default function MyCoursesScreen() {
   }, [isLandscape, lockPortraitOrientation, lockLandscapeOrientation]);
 
   useEffect(() => {
+    if (playingLessonId && !isPaused) {
+      void activateKeepAwakeAsync('ohms-lesson-video');
+      return () => {
+        void deactivateKeepAwake('ohms-lesson-video');
+      };
+    }
+    void deactivateKeepAwake('ohms-lesson-video');
+  }, [playingLessonId, isPaused]);
+
+  useEffect(() => {
     if (!isFullscreen && isLandscape) {
       lockPortraitOrientation();
     }
@@ -1534,15 +1529,17 @@ export default function MyCoursesScreen() {
           resizeMode={isFull ? ResizeMode.CONTAIN : ResizeMode.COVER}
           shouldPlay={!isPaused}
           isMuted={isMuted}
+          isLooping={false}
           useNativeControls={false}
-          progressUpdateIntervalMillis={500}
+          progressUpdateIntervalMillis={250}
+          preferredForwardBufferDuration={45}
+          onReadyForDisplay={() => setIsVideoLoaded(true)}
           onPlaybackStatusUpdate={handlePlaybackStatusUpdate}
         />
 
         {!isVideoLoaded && (
-          <View style={styles.playerLoading}>
+          <View style={styles.playerLoading} pointerEvents="none">
             <ActivityIndicator size="large" color="#FFFFFF" />
-            <Text style={styles.playerLoadingText}>Buffering…</Text>
           </View>
         )}
 
@@ -1912,10 +1909,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  playlistPlayerImage: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
+  videoFrameFallback: {
+    backgroundColor: '#1a1a1a',
   },
   playlistPlayerOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -2083,6 +2078,9 @@ const styles = StyleSheet.create({
   playlistThumb: {
     width: '100%',
     height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#111',
   },
   playlistThumbLock: {
     ...StyleSheet.absoluteFillObject,
@@ -2701,17 +2699,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-  },
-  thumbnailContainer: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    backgroundColor: '#000',
-    position: 'relative',
-  },
-  thumbnail: {
-    width: '100%',
-    height: '100%',
-    opacity: 0.9,
   },
   durationBadge: {
     position: 'absolute',

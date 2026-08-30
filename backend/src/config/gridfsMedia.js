@@ -438,6 +438,7 @@ module.exports = {
   gridFsHas,
   cachedHas,
   findByFilename,
+  getBucket,
   tryStreamGridFs,
   guessContentType,
   refreshFilenameCache,

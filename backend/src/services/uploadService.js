@@ -1,6 +1,7 @@
 const ApiError = require('../utils/ApiError');
 const { buildUploadPayload, deleteFileByUrl, deleteFileByRelativePath } = require('../config/uploads');
 const { putFileFromDisk, assertGridFsReady } = require('../config/gridfsMedia');
+const { ensureFaststart } = require('../utils/mp4Faststart');
 
 async function persistToGridFs(subpath, req) {
   assertGridFsReady();
@@ -33,6 +34,12 @@ async function saveAvatar(req) {
 async function saveLessonVideo(req) {
   if (!req.file) {
     throw new ApiError(400, 'Please upload a video file');
+  }
+
+  try {
+    ensureFaststart(req.file.path);
+  } catch (error) {
+    console.warn('[media] faststart remux skipped:', error.message);
   }
 
   const subpath = `videos/${req.file.filename}`;
